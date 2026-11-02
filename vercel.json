@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "MONGOMS_DISABLE_POSTINSTALL=1 npm run install:all",
+  "buildCommand": "npm run build",
+  "outputDirectory": "client/dist",
+  "functions": {
+    "api/index.js": { "maxDuration": 60, "includeFiles": "server/src/**" }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/mail", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/recurring", "schedule": "0 * * * *" }
+  ]
+}

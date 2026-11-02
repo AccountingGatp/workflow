@@ -1,6 +1,7 @@
 {
   "name": "workflow",
   "private": true,
+  "type": "module",
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",
     "dev:server": "npm --prefix server run dev",

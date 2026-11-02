@@ -221,13 +221,16 @@ export async function syncAccount(accountId) {
   } finally { syncing.delete(id); }
 }
 
+export async function syncAllAccounts() {
+  if (!gmailConfigured()) return;
+  for (const a of await MailAccount.find({ status: { $ne: 'disconnected' } }).select('_id')) {
+    await syncAccount(a._id).catch((e) => console.error('Mail sync failed:', e.message));
+  }
+}
+
 export function startMailSync() {
   if (!gmailConfigured()) return;
-  const run = async () => {
-    for (const a of await MailAccount.find({ status: { $ne: 'disconnected' } }).select('_id')) {
-      await syncAccount(a._id).catch((e) => console.error('Mail sync failed:', e.message));
-    }
-  };
+  const run = syncAllAccounts;
   run().catch(console.error);
   setInterval(() => run().catch(console.error), Number(process.env.MAIL_SYNC_SECONDS || 120) * 1000);
 }

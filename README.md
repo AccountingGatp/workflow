@@ -32,6 +32,21 @@ npm run create-admin -- --email you@firm.com --name "Your Name" --password "a-st
 
 It creates the user, or promotes an existing one and resets their password.
 
+## Deploy on Vercel
+
+The whole app (website + API) runs on one Vercel project; no other host is needed.
+`api/index.js` serves the API as a serverless function, and Vercel Cron (in `vercel.json`)
+syncs Gmail every 5 minutes and creates recurring tasks every hour. Cron needs a Pro plan.
+
+1. MongoDB Atlas → Network Access → allow `0.0.0.0/0`.
+2. Vercel → Add New → Project → import this repo. Leave **Root Directory** as the repo root;
+   the settings come from `vercel.json`.
+3. Environment variables: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`,
+   `SEED_DEMO=false`, and `CRON_SECRET` (any long random string).
+   For Mail also add the Google ones and set `GOOGLE_REDIRECT_URI=https://<your-domain>/api/mail/oauth/callback`
+   and `CLIENT_URL=https://<your-domain>`.
+4. Deploy. Every push to `main` redeploys automatically.
+
 ## Demo data
 
 Set `SEED_DEMO=true` to fill an empty database with demo data. Demo accounts (password `demo1234`): `owner@` (Super Admin), `anita@` / `rahul@` / `sneha@` (Admin/TL),
