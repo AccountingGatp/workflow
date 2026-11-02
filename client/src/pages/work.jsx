@@ -25,18 +25,19 @@ const recentlyDone = (t) => t.status === 'done' && Date.now() - new Date(t.compl
 export function MyWork() {
   const { user, can } = useAuth();
   // TLs land on their team's work; everyone can switch to just their own tasks
-  const [view, setView] = useState(() => (can.manage ? 'team' : 'mine'));
+  const [view, setView] = useState(() => (can.manage ? 'clients' : 'mine'));
   const [bucket, setBucket] = useState('active');
-  const [team, setTeam] = useState('');
+  const [client, setClient] = useState('');
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
-  const tasks = useApi(`/tasks?scope=${view === 'team' ? 'all' : 'mine'}`, [view]);
+  const tasks = useApi(`/tasks?scope=${view === 'clients' ? 'all' : 'mine'}`, [view]);
   const reload = () => tasks.reload();
   const toggle = useTaskToggle(reload);
 
-  const teams = useMemo(() => {
-    const m = new Map(); (tasks.data || []).forEach((t) => t.team && m.set(t.team._id, t.team)); return [...m.values()];
+  const clients = useMemo(() => {
+    const m = new Map(); (tasks.data || []).forEach((t) => t.client && m.set(t.client._id, t.client));
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [tasks.data]);
 
   const filtered = (tasks.data || []).filter((t) => {
@@ -44,11 +45,11 @@ export function MyWork() {
     // Completed work stays visible for a week so nobody wonders where it went
     if (bucket === 'active' && b === 'done' && !recentlyDone(t)) return false;
     if (bucket !== 'active' && bucket !== 'all' && b !== bucket) return false;
-    if (team && t.team?._id !== team) return false;
+    if (client && t.client?._id !== client) return false;
     if (q && !`${t.title} ${t.client?.name}`.toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
-  const count = (b) => (tasks.data ? tasks.data.filter((t) => dueInfo(t).bucket === b && (!team || t.team?._id === team)).length : undefined);
+  const count = (b) => (tasks.data ? tasks.data.filter((t) => dueInfo(t).bucket === b && (!client || t.client?._id === client)).length : undefined);
   const m = { dueToday: count('today'), overdue: count('overdue'), upcoming: count('upcoming'), done: (tasks.data || []).filter(recentlyDone).length };
   const hour = new Date().getHours();
   const pick = (b) => setBucket((cur) => (cur === b ? 'active' : b));
@@ -56,10 +57,10 @@ export function MyWork() {
   return (
     <>
       <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' · ').pop().split(' ')[0]}`}
-        subtitle={view === 'team' ? 'All work for your team’s clients — who is doing what, and how far they are.' : 'Everything assigned to you, across all your teams, in one place.'}>
+        subtitle={view === 'clients' ? 'Work across your clients — owners, due dates and progress.' : 'Everything assigned to you across your clients.'}>
         {can.manage && (
           <div className="chips" role="tablist" aria-label="Whose work">
-            <button className={`chip ${view === 'team' ? 'on' : ''}`} role="tab" aria-selected={view === 'team'} onClick={() => setView('team')}><Users size={16} />Team work</button>
+            <button className={`chip ${view === 'clients' ? 'on' : ''}`} role="tab" aria-selected={view === 'clients'} onClick={() => setView('clients')}><Users size={16} />Client work</button>
             <button className={`chip ${view === 'mine' ? 'on' : ''}`} role="tab" aria-selected={view === 'mine'} onClick={() => setView('mine')}>Assigned to me</button>
           </div>
         )}
@@ -72,14 +73,9 @@ export function MyWork() {
         <Stat icon={CheckCircle2} label={`Done · last ${RECENT_DONE_DAYS} days`} value={tasks.data ? m.done : undefined} tone="success" selected={bucket === 'done'} onClick={() => pick('done')} />
       </div>
       <div className="row-wrap" style={{ marginBottom: 16 }}>
-        <div className="chips">
-          <button className={`chip ${!team ? 'on' : ''}`} onClick={() => setTeam('')}>All teams</button>
-          {teams.map((t) => (
-            <button key={t._id} className={`chip ${team === t._id ? 'on' : ''}`} onClick={() => setTeam(team === t._id ? '' : t._id)}>
-              <span className="team-dot" style={{ background: t.color }} />{t.name}
-            </button>
-          ))}
-        </div>
+        <select className="select" style={{ maxWidth: 280 }} value={client} onChange={(e) => setClient(e.target.value)} aria-label="Filter by client">
+          <option value="">All clients</option>{clients.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+        </select>
         <div className="spacer" />
         <select className="select" style={{ width: 'auto', minHeight: 40, borderRadius: 999 }} value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Show">
           <option value="active">Open + recently done</option><option value="today">Due today</option><option value="overdue">Overdue</option>
@@ -87,7 +83,7 @@ export function MyWork() {
         </select>
         <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search tasks or clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tasks" /></div>
       </div>
-      <TaskListCard tasks={filtered} loading={tasks.loading} showPeople={view === 'team'} onOpen={(t) => setOpenId(t._id)} onToggle={toggle}
+      <TaskListCard tasks={filtered} loading={tasks.loading} showPeople={view === 'clients'} onOpen={(t) => setOpenId(t._id)} onToggle={toggle}
         emptyTitle={bucket === 'overdue' ? 'Nothing overdue — nice work' : 'No tasks match'} />
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
       {creating && <TaskForm onClose={() => setCreating(false)} onSaved={reload} />}
@@ -111,7 +107,7 @@ export function Overview() {
 
   return (
     <>
-      <PageHead title="Overview" subtitle={can.super ? 'Workload across every team and client.' : 'Workload for the clients you manage.'} />
+      <PageHead title="Overview" subtitle={can.super ? 'Workload across every client.' : 'Workload for the clients you manage.'} />
       {!d ? <div className="card"><Skeleton /></div> : (
         <div className="split">
           <div className="stack" style={{ gap: 16 }}>
@@ -156,17 +152,12 @@ export function Overview() {
                 ))}
               </div>
             </div>
-            <div className="card">
-              <div className="card-head"><h3>By team</h3></div>
-              <div className="list">
-                {d.byTeam.map((t) => (
-                  <div key={t._id || 'none'} className="list-item" style={{ cursor: 'default' }}>
-                    <div className="li-main"><TeamTag team={t._id ? t : { name: 'No team', color: 'var(--text-3)' }} /></div>
-                    {t.overdue > 0 && <Badge cls="b-danger">{t.overdue} overdue</Badge>}<span className="mono">{t.open} open</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <div className="card"><div className="card-head"><h3>By client</h3></div><div className="list">
+              {(d.byClient || []).map((c) => <div key={c._id || 'none'} className="list-item" style={{ cursor: 'default' }}>
+                <div className="li-main"><strong>{c.name || 'Unassigned client'}</strong></div>
+                {c.overdue > 0 && <Badge cls="b-danger">{c.overdue} overdue</Badge>}<span className="mono">{c.open} open</span>
+              </div>)}
+            </div></div>
             <div className="card">
               <div className="card-head"><h3>Access expiring soon</h3><Clock size={16} className="muted" /></div>
               {d.expiringSoon.length === 0 ? <p className="small muted" style={{ padding: 20 }}>No temporary access ends in the next 7 days.</p> : (
