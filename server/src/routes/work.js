@@ -8,7 +8,7 @@ import { generateRecurringTasks } from '../services/recurrence.js';
 
 const r = Router();
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
+  .populate('template', 'frequency').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
