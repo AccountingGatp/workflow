@@ -24,7 +24,7 @@ export function Clients() {
       <div className="card" style={{ overflow: 'hidden' }}>
         {loading && !data ? <Skeleton /> : rows.length === 0 ? <Empty icon={Building2} title="No clients" >Ask your admin for access to a client.</Empty> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Client</th><th>Team</th><th>TL / managers</th><th>Open work</th><th>Status</th></tr></thead>
+            <thead><tr><th>Client</th><th>Managers</th><th>Open work</th><th>Status</th></tr></thead>
             <tbody>
               {rows.map((c) => (
                 <tr key={c._id} className="clickable" onClick={() => nav(`/clients/${c._id}`)}>
@@ -32,8 +32,7 @@ export function Clients() {
                     <span className="stat-icon" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}><Building2 size={18} /></span>
                     <div><Link to={`/clients/${c._id}`} style={{ color: 'var(--text)', fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>{c.name}</Link><div className="small muted">{c.accountingId}</div></div>
                   </div></td>
-                  <td><div className="stack" style={{ gap: 4 }}>{c.teams.map((t) => <TeamTag key={t._id} team={t} />)}</div></td>
-                  <td><Avatars people={c.admins} /></td>
+                                    <td><Avatars people={c.admins} /></td>
                   <td><span className="row"><span className="mono">{c.openTasks}</span>{c.overdueTasks > 0 && <Badge cls="b-danger">{c.overdueTasks} overdue</Badge>}</span></td>
                   <td><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></td>
                 </tr>
@@ -48,10 +47,9 @@ export function Clients() {
 }
 
 function ClientForm({ onClose, onSaved }) {
-  const teams = useApi('/teams');
   const users = useApi('/users');
   const toast = useToast();
-  const [f, setF] = useState({ name: '', accountingId: '', contactName: '', contactEmail: '', contactPhone: '', status: 'active', teamIds: [], adminIds: [] });
+  const [f, setF] = useState({ name: '', accountingId: '', contactName: '', contactEmail: '', contactPhone: '', status: 'active', adminIds: [] });
   const [error, setError] = useState(null);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
   const toggle = (k, id) => setF((s) => ({ ...s, [k]: s[k].includes(id) ? s[k].filter((x) => x !== id) : [...s[k], id] }));
@@ -69,10 +67,7 @@ function ClientForm({ onClose, onSaved }) {
           <Field label="Contact name"><input className="input" value={f.contactName} onChange={set('contactName')} /></Field>
           <Field label="Contact email"><input className="input" type="email" value={f.contactEmail} onChange={set('contactEmail')} /></Field>
         </div>
-        <Field label="Team" hint="The team’s TL manages this client and assigns its work."><div className="chips">{(teams.data || []).map((t) => (
-          <button type="button" key={t._id} className={`chip ${f.teamIds.includes(t._id) ? 'on' : ''}`} onClick={() => toggle('teamIds', t._id)}><span className="team-dot" style={{ background: t.color }} />{t.name}</button>
-        ))}</div></Field>
-        <Field label="Extra managers (optional)" hint="Only if another Admin / TL should also manage this client."><div className="chips">{(users.data || []).filter((u) => u.role === 'admin').map((u) => (
+        <Field label="Client managers (optional)" hint="Select who manages this client."><div className="chips">{(users.data || []).filter((u) => u.role === 'admin').map((u) => (
           <button type="button" key={u._id} className={`chip ${f.adminIds.includes(u._id) ? 'on' : ''}`} onClick={() => toggle('adminIds', u._id)} style={{ paddingLeft: 4 }}><Avatar name={u.name} size="sm" />{u.name}</button>
         ))}</div></Field>
       </form>
@@ -108,7 +103,7 @@ export function ClientDetail() {
   return (
     <>
       <Link to="/clients" className="row small" style={{ color: 'var(--text-3)', marginBottom: 8 }}><ArrowLeft size={16} />Clients</Link>
-      <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge>{c.teams.map((t) => <TeamTag key={t._id} team={t} />)}</span>}>
+      <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></span>}>
         {c.canManage && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
       <div className="split">
