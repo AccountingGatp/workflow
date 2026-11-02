@@ -1,4 +1,4 @@
-# Practice Hub — Karbon alternative
+# Workflow
 
 Work management for an accounting practice: **Users ↔ Teams ↔ Clients ↔ Tasks**, with role-based access and explicit per-client permissions.
 

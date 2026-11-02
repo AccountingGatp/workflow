@@ -296,7 +296,7 @@ export function Login() {
   return (
     <div className="login">
       <section className="login-hero">
-        <div className="row" style={{ gap: 10 }}><div className="brand-mark" style={{ background: 'rgba(255,255,255,.18)' }}><Layers size={18} /></div><span className="brand-name">Practice Hub</span></div>
+        <div className="row" style={{ gap: 10 }}><div className="brand-mark" style={{ background: 'rgba(255,255,255,.18)' }}><Layers size={18} /></div><span className="brand-name">Workflow</span></div>
         <div>
           <h1>Every client, task and team — one calm workspace.</h1>
           <p>Built for accounting practices where people work across several teams, and every client’s data stays private.</p>

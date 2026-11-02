@@ -1,5 +1,5 @@
 {
-  "name": "karbon-alternative",
+  "name": "workflow",
   "private": true,
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",

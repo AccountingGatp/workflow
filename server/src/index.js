@@ -23,7 +23,7 @@ async function connect() {
     // No database configured: run an in-memory MongoDB so the app works out of the box.
     const { MongoMemoryServer } = await import('mongodb-memory-server');
     const mem = await MongoMemoryServer.create();
-    uri = mem.getUri('karbon');
+    uri = mem.getUri('workflow');
     console.log('⚠  MONGODB_URI not set — using a temporary in-memory MongoDB (data resets on restart).');
   }
   await mongoose.connect(uri);

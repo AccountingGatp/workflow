@@ -38,7 +38,7 @@ export default function Layout() {
     <div className="shell">
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
       <nav className={`sidebar ${open ? 'open' : ''}`} aria-label="Main">
-        <div className="brand"><div className="brand-mark"><Layers size={18} /></div><span className="brand-name">Practice Hub</span></div>
+        <div className="brand"><div className="brand-mark"><Layers size={18} /></div><span className="brand-name">Workflow</span></div>
         {!can.super && item('/', CheckSquare, 'My work')}
         {can.manage && item('/overview', LayoutDashboard, 'Overview')}
         {item('/mail', MailIcon, 'Mail')}
