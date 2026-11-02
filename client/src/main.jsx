@@ -7,7 +7,7 @@ import Layout from './Layout.jsx';
 import { MyWork, Overview } from './pages/work.jsx';
 import { Clients, ClientDetail } from './pages/clients.jsx';
 import { Mail, MailInboxes } from './pages/mail.jsx';
-import { Teams, People, Recurring, Access, Audit, Login } from './pages/org.jsx';
+import { People, Recurring, Access, Audit, Login } from './pages/org.jsx';
 
 try { const t = localStorage.getItem('ka.theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* ignore */ }
 
@@ -25,7 +25,7 @@ function App() {
         <Route path="clients/:id" element={<ClientDetail />} />
         <Route path="mail" element={<Mail />} />
         <Route path="mail/inboxes" element={guard(can.manage, <MailInboxes />)} />
-        <Route path="teams" element={<Teams />} />
+        <Route path="teams" element={<Navigate to="/clients" replace />} />
         <Route path="recurring" element={guard(can.manage, <Recurring />)} />
         <Route path="people" element={guard(can.super, <People />)} />
         <Route path="access" element={guard(can.manage, <Access />)} />
