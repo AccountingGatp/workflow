@@ -102,8 +102,9 @@ export function Overview() {
   const d = dash.data;
   const statusTotal = (d?.byStatus || []).reduce((a, s) => a + s.n, 0) || 1;
   const statusColor = { todo: 'var(--text-3)', in_progress: 'var(--info)', waiting: 'var(--warning)', done: 'var(--success)' };
-  const overdue = (all.data || []).filter((t) => dueInfo(t).bucket === 'overdue');
-  const shown = person ? (all.data || []).filter((t) => t.assignees.some((a) => a._id === person)) : overdue;
+  const actionable = (all.data || []).filter((t) => ['today', 'overdue'].includes(dueInfo(t).bucket));
+  const overdue = actionable.filter((t) => dueInfo(t).bucket === 'overdue');
+  const shown = person ? actionable.filter((t) => t.assignees.some((a) => a._id === person)) : overdue;
 
   return (
     <>
@@ -112,7 +113,7 @@ export function Overview() {
         <div className="split">
           <div className="stack" style={{ gap: 16 }}>
             <div className="card">
-              <div className="card-head"><h3>Workload by person</h3><span className="small muted">Open tasks · click a row to filter</span></div>
+              <div className="card-head"><h3>Workload by person</h3><span className="small muted">Open workload · select a person to see today’s and overdue tasks</span></div>
               {d.byPerson.length === 0 ? <Empty icon={Users} title="No open work" /> : (
                 <div className="table-wrap"><table>
                   <thead><tr><th>Person</th><th>Today</th><th>Overdue</th><th style={{ width: '40%' }}>Open</th></tr></thead>
@@ -134,10 +135,10 @@ export function Overview() {
             </div>
             <div>
               <div className="row" style={{ margin: '8px 0 12px' }}>
-                <h3>{person ? `Open work · ${d.byPerson.find((p) => p._id === person)?.name}` : 'Overdue work'}</h3>
+                <h3>{person ? `Due now · ${d.byPerson.find((p) => p._id === person)?.name}` : 'Overdue work'}</h3>
                 {person && <button className="btn btn-ghost btn-sm" onClick={() => setPerson('')}>Show overdue</button>}
               </div>
-              <TaskListCard tasks={shown} loading={all.loading} groups={!!person} onOpen={(t) => setOpenId(t._id)} emptyTitle="Nothing overdue" />
+              <TaskListCard tasks={shown} loading={all.loading} groups={!!person} onOpen={(t) => setOpenId(t._id)} emptyTitle={person ? "No tasks due today or overdue" : "Nothing overdue"} />
             </div>
           </div>
           <div className="stack" style={{ gap: 16 }}>
