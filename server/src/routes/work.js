@@ -162,18 +162,18 @@ r.get('/dashboard', ah(async (req, res) => {
       { $sort: { overdue: -1, open: -1 } },
     ]);
     const byStatus = await Task.aggregate([{ $match: { ...scope, dueDate: { $lte: new Date(eod.getTime() + 7 * 864e5) } } }, { $group: { _id: '$status', n: { $sum: 1 } } }]);
-    const byTeam = await Task.aggregate([
+    const byClient = await Task.aggregate([
       { $match: open },
-      { $group: { _id: '$team', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $lt: ['$dueDate', sod] }, 1, 0] } } } },
-      { $lookup: { from: 'teams', localField: '_id', foreignField: '_id', as: 't' } },
-      { $project: { open: 1, overdue: 1, name: { $first: '$t.name' }, color: { $first: '$t.color' } } },
+      { $group: { _id: '$client', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $lt: ['$dueDate', sod] }, 1, 0] } } } },
+      { $lookup: { from: 'clients', localField: '_id', foreignField: '_id', as: 'c' } },
+      { $project: { open: 1, overdue: 1, name: { $first: '$c.name' } } },
       { $sort: { open: -1 } },
     ]);
     const expiringSoon = await ClientPermission.find({
       ...activePermissionFilter(), expiresAt: { $ne: null, $lte: new Date(now.getTime() + 7 * 864e5) },
       ...(isSuper(req.user) ? {} : { client: { $in: await managedClientIds(req.user) } }),
     }).populate('user', 'name').populate('client', 'name').lean();
-    Object.assign(result, { byPerson, byStatus, byTeam, expiringSoon });
+    Object.assign(result, { byPerson, byStatus, byClient, expiringSoon });
   }
   res.json(result);
 }));
