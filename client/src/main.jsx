@@ -6,6 +6,7 @@ import { AuthProvider, ToastProvider, useAuth } from './lib.jsx';
 import Layout from './Layout.jsx';
 import { MyWork, Overview } from './pages/work.jsx';
 import { Clients, ClientDetail } from './pages/clients.jsx';
+import { Mail, MailInboxes } from './pages/mail.jsx';
 import { Teams, People, Recurring, Access, Audit, Login } from './pages/org.jsx';
 
 try { const t = localStorage.getItem('ka.theme'); if (t) document.documentElement.dataset.theme = t; } catch { /* ignore */ }
@@ -22,6 +23,8 @@ function App() {
         <Route path="overview" element={guard(can.manage, <Overview />)} />
         <Route path="clients" element={<Clients />} />
         <Route path="clients/:id" element={<ClientDetail />} />
+        <Route path="mail" element={<Mail />} />
+        <Route path="mail/inboxes" element={guard(can.manage, <MailInboxes />)} />
         <Route path="teams" element={<Teams />} />
         <Route path="recurring" element={guard(can.manage, <Recurring />)} />
         <Route path="people" element={guard(can.super, <People />)} />

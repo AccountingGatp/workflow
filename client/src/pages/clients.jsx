@@ -126,6 +126,7 @@ export function ClientDetail() {
             <div className="row small"><Avatar name={c.contactName || '?'} size="sm" />{c.contactName || '—'}</div>
             {c.contactEmail && <div className="row small"><Mail size={16} className="muted" />{c.contactEmail}</div>}
             {c.contactPhone && <div className="row small"><Phone size={16} className="muted" />{c.contactPhone}</div>}
+            {c.canManage && <EmailRules client={c} onSaved={reload} />}
           </div>
           <div className="card">
             <div className="card-head"><h3>Team & managers</h3>{c.isSuper && <button className="btn btn-tonal btn-sm" onClick={() => setAssigning(true)}><Plus size={16} />Assign</button>}</div>
@@ -166,6 +167,22 @@ export function ClientDetail() {
       {granting && <GrantAccess client={c} onClose={() => setGranting(false)} onSaved={reload} />}
       {assigning && <AssignManager client={c} onClose={() => setAssigning(false)} onSaved={reload} />}
     </>
+  );
+}
+
+function EmailRules({ client, onSaved }) {
+  const toast = useToast();
+  const [value, setValue] = useState((client.emailMatches || []).join(', '));
+  const save = async () => {
+    try {
+      await api(`/clients/${client._id}`, { method: 'PATCH', body: { emailMatches: value.split(/[\s,;]+/).filter(Boolean) } });
+      toast('Email rules saved'); onSaved();
+    } catch (e) { toast(e.message); }
+  };
+  return (
+    <Field label="Client’s email addresses" hint="Email from these addresses or domains is tagged to this client automatically. Example: hamilton.com, ceo@hamilton.com">
+      <div className="row"><input className="input" value={value} onChange={(e) => setValue(e.target.value)} aria-label="Client email addresses" /><button className="btn btn-tonal btn-sm" onClick={save}>Save</button></div>
+    </Field>
   );
 }
 

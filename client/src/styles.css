@@ -312,3 +312,12 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   .grid-3 .stat { padding: 16px; }
   .card-head { flex-wrap: wrap; }
 }
+
+/* ---------- Mail ---------- */
+.mail-grid { display: grid; grid-template-columns: minmax(280px, 380px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.mail-list { max-height: calc(100vh - 230px); overflow: auto; }
+.mail-item.on { background: var(--primary-soft); }
+.mail-msg { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.mail-msg.out { background: var(--surface-2); }
+.mail-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; color: var(--text-2); }
+@media (max-width: 900px) { .mail-grid { grid-template-columns: minmax(0, 1fr); } .mail-list { max-height: 320px; } }

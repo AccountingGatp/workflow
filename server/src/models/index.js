@@ -40,6 +40,7 @@ export const Client = model('Client', new Schema({
   contactPhone: String,
   status: { type: String, enum: ['active', 'onboarding', 'inactive'], default: 'active' },
   notes: String,
+  emailMatches: [{ type: String, lowercase: true, trim: true }], // addresses or domains that identify this client's email
 }, opts));
 
 /**
@@ -120,6 +121,7 @@ const taskSchema = new Schema({
   sop: String,
   checklist: [checklistItem],
   template: ref('TaskTemplate'),
+  mailThread: ref('MailThread'),
   completedAt: Date,
   completedBy: ref('User'),
   createdBy: ref('User'),

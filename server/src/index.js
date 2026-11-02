@@ -10,6 +10,8 @@ import authRoutes from './routes/auth.js';
 import peopleRoutes from './routes/people.js';
 import clientRoutes from './routes/clients.js';
 import workRoutes from './routes/work.js';
+import mailRoutes, { mailPublic } from './routes/mail.js';
+import { startMailSync } from './services/gmail.js';
 import { startScheduler } from './services/recurrence.js';
 import { seedIfEmpty } from './seed.js';
 
@@ -35,7 +37,8 @@ app.use(express.json({ limit: '1mb' }));
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/config', (_req, res) => res.json({ demo: process.env.SEED_DEMO === 'true' }));
 app.use('/api/auth', authRoutes);
-app.use('/api', requireAuth, peopleRoutes, clientRoutes, workRoutes);
+app.use('/api', mailPublic);
+app.use('/api', requireAuth, peopleRoutes, clientRoutes, workRoutes, mailRoutes);
 
 // Serve the built client in production
 const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
@@ -54,4 +57,5 @@ app.use((err, _req, res, _next) => {
 await connect();
 await seedIfEmpty();
 startScheduler();
+startMailSync();
 app.listen(PORT, () => console.log(`✓ API on http://localhost:${PORT}`));

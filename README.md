@@ -63,3 +63,21 @@ How it works (enforced server-side in `server/src/services/access.js`):
 
 `users`, `teams`, `team_memberships`, `clients`, `client_assignments`, `client_permissions`, `access_requests`,
 `tasks`, `task_templates`, `audit_logs`. (`documents` arrives with the document-storage phase.)
+
+## Mail (Gmail)
+
+Mail follows client access: everyone with access to a client handles its email. Untagged email is visible only to the
+Owner and the TL of the inbox's team. Staff replies wait for TL review; the client's TL and the Owner send directly.
+Emails are stored as plain text, and attachments are listed by name only for now.
+
+**Setup (Google Workspace admin):**
+
+1. In [Google Cloud Console](https://console.cloud.google.com), create a project and enable the **Gmail API**.
+2. Configure the OAuth consent screen with user type **Internal**, and add the scopes `gmail.readonly` and `gmail.send`.
+3. Create an **OAuth client ID** of type *Web application*. Add the redirect URI from `GOOGLE_REDIRECT_URI`.
+4. Fill in `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `MAIL_TOKEN_KEY` in `server/.env`, then restart.
+5. As Super Admin, open **Mail → Inboxes → Connect Gmail inbox** and sign in as that mailbox.
+6. On each client's page, add its email addresses or domains so mail is tagged automatically.
+
+**Try it without Google:** run `node scripts/fake-gmail.js` from `server/` (settings are at the top of that file).
+With a fresh database, `bash scripts/test-mail.sh` runs the full access and review test against it.

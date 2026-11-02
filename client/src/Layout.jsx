@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, CheckSquare, Building2, Users, UsersRound, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Layers,
+  LayoutDashboard, CheckSquare, Building2, Users, UsersRound, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Layers, Mail as MailIcon,
 } from 'lucide-react';
 import { useAuth, useApi, ROLE_LABEL } from './lib.jsx';
 import { Avatar } from './ui.jsx';
@@ -41,6 +41,7 @@ export default function Layout() {
         <div className="brand"><div className="brand-mark"><Layers size={18} /></div><span className="brand-name">Practice Hub</span></div>
         {!can.super && item('/', CheckSquare, 'My work')}
         {can.manage && item('/overview', LayoutDashboard, 'Overview')}
+        {item('/mail', MailIcon, 'Mail')}
         {item('/clients', Building2, 'Clients')}
         {can.manage && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>

@@ -1,6 +1,18 @@
 import { Router } from 'express';
 import { Client, ClientAssignment, ClientPermission, AccessRequest, User, Task } from '../models/index.js';
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
+import { retagUntagged } from '../services/gmail.js';
+
+// A rule on one of these would tag every sender on that service as this client
+const PUBLIC_DOMAINS = new Set(['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'aol.com', 'proton.me', 'protonmail.com', 'rediffmail.com']);
+function cleanEmailMatches(list) {
+  const out = [...new Set((Array.isArray(list) ? list : []).map((x) => String(x).trim().toLowerCase().replace(/^@/, '')).filter(Boolean))];
+  for (const m of out) {
+    if (!/^([^\s@]+@)?[^\s@]+\.[^\s@]+$/.test(m)) throw new HttpError(400, `"${m}" is not an email address or domain`);
+    if (PUBLIC_DOMAINS.has(m)) throw new HttpError(400, `${m} is a public email service. Add the client's full address instead.`);
+  }
+  return out;
+}
 import {
   audit, isSuper, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
   canGrantDirectly, activePermissionFilter, teamLeads,
@@ -77,7 +89,9 @@ r.patch('/clients/:id', ah(async (req, res) => {
   if (!(await canManageClient(req.user, req.params.id))) throw new HttpError(403, 'Only managing admins can edit this client');
   const allowed = ['name', 'accountingId', 'contactName', 'contactEmail', 'contactPhone', 'status', 'notes'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+  if (req.body?.emailMatches !== undefined) update.emailMatches = cleanEmailMatches(req.body.emailMatches);
   const client = await Client.findByIdAndUpdate(req.params.id, update, { new: true });
+  if (update.emailMatches) await retagUntagged();
   audit(req.user, 'client.update', { entity: 'Client', entityId: client._id, client: client._id, summary: `Updated ${client.name}` });
   res.json(client);
 }));
