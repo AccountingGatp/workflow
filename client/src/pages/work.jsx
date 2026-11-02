@@ -21,6 +21,15 @@ function Stat({ icon: Icon, label, value, tone, selected, onClick }) {
 
 const RECENT_DONE_DAYS = 7;
 const recentlyDone = (t) => t.status === 'done' && Date.now() - new Date(t.completedAt || t.updatedAt) < RECENT_DONE_DAYS * 864e5;
+const upcomingWeekTask = (t) => {
+  if (t.status === 'done' || dueInfo(t).bucket !== 'upcoming') return false;
+  const due = new Date(t.dueDate).getTime();
+  const nextWeek = new Date();
+  nextWeek.setDate(nextWeek.getDate() + 7);
+  nextWeek.setHours(23, 59, 59, 999);
+  return due <= nextWeek.getTime() && ['weekly', 'monthly'].includes(t.template?.frequency);
+};
+
 
 export function MyWork() {
   const { user, can } = useAuth();
@@ -44,12 +53,13 @@ export function MyWork() {
     const b = dueInfo(t).bucket;
     // Completed work stays visible for a week so nobody wonders where it went
     if (bucket === 'active' && b === 'done' && !recentlyDone(t)) return false;
+    if (b === 'upcoming' && !upcomingWeekTask(t)) return false;
     if (bucket !== 'active' && bucket !== 'all' && b !== bucket) return false;
     if (client && t.client?._id !== client) return false;
     if (q && !`${t.title} ${t.client?.name}`.toLowerCase().includes(q.toLowerCase())) return false;
     return true;
   });
-  const count = (b) => (tasks.data ? tasks.data.filter((t) => dueInfo(t).bucket === b && (!client || t.client?._id === client)).length : undefined);
+  const count = (b) => (tasks.data ? tasks.data.filter((t) => dueInfo(t).bucket === b && (b !== 'upcoming' || upcomingWeekTask(t)) && (!client || t.client?._id === client)).length : undefined);
   const m = { dueToday: count('today'), overdue: count('overdue'), upcoming: count('upcoming'), done: (tasks.data || []).filter(recentlyDone).length };
   const hour = new Date().getHours();
   const pick = (b) => setBucket((cur) => (cur === b ? 'active' : b));
@@ -69,7 +79,7 @@ export function MyWork() {
       <div className="grid grid-4" style={{ marginBottom: 24 }}>
         <Stat icon={CalendarClock} label="Due today" value={m?.dueToday} tone="warning" selected={bucket === 'today'} onClick={() => pick('today')} />
         <Stat icon={AlertTriangle} label="Overdue" value={m?.overdue} tone="danger" selected={bucket === 'overdue'} onClick={() => pick('overdue')} />
-        <Stat icon={CalendarRange} label="Upcoming" value={m?.upcoming} tone="primary" selected={bucket === 'upcoming'} onClick={() => pick('upcoming')} />
+        <Stat icon={CalendarRange} label="Next 7 days" value={m?.upcoming} tone="primary" selected={bucket === 'upcoming'} onClick={() => pick('upcoming')} />
         <Stat icon={CheckCircle2} label={`Done · last ${RECENT_DONE_DAYS} days`} value={tasks.data ? m.done : undefined} tone="success" selected={bucket === 'done'} onClick={() => pick('done')} />
       </div>
       <div className="row-wrap" style={{ marginBottom: 16 }}>
@@ -79,7 +89,7 @@ export function MyWork() {
         <div className="spacer" />
         <select className="select" style={{ width: 'auto', minHeight: 40, borderRadius: 999 }} value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Show">
           <option value="active">Open + recently done</option><option value="today">Due today</option><option value="overdue">Overdue</option>
-          <option value="upcoming">Upcoming</option><option value="done">Completed</option><option value="all">All</option>
+          <option value="upcoming">Weekly / monthly · next 7 days</option><option value="done">Completed</option><option value="all">All</option>
         </select>
         <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search tasks or clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tasks" /></div>
       </div>
@@ -121,7 +131,7 @@ function ManagerOverview() {
   const filtered = personTasks.filter((t) => {
     if (statusFilter === 'completed') return t.status === 'done';
     if (statusFilter === 'due') return t.status !== 'done' && ['today', 'overdue'].includes(dueInfo(t).bucket);
-    return t.status !== 'done';
+    return t.status !== 'done' && (dueInfo(t).bucket !== 'upcoming' || upcomingWeekTask(t));
   });
   const totalDone = scoped.filter((t) => t.status === 'done').length;
   const totalPending = scoped.length - totalDone;
