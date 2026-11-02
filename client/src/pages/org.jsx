@@ -180,33 +180,70 @@ const FREQ = (t) => t.frequency === 'daily' ? 'Every working day'
 
 export function Recurring() {
   const { data, loading, reload } = useApi('/templates');
-  const [clientFilter, setClientFilter] = useState('');
+  const clients = useApi('/clients');
   const toast = useToast();
-  const [creating, setCreating] = useState(false);
-  const toggle = async (t) => { try { await api(`/templates/${t._id}`, { method: 'PATCH', body: { active: !t.active } }); toast(t.active ? 'Paused' : 'Resumed'); reload(); } catch (e) { toast(e.message); } };
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [creating, setCreating] = useState(null);
+  const [search, setSearch] = useState('');
+  const availableClients = (clients.data || []).filter((c) => c.canManage).sort((a, b) => a.name.localeCompare(b.name));
+  const shownClients = availableClients.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
+  const selected = availableClients.find((c) => c._id === selectedClient);
+  const templates = (data || []).filter((t) => t.client?._id === selectedClient);
+  const toggle = async (t) => {
+    try {
+      await api(`/templates/${t._id}`, { method: 'PATCH', body: { active: !t.active } });
+      toast(t.active ? 'Paused' : 'Resumed'); reload();
+    } catch (e) { toast(e.message); }
+  };
   return (
     <>
-      <PageHead title="Recurring work" subtitle="Templates create the next task automatically, whether or not the previous one was finished.">
-        <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Schedule work</button>
-      </PageHead>
-      <div className="row-wrap" style={{ marginBottom: 16 }}><label htmlFor="recurring-client" className="small muted">Client</label><select id="recurring-client" className="select" style={{ maxWidth: 320 }} value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}><option value="">All clients</option>{[...new Map((data || []).filter((t) => t.client).map((t) => [t.client._id, t.client])).values()].sort((a,b) => a.name.localeCompare(b.name)).map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></div>
-      <div className="card" style={{ overflow: 'hidden' }}>
-        {loading && !data ? <Skeleton /> : (data || []).filter((t) => !clientFilter || t.client?._id === clientFilter).length === 0 ? <Empty icon={Repeat} title="No recurring work for this client" /> : (
-          <div className="table-wrap"><table>
-            <thead><tr><th>Work</th><th>Client</th><th>Schedule</th><th>Assigned</th><th /></tr></thead>
-            <tbody>{(data || []).filter((t) => !clientFilter || t.client?._id === clientFilter).sort((a,b) => (a.client?.name || "").localeCompare(b.client?.name || "") || a.title.localeCompare(b.title)).map((t) => (
-              <tr key={t._id} style={!t.active ? { opacity: .55 } : undefined}>
-                <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
-                <td>{t.client?.name || 'Unknown client'}</td>
-                <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
-                <td><Avatars people={t.assignees} /></td>
-                <td style={{ textAlign: 'right' }}><button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button></td>
-              </tr>
-            ))}</tbody>
-          </table></div>
-        )}
-      </div>
-      {creating && <TaskForm recurring onClose={() => setCreating(false)} onSaved={reload} />}
+      <PageHead title="Recurring work" subtitle="Choose a client to schedule and manage their recurring tasks." />
+      {!selected ? (
+        <>
+          <div className="row-wrap" style={{ marginBottom: 18 }}>
+            <input className="input" style={{ maxWidth: 360 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients…" aria-label="Search clients" />
+            <span className="small muted">{shownClients.length} clients</span>
+          </div>
+          {clients.loading && !clients.data ? <div className="card"><Skeleton /></div> :
+            shownClients.length === 0 ? <div className="card"><Empty icon={Building2} title="No clients found" /></div> :
+            <div className="grid grid-3">
+              {shownClients.map((c) => {
+                const count = (data || []).filter((t) => t.client?._id === c._id).length;
+                return <button key={c._id} className="card card-pad" style={{ textAlign: 'left', cursor: 'pointer', minHeight: 105 }} onClick={() => setSelectedClient(c._id)}>
+                  <div className="row"><Building2 size={20} className="muted" /><strong>{c.name}</strong></div>
+                  <div className="small muted" style={{ marginTop: 12 }}>{count} recurring task{count === 1 ? '' : 's'} · Open client work →</div>
+                </button>;
+              })}
+            </div>
+          }
+        </>
+      ) : (
+        <>
+          <div className="row-wrap" style={{ marginBottom: 20 }}>
+            <button className="btn btn-ghost" onClick={() => setSelectedClient(null)}>← All clients</button>
+            <h2>{selected.name}</h2><div className="spacer" />
+            <button className="btn btn-primary" onClick={() => setCreating('recurring')}><Plus size={18} />Add recurring task</button>
+            <button className="btn btn-outline" onClick={() => setCreating('once')}><Plus size={18} />Add one-time task</button>
+          </div>
+          <div className="card" style={{ overflow: 'hidden' }}>
+            {loading && !data ? <Skeleton /> : templates.length === 0 ? <Empty icon={Repeat} title="No recurring tasks for this client yet" /> : (
+              <div className="table-wrap"><table>
+                <thead><tr><th>Task</th><th>Schedule</th><th>Assigned</th><th>Status</th><th /></tr></thead>
+                <tbody>{templates.map((t) => (
+                  <tr key={t._id} style={!t.active ? { opacity: .55 } : undefined}>
+                    <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
+                    <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
+                    <td><Avatars people={t.assignees} /></td>
+                    <td>{t.active ? 'Active' : 'Paused'}</td>
+                    <td style={{ textAlign: 'right' }}><button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button></td>
+                  </tr>
+                ))}</tbody>
+              </table></div>
+            )}
+          </div>
+        </>
+      )}
+      {creating && <TaskForm key={selectedClient + creating} recurring={creating === 'recurring'} presetClient={selectedClient} onClose={() => setCreating(null)} onSaved={() => { reload(); setCreating(null); }} />}
     </>
   );
 }
