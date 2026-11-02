@@ -151,13 +151,13 @@ export function TaskDrawer({ id, onClose, onChanged }) {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) {
+export function TaskForm({ recurring = false, presetClient, template = null, onClose, onSaved }) {
   const clients = useApi('/clients');
   const users = useApi('/users');
   const toast = useToast();
   const [f, setF] = useState({
-    title: '', client: presetClient || '', assignees: [], owner: '', dueDate: toInputDate(new Date()),
-    priority: 'normal', sop: '', checklist: [''], frequency: 'weekly', weekday: 1, monthDay: 1,
+    title: template?.title || '', client: presetClient || template?.client?._id || '', assignees: template?.assignees?.map(a => a._id || a) || [], owner: template?.owner?._id || template?.owner || '', dueDate: toInputDate(new Date()),
+    priority: template?.priority || 'normal', sop: template?.sop || '', checklist: template?.checklist?.length ? [...template.checklist] : [''], frequency: template?.frequency || 'weekly', weekday: template?.weekday ?? 1, monthDay: template?.monthDay ?? 1,
   });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -181,21 +181,21 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
         : { dueDate: new Date(`${f.dueDate}T17:00:00`).toISOString() }),
     };
     try {
-      const res = await api(recurring ? '/templates' : '/tasks', { method: 'POST', body });
-      toast(recurring ? `Scheduled — ${res.created} upcoming task${res.created === 1 ? '' : 's'} created` : 'Task created');
+      const res = await api(template ? `/templates/${template._id}/details` : recurring ? '/templates' : '/tasks', { method: template ? 'PATCH' : 'POST', body });
+      toast(template ? 'Recurring task updated' : recurring ? `Scheduled — ${res.created} upcoming task${res.created === 1 ? '' : 's'} created` : 'Task created');
       onSaved?.(); onClose();
     } catch (err) { setError(err); } finally { setSaving(false); }
   };
 
   return (
-    <Modal wide title={recurring ? 'Schedule recurring work' : 'New task'} onClose={onClose} footer={<>
+    <Modal wide title={template ? 'Edit recurring task' : recurring ? 'Schedule recurring work' : 'New task'} onClose={onClose} footer={<>
       <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-      <button className="btn btn-primary" form="task-form" disabled={saving || !f.title || !f.client}>{saving ? 'Saving…' : recurring ? 'Schedule' : 'Create task'}</button>
+      <button className="btn btn-primary" form="task-form" disabled={saving || !f.title || !f.client}>{saving ? 'Saving…' : template ? 'Save changes' : recurring ? 'Schedule' : 'Create task'}</button>
     </>}>
       <form id="task-form" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
-        <Field label="Client"><select className="select" value={f.client} onChange={set('client')} required><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
+        <Field label="Client"><select className="select" value={f.client} onChange={set('client')} required disabled={!!template}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
         {recurring ? (
           <div className="grid grid-2">
             <Field label="Repeats">
