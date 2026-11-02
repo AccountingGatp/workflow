@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, CheckSquare, Building2, Users, UsersRound, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Layers, Mail as MailIcon,
+  LayoutDashboard, CheckSquare, Building2, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Layers, Mail as MailIcon,
 } from 'lucide-react';
 import { useAuth, useApi, ROLE_LABEL } from './lib.jsx';
 import { Avatar } from './ui.jsx';
@@ -45,7 +45,6 @@ export default function Layout() {
         {item('/clients', Building2, 'Clients')}
         {can.manage && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>
-        {item('/teams', UsersRound, 'Teams')}
         {can.super && item('/people', Users, 'People')}
         {can.manage && item('/access', ShieldCheck, 'Access', pending ? <span className="count">{pending}</span> : null)}
         {can.manage && item('/audit', History, 'Activity log')}
