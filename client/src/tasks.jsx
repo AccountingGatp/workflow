@@ -21,7 +21,6 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
         </div>
         <div className="li-meta">
           <span>{task.client?.name}</span>
-          {task.team && <><span>·</span><TeamTag team={task.team} /></>}
           {task.checklist?.length > 0 && <><span>·</span><span className="mono">{doneCount}/{task.checklist.length} steps</span></>}
           {showPeople && <><span>·</span><span>{task.assignees.map((a) => a.name).join(', ') || 'Unassigned'}</span></>}
           {task.status === 'done' && task.completedBy && <><span>·</span><span style={{ color: 'var(--success)' }}>Done by {task.completedBy.name}</span></>}
@@ -84,7 +83,6 @@ export function TaskDrawer({ id, onClose, onChanged }) {
               <div className="card" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '12px 16px', alignItems: 'center' }}>
                 <span className="muted row"><Building2 size={16} />Client</span><strong>{task.client.name}</strong>
                 <span className="muted row"><Calendar size={16} />Due</span><span>{fmtDate(task.dueDate)}</span>
-                {task.team && <><span className="muted row">Team</span><TeamTag team={task.team} /></>}
                 <span className="muted row">Assigned</span>
                 <div className="row-wrap">
                   {task.assignees.map((a) => (
@@ -155,36 +153,18 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 
 export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) {
   const clients = useApi('/clients');
-  const teams = useApi('/teams');
   const users = useApi('/users');
   const toast = useToast();
   const [f, setF] = useState({
-    title: '', client: presetClient || '', team: '', assignees: [], owner: '', dueDate: toInputDate(new Date()),
+    title: '', client: presetClient || '', assignees: [], owner: '', dueDate: toInputDate(new Date()),
     priority: 'normal', sop: '', checklist: [''], frequency: 'weekly', weekday: 1, monthDay: 1,
   });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e?.target ? e.target.value : e }));
 
-  const { user } = useAuth();
-  const [everyone, setEveryone] = useState(false);
   const manageable = (clients.data || []).filter((c) => c.canManage);
-  const client = manageable.find((c) => c._id === f.client);
-  const clientTeamIds = new Set((client?.teams || []).map((t) => t._id));
-
-  // Choose the client's team automatically — the one I lead if the client has several
-  const pickTeam = (c) => {
-    const ts = c?.teams || [];
-    return (ts.find((t) => String(t.lead?._id) === String(user._id)) || ts[0])?._id || '';
-  };
-  useEffect(() => {
-    if (client && !f.team) setF((s) => ({ ...s, team: pickTeam(client) }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client?._id]);
-
-  const allPeople = useMemo(() => (users.data || []).filter((u) => u.active && u.role !== 'super_admin'), [users.data]);
-  const teamPeople = allPeople.filter((u) => u.teams.some((t) => t.team._id === f.team));
-  const people = f.team && !everyone ? teamPeople : allPeople;
+  const people = useMemo(() => (users.data || []).filter((u) => u.active && u.role !== 'super_admin'), [users.data]);
 
   const toggleAssignee = (id) => setF((s) => {
     const assignees = s.assignees.includes(id) ? s.assignees.filter((x) => x !== id) : [...s.assignees, id];
@@ -194,7 +174,7 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
   const submit = async (e) => {
     e.preventDefault(); setError(null); setSaving(true);
     const body = {
-      title: f.title, client: f.client, team: f.team || undefined, assignees: f.assignees, owner: f.owner || undefined,
+      title: f.title, client: f.client, assignees: f.assignees, owner: f.owner || undefined,
       priority: f.priority, sop: f.sop, checklist: f.checklist.map((s) => s.trim()).filter(Boolean),
       ...(recurring
         ? { frequency: f.frequency, weekday: Number(f.weekday), monthDay: Number(f.monthDay) }
@@ -215,20 +195,7 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
       <form id="task-form" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
-        <div className="grid grid-2">
-          <Field label="Client">
-            <select className="select" value={f.client} onChange={(e) => { const c = manageable.find((x) => x._id === e.target.value); setF((s) => ({ ...s, client: e.target.value, team: pickTeam(c) })); }} required>
-              <option value="">Select client…</option>
-              {manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Team">
-            <select className="select" value={f.team} onChange={set('team')}>
-              <option value="">—</option>
-              {(teams.data || []).filter((t) => !client || clientTeamIds.has(t._id)).map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}
-            </select>
-          </Field>
-        </div>
+        <Field label="Client"><select className="select" value={f.client} onChange={set('client')} required><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
         {recurring ? (
           <div className="grid grid-2">
             <Field label="Repeats">
@@ -245,7 +212,7 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
             <Field label="Priority"><select className="select" value={f.priority} onChange={set('priority')}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></Field>
           </div>
         )}
-        <Field label={f.team && !everyone ? 'Assign to (team members)' : 'Assign to'} hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'They get access to this client automatically.'}>
+        <Field label="Assign to" hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'They get access to this client automatically.'}>
           <div className="chips">
             {people.map((p) => {
               const on = f.assignees.includes(p._id);
@@ -260,8 +227,6 @@ export function TaskForm({ recurring = false, presetClient, onClose, onSaved }) 
                 </span>
               );
             })}
-            {f.team && people.length === 0 && <span className="small muted">This team has no members yet. Add them on the Teams page.</span>}
-            {f.team && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEveryone((v) => !v)}>{everyone ? 'Only team members' : 'Show everyone'}</button>}
           </div>
         </Field>
         <Field label="SOP / instructions"><textarea className="textarea" value={f.sop} onChange={set('sop')} placeholder={'1. Open the inbox\n2. Enter bills in Xero\n3. …'} /></Field>
