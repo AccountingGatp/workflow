@@ -180,6 +180,7 @@ const FREQ = (t) => t.frequency === 'daily' ? 'Every working day'
 
 export function Recurring() {
   const { data, loading, reload } = useApi('/templates');
+  const [clientFilter, setClientFilter] = useState('');
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const toggle = async (t) => { try { await api(`/templates/${t._id}`, { method: 'PATCH', body: { active: !t.active } }); toast(t.active ? 'Paused' : 'Resumed'); reload(); } catch (e) { toast(e.message); } };
@@ -188,14 +189,15 @@ export function Recurring() {
       <PageHead title="Recurring work" subtitle="Templates create the next task automatically, whether or not the previous one was finished.">
         <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Schedule work</button>
       </PageHead>
+      <div className="row-wrap" style={{ marginBottom: 16 }}><label htmlFor="recurring-client" className="small muted">Client</label><select id="recurring-client" className="select" style={{ maxWidth: 320 }} value={clientFilter} onChange={(e) => setClientFilter(e.target.value)}><option value="">All clients</option>{[...new Map((data || []).filter((t) => t.client).map((t) => [t.client._id, t.client])).values()].sort((a,b) => a.name.localeCompare(b.name)).map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></div>
       <div className="card" style={{ overflow: 'hidden' }}>
-        {loading && !data ? <Skeleton /> : data.length === 0 ? <Empty icon={Repeat} title="No recurring work yet" /> : (
+        {loading && !data ? <Skeleton /> : (data || []).filter((t) => !clientFilter || t.client?._id === clientFilter).length === 0 ? <Empty icon={Repeat} title="No recurring work for this client" /> : (
           <div className="table-wrap"><table>
             <thead><tr><th>Work</th><th>Client</th><th>Schedule</th><th>Assigned</th><th /></tr></thead>
-            <tbody>{data.map((t) => (
+            <tbody>{(data || []).filter((t) => !clientFilter || t.client?._id === clientFilter).sort((a,b) => (a.client?.name || "").localeCompare(b.client?.name || "") || a.title.localeCompare(b.title)).map((t) => (
               <tr key={t._id} style={!t.active ? { opacity: .55 } : undefined}>
                 <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
-                <td><div>{t.client.name}</div><TeamTag team={t.team} /></td>
+                <td>{t.client?.name || 'Unknown client'}</td>
                 <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
                 <td><Avatars people={t.assignees} /></td>
                 <td style={{ textAlign: 'right' }}><button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button></td>
