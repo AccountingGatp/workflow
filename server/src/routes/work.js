@@ -131,6 +131,42 @@ r.patch('/templates/:id', ah(async (req, res) => {
   res.json(tpl);
 }));
 
+/* Managers may maintain a template, but may not change its client. */
+r.patch('/templates/:id/details', ah(async (req, res) => {
+  const tpl = await TaskTemplate.findById(req.params.id);
+  if (!tpl) throw new HttpError(404, 'Template not found');
+  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can edit recurring tasks');
+  const b = req.body || {};
+  if (!String(b.title || '').trim()) throw new HttpError(400, 'Task name is required');
+  if (!['daily', 'weekly', 'monthly'].includes(b.frequency)) throw new HttpError(400, 'Invalid frequency');
+  const assignees = Array.isArray(b.assignees) ? b.assignees : [];
+  await assertAssignable(req.user, tpl.client, assignees);
+  tpl.title = String(b.title).trim();
+  tpl.frequency = b.frequency;
+  tpl.weekday = b.frequency === 'weekly' ? Number(b.weekday ?? 1) : undefined;
+  tpl.monthDay = b.frequency === 'monthly' ? Number(b.monthDay ?? 1) : undefined;
+  tpl.priority = b.priority || 'normal';
+  tpl.sop = String(b.sop || '');
+  tpl.checklist = (Array.isArray(b.checklist) ? b.checklist : []).map(x => String(x).trim()).filter(Boolean);
+  tpl.assignees = assignees;
+  tpl.owner = assignees.includes(b.owner) ? b.owner : assignees[0];
+  await tpl.save();
+  // Existing occurrences are retained as historical tasks; new ones use revised values.
+  await generateRecurringTasks(tpl._id);
+  audit(req.user, 'template.edit', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `Edited recurring task “${tpl.title}”` });
+  res.json(tpl);
+}));
+
+r.delete('/templates/:id', ah(async (req, res) => {
+  const tpl = await TaskTemplate.findById(req.params.id);
+  if (!tpl) throw new HttpError(404, 'Template not found');
+  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can delete recurring tasks');
+  // Stop future occurrences while keeping already generated tasks and their audit history.
+  await tpl.deleteOne();
+  audit(req.user, 'template.delete', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `Deleted recurring schedule “${tpl.title}”; existing tasks retained` });
+  res.json({ ok: true });
+}));
+
 /* ---------- Dashboard / workload ---------- */
 
 r.get('/dashboard', ah(async (req, res) => {
