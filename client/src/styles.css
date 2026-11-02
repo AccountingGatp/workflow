@@ -106,14 +106,28 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar {
-  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 12px;
-  height: 64px; padding: 0 32px; background: color-mix(in srgb, var(--bg) 85%, transparent);
-  backdrop-filter: blur(10px); border-bottom: 1px solid transparent;
+  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px;
+  height: 64px; min-height: 64px; padding: 0 32px;
+  background: color-mix(in srgb, var(--bg) 94%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
 }
 .topbar .menu-btn { display: none; }
-.content { padding: 8px 32px 48px; max-width: 1352px; width: 100%; }
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 8px 0 24px; }
+.content { padding: 8px 32px 48px; max-width: 1352px; width: 100%; min-width: 0; }
+.page-head {
+  position: sticky; top: 64px; z-index: 20;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  flex-wrap: wrap; margin: 0 -12px 24px; padding: 16px 12px;
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0 0 var(--r-md) var(--r-md);
+}
+.page-head > div:first-child { min-width: 0; flex: 1 1 240px; }
+.page-head h1 { overflow-wrap: anywhere; }
 .page-head p { color: var(--text-3); margin-top: 4px; }
+.page-head > .row-wrap { flex: 0 1 auto; align-items: center; }
+html { scroll-padding-top: 160px; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
@@ -123,6 +137,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   .topbar { padding: 0 16px; }
   .topbar .menu-btn { display: inline-flex; }
   .content { padding: 8px 16px 40px; }
+  .page-head { margin-left: -8px; margin-right: -8px; padding: 12px 8px; gap: 10px; }
 }
 
 /* ---------- Primitives ---------- */
@@ -321,3 +336,13 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .mail-msg.out { background: var(--surface-2); }
 .mail-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 10px; color: var(--text-2); }
 @media (max-width: 900px) { .mail-grid { grid-template-columns: minmax(0, 1fr); } .mail-list { max-height: 320px; } }
+
+/* Keep sticky titles usable on small screens and avoid trapping actions off-screen. */
+@media (max-width: 640px) {
+  .topbar { height: 56px; min-height: 56px; }
+  .page-head { top: 56px; align-items: flex-start; padding: 10px 8px; }
+  .page-head > div:first-child { flex-basis: 100%; }
+  .page-head > .row-wrap { width: 100%; justify-content: flex-start; gap: 8px; }
+  .page-head .btn { min-height: 36px; }
+  html { scroll-padding-top: 180px; }
+}
