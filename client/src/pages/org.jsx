@@ -184,11 +184,17 @@ export function Recurring() {
   const toast = useToast();
   const [selectedClient, setSelectedClient] = useState(null);
   const [creating, setCreating] = useState(null);
+  const [editingTemplate, setEditingTemplate] = useState(null);
   const [search, setSearch] = useState('');
   const availableClients = (clients.data || []).filter((c) => c.canManage).sort((a, b) => a.name.localeCompare(b.name));
   const shownClients = availableClients.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
   const selected = availableClients.find((c) => c._id === selectedClient);
   const templates = (data || []).filter((t) => t.client?._id === selectedClient);
+  const removeTemplate = async (t) => {
+    if (!window.confirm(`Delete recurring schedule “${t.title}”? Future tasks will stop being created. Existing task records will stay.`)) return;
+    try { await api(`/templates/${t._id}`, { method: 'DELETE' }); toast('Recurring schedule deleted'); reload(); }
+    catch (e) { toast(e.message); }
+  };
   const toggle = async (t) => {
     try {
       await api(`/templates/${t._id}`, { method: 'PATCH', body: { active: !t.active } });
@@ -235,7 +241,11 @@ export function Recurring() {
                     <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
                     <td><Avatars people={t.assignees} /></td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
-                    <td style={{ textAlign: 'right' }}><button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button></td>
+                    <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>
+                      <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Delete</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button>
+                    </div></td>
                   </tr>
                 ))}</tbody>
               </table></div>
@@ -243,6 +253,7 @@ export function Recurring() {
           </div>
         </>
       )}
+      {editingTemplate && <TaskForm key={editingTemplate._id} recurring template={editingTemplate} presetClient={selectedClient} onClose={() => setEditingTemplate(null)} onSaved={() => { reload(); setEditingTemplate(null); }} />}
       {creating && <TaskForm key={selectedClient + creating} recurring={creating === 'recurring'} presetClient={selectedClient} onClose={() => setCreating(null)} onSaved={() => { reload(); setCreating(null); }} />}
     </>
   );
