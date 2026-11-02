@@ -91,9 +91,91 @@ export function MyWork() {
   );
 }
 
+/* ---------- Client manager dashboard ---------- */
+
+function ManagerOverview() {
+  const clients = useApi('/clients');
+  const tasks = useApi('/tasks?scope=all');
+  const [clientId, setClientId] = useState('');
+  const [personId, setPersonId] = useState('');
+  const [statusFilter, setStatusFilter] = useState('pending');
+  const [openId, setOpenId] = useState(null);
+  const managed = (clients.data || []).filter((c) => c.canManage);
+  const managedIds = new Set(managed.map((c) => c._id));
+  const allowed = (tasks.data || []).filter((t) => managedIds.has(t.client?._id));
+  const scoped = clientId ? allowed.filter((t) => t.client?._id === clientId) : allowed;
+  const peopleMap = new Map();
+  for (const t of scoped) for (const p of (t.assignees || [])) {
+    if (!peopleMap.has(p._id)) peopleMap.set(p._id, { ...p, pending: 0, completed: 0, overdue: 0, today: 0 });
+    const row = peopleMap.get(p._id);
+    if (t.status === 'done') row.completed += 1;
+    else {
+      row.pending += 1;
+      const bucket = dueInfo(t).bucket;
+      if (bucket === 'overdue') row.overdue += 1;
+      if (bucket === 'today') row.today += 1;
+    }
+  }
+  const people = [...peopleMap.values()].sort((a, b) => b.overdue - a.overdue || b.pending - a.pending || a.name.localeCompare(b.name));
+  const personTasks = personId ? scoped.filter((t) => t.assignees.some((a) => a._id === personId)) : scoped;
+  const filtered = personTasks.filter((t) => {
+    if (statusFilter === 'completed') return t.status === 'done';
+    if (statusFilter === 'due') return t.status !== 'done' && ['today', 'overdue'].includes(dueInfo(t).bucket);
+    return t.status !== 'done';
+  });
+  const totalDone = scoped.filter((t) => t.status === 'done').length;
+  const totalPending = scoped.length - totalDone;
+  const overdueCount = scoped.filter((t) => t.status !== 'done' && dueInfo(t).bucket === 'overdue').length;
+  const todayCount = scoped.filter((t) => t.status !== 'done' && dueInfo(t).bucket === 'today').length;
+  const selectedName = people.find((p) => p._id === personId)?.name;
+
+  return <>
+    <PageHead title="Manager overview" subtitle="Track pending and completed work for the clients you manage." />
+    <div className="row-wrap" style={{ marginBottom: 20, gap: 12 }}>
+      <select className="select" aria-label="Select client" style={{ maxWidth: 360 }} value={clientId} onChange={(e) => { setClientId(e.target.value); setPersonId(''); }}>
+        <option value="">All my clients</option>
+        {managed.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+      </select>
+      <span className="small muted">{managed.length} managed clients</span>
+    </div>
+    <div className="grid grid-4" style={{ marginBottom: 20 }}>
+      <div className="card card-pad"><div className="small muted">Pending tasks</div><h2>{totalPending}</h2></div>
+      <div className="card card-pad"><div className="small muted">Due today</div><h2>{todayCount}</h2></div>
+      <div className="card card-pad"><div className="small muted">Overdue</div><h2>{overdueCount}</h2></div>
+      <div className="card card-pad"><div className="small muted">Completed tasks</div><h2>{totalDone}</h2></div>
+    </div>
+    <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card-head"><h3>Employee workload</h3><span className="small muted">Click a person to review their tasks</span></div>
+      {clients.loading || tasks.loading ? <Skeleton /> : people.length === 0 ? <Empty icon={Users} title="No tasks assigned for these clients" /> :
+        <div className="table-wrap"><table>
+          <thead><tr><th>Employee</th><th>Pending</th><th>Due today</th><th>Overdue</th><th>Completed</th></tr></thead>
+          <tbody>{people.map((p) => <tr key={p._id} className="clickable" style={personId === p._id ? { background: 'var(--primary-soft)' } : undefined} onClick={() => setPersonId((old) => old === p._id ? '' : p._id)}>
+            <td><span className="row"><Avatar name={p.name} size="sm"/>{p.name}</span></td>
+            <td className="mono">{p.pending}</td><td className="mono">{p.today}</td>
+            <td>{p.overdue ? <Badge cls="b-danger">{p.overdue}</Badge> : '0'}</td>
+            <td><Badge cls="b-success">{p.completed}</Badge></td>
+          </tr>)}</tbody>
+        </table></div>
+      }
+    </div>
+    <div className="row-wrap" style={{ marginBottom: 12 }}>
+      <h3>{selectedName ? `Tasks · ${selectedName}` : 'Client tasks'}</h3>
+      <div className="spacer" />
+      {personId && <button className="btn btn-ghost btn-sm" onClick={() => setPersonId('')}>All employees</button>}
+      <div className="chips">
+        {[['due','Due now'], ['pending','All pending'], ['completed','Completed']].map(([id, label]) =>
+          <button key={id} className={`chip ${statusFilter === id ? 'on' : ''}`} onClick={() => setStatusFilter(id)}>{label}</button>
+        )}
+      </div>
+    </div>
+    <TaskListCard tasks={filtered} loading={tasks.loading} showPeople={!personId} onOpen={(t) => setOpenId(t._id)} emptyTitle="No tasks for this selection" />
+    {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={tasks.reload} />}
+  </>;
+}
+
 /* ---------- Overview (Admin / Super Admin) ---------- */
 
-export function Overview() {
+function GlobalOverview() {
   const { can } = useAuth();
   const dash = useApi('/dashboard');
   const all = useApi('/tasks?scope=all&status=todo,in_progress,waiting');
@@ -176,6 +258,11 @@ export function Overview() {
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={() => { all.reload(); dash.reload(); }} />}
     </>
   );
+}
+
+export function Overview() {
+  const { can } = useAuth();
+  return can.super ? <GlobalOverview /> : <ManagerOverview />;
 }
 
 export function useGoto() { const nav = useNavigate(); return (p) => () => nav(p); }
