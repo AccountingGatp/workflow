@@ -37,6 +37,23 @@ export function useApi(path, deps = []) {
   return { ...state, reload: load };
 }
 
+/** Server-paginated task list; only one page is kept in the browser. */
+export function usePaginatedTasks(query, pageSize = 25) {
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [query]);
+  const params = query ? query + '&' : '';
+  const response = useApi(`/tasks?${params}page=${page}&pageSize=${pageSize}`, [query, page, pageSize]);
+  return {
+    ...response,
+    data: response.data?.items ?? null,
+    total: response.data?.total ?? 0,
+    totalPages: response.data?.totalPages ?? 0,
+    page,
+    pageSize,
+    setPage,
+  };
+}
+
 /* ---------- Auth ---------- */
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
