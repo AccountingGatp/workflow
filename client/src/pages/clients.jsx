@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Building2, Plus, Search, ArrowLeft, ShieldCheck, Trash2, Mail, Phone, Hash, UserPlus, Clock, X } from 'lucide-react';
-import { api, useApi, useAuth, useToast, fmtDate, toInputDate, ROLE_LABEL } from '../lib.jsx';
+import { api, useApi, usePaginatedTasks, useAuth, useToast, fmtDate, toInputDate, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
-import { TaskDrawer, TaskForm, TaskListCard, useTaskToggle } from '../tasks.jsx';
+import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
 
 const STATUS_CLS = { active: 'b-success', onboarding: 'b-info', inactive: '' };
 
@@ -78,12 +78,12 @@ function ClientForm({ onClose, onSaved }) {
 export function ClientDetail() {
   const { id } = useParams();
   const { data: c, error, reload } = useApi(`/clients/${id}`, [id]);
-  const tasks = useApi(`/tasks?scope=all&client=${id}`, [id]);
+  const [show, setShow] = useState('open');
+  const tasks = usePaginatedTasks(`scope=all&client=${id}&view=${show === 'done' ? 'completed' : show}`);
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [granting, setGranting] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const [show, setShow] = useState('open');
   const toast = useToast();
   const toggle = useTaskToggle(tasks.reload);
 
@@ -98,7 +98,6 @@ export function ClientDetail() {
     if (!confirm(`Stop ${a.name} managing ${c.name}? Existing tasks and history are kept.`)) return;
     try { await api(`/clients/${id}/assignments/${a.assignmentId}`, { method: 'DELETE' }); reload(); } catch (e) { toast(e.message); }
   };
-  const list = (tasks.data || []).filter((t) => (show === 'open' ? t.status !== 'done' : show === 'done' ? t.status === 'done' : true));
 
   return (
     <>
@@ -112,7 +111,8 @@ export function ClientDetail() {
             <h3>Work</h3><div className="spacer" />
             <div className="chips">{[['open', 'Open'], ['done', 'Completed'], ['all', 'All']].map(([k, l]) => <button key={k} className={`chip ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{l}</button>)}</div>
           </div>
-          <TaskListCard tasks={list} loading={tasks.loading} onOpen={(t) => setOpenId(t._id)} onToggle={toggle} emptyTitle="No tasks for this client" />
+          <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={(t) => setOpenId(t._id)} onToggle={toggle} emptyTitle="No tasks for this client" />
+          <TaskPagination {...tasks} />
         </div>
         <div className="stack" style={{ gap: 16 }}>
           <div className="card card-pad stack" style={{ gap: 10 }}>
