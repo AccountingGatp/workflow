@@ -194,6 +194,7 @@ export function TaskForm({ recurring = false, presetClient, template = null, onC
     </>}>
       <form id="task-form" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
+        {template && <div className="form-note">Saving changes replaces unstarted future occurrences with the updated schedule. Completed, in-progress, and past tasks are preserved.</div>}
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
         <Field label="Client"><select className="select" value={f.client} onChange={set('client')} required disabled={!!template}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
         {recurring ? (
