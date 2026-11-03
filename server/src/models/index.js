@@ -128,6 +128,8 @@ const taskSchema = new Schema({
 }, opts);
 taskSchema.index({ template: 1, dueDate: 1 }, { unique: true, partialFilterExpression: { template: { $exists: true } } });
 taskSchema.index({ assignees: 1, dueDate: 1 });
+taskSchema.index({ client: 1, dueDate: 1, _id: 1 });
+taskSchema.index({ client: 1, status: 1, completedAt: -1 });
 export const Task = model('Task', taskSchema);
 
 const auditSchema = new Schema({
