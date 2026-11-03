@@ -248,6 +248,18 @@ export function TaskForm({ recurring = false, presetClient, template = null, onC
   );
 }
 
+export function TaskPagination({ page, totalPages, total, pageSize, setPage }) {
+  if (totalPages <= 1) return null;
+  return <div className="row-wrap" style={{ justifyContent: 'space-between', marginTop: 14, marginBottom: 12, gap: 12 }}>
+    <span className="small muted">Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} tasks</span>
+    <div className="row" style={{ gap: 8 }}>
+      <button className="btn btn-outline btn-sm" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>Previous</button>
+      <span className="small mono">Page {page} / {totalPages}</span>
+      <button className="btn btn-outline btn-sm" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>Next</button>
+    </div>
+  </div>;
+}
+
 export function TaskListCard({ tasks, loading, onOpen, onToggle, groups = true, showPeople, emptyTitle = 'Nothing here' }) {
   if (loading && !tasks) return <div className="card"><Skeleton /></div>;
   if (!tasks?.length) return <div className="card"><Empty icon={ListChecks} title={emptyTitle} /></div>;
