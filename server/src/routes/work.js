@@ -55,6 +55,11 @@ const taskFilters = async (req, dates, weeklyMonthly) => {
   const { scope = 'mine', status, client, team, assignee, from, to, view = 'all', q } = req.query;
   const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly)];
   if (scope === 'mine') clauses.push({ assignees: req.user._id });
+  if (scope === 'managed') {
+    if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
+    const managed = await managedClientIds(req.user);
+    if (managed !== null) clauses.push({ client: { $in: managed } });
+  }
   if (status) clauses.push({ status: { $in: String(status).split(',') } });
   if (client) {
     if (!mongoose.isValidObjectId(client)) throw new HttpError(400, 'Invalid client');
