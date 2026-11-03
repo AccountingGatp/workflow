@@ -191,8 +191,8 @@ export function Recurring() {
   const selected = availableClients.find((c) => c._id === selectedClient);
   const templates = (data || []).filter((t) => t.client?._id === selectedClient);
   const removeTemplate = async (t) => {
-    if (!window.confirm(`Delete recurring schedule “${t.title}”? Future tasks will stop being created. Existing task records will stay.`)) return;
-    try { await api(`/templates/${t._id}`, { method: 'DELETE' }); toast('Recurring schedule deleted'); reload(); }
+    if (!window.confirm(`Cancel the recurring schedule “${t.title}”? Unstarted future occurrences will be removed. Completed, in-progress and historical tasks will be kept.`)) return;
+    try { await api(`/templates/${t._id}`, { method: 'DELETE' }); toast('Recurring schedule cancelled; future unstarted tasks removed'); reload(); }
     catch (e) { toast(e.message); }
   };
   const toggle = async (t) => {
@@ -242,8 +242,8 @@ export function Recurring() {
                     <td><Avatars people={t.assignees} /></td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
                     <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>
-                      <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit</button>
-                      <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Delete</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Cancel future occurrences</button>
                       <button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button>
                     </div></td>
                   </tr>
