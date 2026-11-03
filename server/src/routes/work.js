@@ -85,7 +85,7 @@ r.get('/tasks', ah(async (req, res) => {
   const filter = await taskFilters(req, dates, weeklyMonthly);
   const [total, items] = await Promise.all([
     Task.countDocuments(filter),
-    populateTask(Task.find(filter).sort({ dueDate: 1, _id: 1 }).skip((page - 1) * pageSize).limit(pageSize)).lean(),
+    populateTask(Task.find(filter).sort(['completed', 'done'].includes(req.query.view) ? { completedAt: -1, _id: -1 } : { dueDate: 1, _id: 1 }).skip((page - 1) * pageSize).limit(pageSize)).lean(),
   ]);
   res.json({ items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
 }));
