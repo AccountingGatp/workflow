@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
 /* ---------- API ---------- */
 const TOKEN_KEY = 'ka.token';
@@ -26,14 +26,25 @@ export async function api(path, { method = 'GET', body } = {}) {
 /** Tiny data hook: { data, error, loading, reload }. */
 export function useApi(path, deps = []) {
   const [state, setState] = useState({ data: null, error: null, loading: true });
+  const requestId = useRef(0);
   const load = useCallback(() => {
-    if (!path) return;
-    setState((s) => ({ ...s, loading: true }));
-    api(path).then((data) => setState({ data, error: null, loading: false }))
-      .catch((error) => setState({ data: null, error, loading: false }));
+    const current = ++requestId.current;
+    if (!path) {
+      setState({ data: null, error: null, loading: false });
+      return;
+    }
+    setState(s => ({ ...s, loading: true }));
+    api(path).then(data => {
+      if (requestId.current === current) setState({ data, error: null, loading: false });
+    }).catch(error => {
+      if (requestId.current === current) setState({ data: null, error, loading: false });
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, ...deps]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    return () => { requestId.current++; };
+  }, [load]);
   return { ...state, reload: load };
 }
 
