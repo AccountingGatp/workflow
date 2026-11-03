@@ -152,15 +152,12 @@ function ManagerOverview() {
 function GlobalOverview() {
   const { can } = useAuth();
   const dash = useApi('/dashboard');
-  const all = useApi('/tasks?scope=all&status=todo,in_progress,waiting');
   const [openId, setOpenId] = useState(null);
   const [person, setPerson] = useState('');
+  const all = usePaginatedTasks(`scope=all&view=${person ? 'due' : 'overdue'}&assignee=${person}`);
   const d = dash.data;
   const statusTotal = (d?.byStatus || []).reduce((a, s) => a + s.n, 0) || 1;
   const statusColor = { todo: 'var(--text-3)', in_progress: 'var(--info)', waiting: 'var(--warning)', done: 'var(--success)' };
-  const actionable = (all.data || []).filter((t) => ['today', 'overdue'].includes(dueInfo(t).bucket));
-  const overdue = actionable.filter((t) => dueInfo(t).bucket === 'overdue');
-  const shown = person ? actionable.filter((t) => t.assignees.some((a) => a._id === person)) : overdue;
 
   return (
     <>
@@ -194,7 +191,8 @@ function GlobalOverview() {
                 <h3>{person ? `Due now · ${d.byPerson.find((p) => p._id === person)?.name}` : 'Overdue work'}</h3>
                 {person && <button className="btn btn-ghost btn-sm" onClick={() => setPerson('')}>Show overdue</button>}
               </div>
-              <TaskListCard tasks={shown} loading={all.loading} groups={!!person} onOpen={(t) => setOpenId(t._id)} emptyTitle={person ? "No tasks due today or overdue" : "Nothing overdue"} />
+              <TaskListCard tasks={all.data} loading={all.loading} groups={!!person} onOpen={(t) => setOpenId(t._id)} emptyTitle={person ? "No tasks due today or overdue" : "Nothing overdue"} />
+              <TaskPagination {...all} />
             </div>
           </div>
           <div className="stack" style={{ gap: 16 }}>
