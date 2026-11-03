@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import mongoose from 'mongoose';
 import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
@@ -30,17 +31,100 @@ async function assertAssignable(actor, clientId, userIds = []) {
 
 /* ---------- Tasks ---------- */
 
+const dayBounds = () => {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  const end = new Date(start); end.setHours(23, 59, 59, 999);
+  const week = new Date(end); week.setDate(week.getDate() + 7);
+  return { start, end, week };
+};
+const upcomingTemplateIds = async () => TaskTemplate.find({ frequency: { $in: ['weekly', 'monthly'] } }).distinct('_id');
+const viewFilter = (view, dates, weeklyMonthly) => {
+  const { start, end, week } = dates;
+  const nextWeek = { dueDate: { $gt: end, $lte: week }, template: { $in: weeklyMonthly }, status: { $ne: 'done' } };
+  if (view === 'today') return { dueDate: { $gte: start, $lte: end }, status: { $ne: 'done' } };
+  if (view === 'overdue') return { dueDate: { $lt: start }, status: { $ne: 'done' } };
+  if (view === 'upcoming') return nextWeek;
+  if (view === 'due') return { dueDate: { $lte: end }, status: { $ne: 'done' } };
+  if (view === 'pending' || view === 'active') return { $or: [{ dueDate: { $lte: end }, status: { $ne: 'done' } }, nextWeek] };
+  if (view === 'completed') return { status: 'done' };
+  if (view === 'done') return { status: 'done', completedAt: { $gte: new Date(Date.now() - 7 * 864e5) } };
+  if (view === 'open') return { status: { $ne: 'done' } };
+  return {};
+};
+const taskFilters = async (req, dates, weeklyMonthly) => {
+  const { scope = 'mine', status, client, team, assignee, from, to, view = 'all', q } = req.query;
+  const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly)];
+  if (scope === 'mine') clauses.push({ assignees: req.user._id });
+  if (status) clauses.push({ status: { $in: String(status).split(',') } });
+  if (client) {
+    if (!mongoose.isValidObjectId(client)) throw new HttpError(400, 'Invalid client');
+    clauses.push({ client });
+  }
+  if (team) clauses.push({ team });
+  if (assignee) {
+    if (!mongoose.isValidObjectId(assignee)) throw new HttpError(400, 'Invalid assignee');
+    clauses.push({ assignees: assignee });
+  }
+  if (from || to) clauses.push({ dueDate: { ...(from && { $gte: new Date(from) }), ...(to && { $lte: new Date(to) }) } });
+  if (q && String(q).trim()) clauses.push({ title: { $regex: String(q).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } });
+  return { $and: clauses };
+};
+
+/* Lists are paginated in MongoDB; counts never depend on the number of tasks returned. */
 r.get('/tasks', ah(async (req, res) => {
-  const { scope = 'mine', status, client, team, assignee, from, to } = req.query;
-  const filter = { $and: [await taskScope(req.user)] };
-  if (scope === 'mine') filter.$and.push({ assignees: req.user._id });
-  if (status) filter.$and.push({ status: { $in: String(status).split(',') } });
-  if (client) filter.$and.push({ client });
-  if (team) filter.$and.push({ team });
-  if (assignee) filter.$and.push({ assignees: assignee });
-  if (from || to) filter.$and.push({ dueDate: { ...(from && { $gte: new Date(from) }), ...(to && { $lte: new Date(to) }) } });
-  const tasks = await populateTask(Task.find(filter).sort({ dueDate: 1 }).limit(500)).lean();
-  res.json(tasks);
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 25));
+  if (page > 100000) throw new HttpError(400, 'Page out of range');
+  const dates = dayBounds();
+  const weeklyMonthly = await upcomingTemplateIds();
+  const filter = await taskFilters(req, dates, weeklyMonthly);
+  const [total, items] = await Promise.all([
+    Task.countDocuments(filter),
+    populateTask(Task.find(filter).sort({ dueDate: 1, _id: 1 }).skip((page - 1) * pageSize).limit(pageSize)).lean(),
+  ]);
+  res.json({ items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
+}));
+
+r.get('/task-summary', ah(async (req, res) => {
+  const dates = dayBounds();
+  const weeklyMonthly = await upcomingTemplateIds();
+  const count = async (view) => Task.countDocuments(await taskFilters({ ...req, query: { ...req.query, view } }, dates, weeklyMonthly));
+  const [today, overdue, upcoming, done, pending] = await Promise.all(['today', 'overdue', 'upcoming', 'done', 'pending'].map(count));
+  res.json({ today, overdue, upcoming, done, pending });
+}));
+
+/* Manager totals aggregate the entire managed portfolio, not a 500-task sample. */
+r.get('/manager-workload', ah(async (req, res) => {
+  if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
+  const managed = await managedClientIds(req.user);
+  const clientId = req.query.client;
+  if (clientId && (!mongoose.isValidObjectId(clientId) || !(await canManageClient(req.user, clientId)))) throw new HttpError(403, 'Client unavailable');
+  const ids = clientId ? [clientId] : managed;
+  const match = ids === null ? {} : { client: { $in: ids.map(id => new mongoose.Types.ObjectId(String(id))) } };
+  const { start, end } = dayBounds();
+  const [report] = await Task.aggregate([
+    { $match: match },
+    { $facet: {
+      totals: [{ $group: {
+        _id: null, pending: { $sum: { $cond: [{ $ne: ['$status', 'done'] }, 1, 0] } },
+        completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+        overdue: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $lt: ['$dueDate', start] }] }, 1, 0] } },
+        today: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $gte: ['$dueDate', start] }, { $lte: ['$dueDate', end] }] }, 1, 0] } },
+      } }],
+      people: [
+        { $unwind: '$assignees' }, { $group: {
+          _id: '$assignees',
+          pending: { $sum: { $cond: [{ $ne: ['$status', 'done'] }, 1, 0] } },
+          completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
+          overdue: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $lt: ['$dueDate', start] }] }, 1, 0] } },
+          today: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $gte: ['$dueDate', start] }, { $lte: ['$dueDate', end] }] }, 1, 0] } },
+        } }, { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'person' } },
+        { $project: { pending: 1, completed: 1, overdue: 1, today: 1, name: { $first: '$person.name' } } },
+        { $sort: { overdue: -1, pending: -1 } }
+      ],
+    } },
+  ]);
+  res.json({ totals: report.totals[0] || { pending: 0, completed: 0, overdue: 0, today: 0 }, people: report.people });
 }));
 
 r.get('/tasks/:id', ah(async (req, res) => {
