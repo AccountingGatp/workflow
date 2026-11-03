@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CalendarClock, AlertTriangle, CalendarRange, Plus, Search, Users, Clock, CheckCircle2 } from 'lucide-react';
-import { useApi, useAuth, dueInfo, STATUS, fmtDate } from '../lib.jsx';
+import { useApi, usePaginatedTasks, useAuth, dueInfo, STATUS, fmtDate } from '../lib.jsx';
 import { Avatar, Badge, Empty, PageHead, Skeleton, TeamTag } from '../ui.jsx';
-import { TaskDrawer, TaskForm, TaskListCard, useTaskToggle } from '../tasks.jsx';
+import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
 
 function Stat({ icon: Icon, label, value, tone, selected, onClick }) {
   return (
@@ -33,68 +33,53 @@ const upcomingWeekTask = (t) => {
 
 export function MyWork() {
   const { user, can } = useAuth();
-  // TLs land on their team's work; everyone can switch to just their own tasks
   const [view, setView] = useState(() => (can.manage ? 'clients' : 'mine'));
   const [bucket, setBucket] = useState('today');
   const [client, setClient] = useState('');
   const [q, setQ] = useState('');
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
-  const tasks = useApi(`/tasks?scope=${view === 'clients' ? 'all' : 'mine'}`, [view]);
-  const reload = () => tasks.reload();
+  const clients = useApi('/clients');
+  const scope = view === 'clients' ? 'all' : 'mine';
+  const query = `scope=${scope}&view=${bucket === 'all' ? 'active' : bucket}&client=${client}&q=${encodeURIComponent(q)}`;
+  const tasks = usePaginatedTasks(query);
+  const summary = useApi(`/task-summary?scope=${scope}&client=${client}&q=${encodeURIComponent(q)}`, [scope, client, q]);
+  const reload = () => { tasks.reload(); summary.reload(); };
   const toggle = useTaskToggle(reload);
-
-  const clients = useMemo(() => {
-    const m = new Map(); (tasks.data || []).forEach((t) => t.client && m.set(t.client._id, t.client));
-    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [tasks.data]);
-
-  const filtered = (tasks.data || []).filter((t) => {
-    const b = dueInfo(t).bucket;
-    // Completed work stays visible for a week so nobody wonders where it went
-    if (bucket === 'active' && b === 'done' && !recentlyDone(t)) return false;
-    if (b === 'upcoming' && !upcomingWeekTask(t)) return false;
-    if (bucket !== 'active' && bucket !== 'all' && b !== bucket) return false;
-    if (client && t.client?._id !== client) return false;
-    if (q && !`${t.title} ${t.client?.name}`.toLowerCase().includes(q.toLowerCase())) return false;
-    return true;
-  });
-  const count = (b) => (tasks.data ? tasks.data.filter((t) => dueInfo(t).bucket === b && (b !== 'upcoming' || upcomingWeekTask(t)) && (!client || t.client?._id === client)).length : undefined);
-  const m = { dueToday: count('today'), overdue: count('overdue'), upcoming: count('upcoming'), done: (tasks.data || []).filter(recentlyDone).length };
+  const counts = summary.data || {};
   const hour = new Date().getHours();
-  const pick = (b) => setBucket((cur) => (cur === b ? 'active' : b));
+  const pick = (b) => setBucket((cur) => cur === b ? 'active' : b);
 
   return (
     <>
       <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' · ').pop().split(' ')[0]}`}
-        subtitle={view === 'clients' ? 'Tasks due today and weekly or monthly work coming up in the next 7 days.' : 'Your tasks for today and weekly or monthly work due in the next 7 days.'}>
-        {can.manage && (
-          <div className="chips" role="tablist" aria-label="Whose work">
-            <button className={`chip ${view === 'clients' ? 'on' : ''}`} role="tab" aria-selected={view === 'clients'} onClick={() => setView('clients')}><Users size={16} />Client work</button>
-            <button className={`chip ${view === 'mine' ? 'on' : ''}`} role="tab" aria-selected={view === 'mine'} onClick={() => setView('mine')}>Assigned to me</button>
-          </div>
-        )}
+        subtitle={view === 'clients' ? 'Work across your clients, prioritized by due date.' : 'Your tasks for today and weekly/monthly tasks due within 7 days.'}>
+        {can.manage && <div className="chips" role="tablist" aria-label="Whose work">
+          <button className={`chip ${view === 'clients' ? 'on' : ''}`} role="tab" aria-selected={view === 'clients'} onClick={() => setView('clients')}><Users size={16} />Client work</button>
+          <button className={`chip ${view === 'mine' ? 'on' : ''}`} role="tab" aria-selected={view === 'mine'} onClick={() => setView('mine')}>Assigned to me</button>
+        </div>}
         {can.manage && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
       <div className="grid grid-4" style={{ marginBottom: 24 }}>
-        <Stat icon={CalendarClock} label="Due today" value={m?.dueToday} tone="warning" selected={bucket === 'today'} onClick={() => pick('today')} />
-        <Stat icon={AlertTriangle} label="Overdue" value={m?.overdue} tone="danger" selected={bucket === 'overdue'} onClick={() => pick('overdue')} />
-        <Stat icon={CalendarRange} label="Weekly / monthly · next 7 days" value={m?.upcoming} tone="primary" selected={bucket === 'upcoming'} onClick={() => pick('upcoming')} />
-        <Stat icon={CheckCircle2} label={`Done · last ${RECENT_DONE_DAYS} days`} value={tasks.data ? m.done : undefined} tone="success" selected={bucket === 'done'} onClick={() => pick('done')} />
+        <Stat icon={CalendarClock} label="Due today" value={summary.data ? counts.today : undefined} tone="warning" selected={bucket === 'today'} onClick={() => pick('today')} />
+        <Stat icon={AlertTriangle} label="Overdue" value={summary.data ? counts.overdue : undefined} tone="danger" selected={bucket === 'overdue'} onClick={() => pick('overdue')} />
+        <Stat icon={CalendarRange} label="Weekly / monthly · next 7 days" value={summary.data ? counts.upcoming : undefined} tone="primary" selected={bucket === 'upcoming'} onClick={() => pick('upcoming')} />
+        <Stat icon={CheckCircle2} label="Completed · last 7 days" value={summary.data ? counts.done : undefined} tone="success" selected={bucket === 'done'} onClick={() => pick('done')} />
       </div>
       <div className="row-wrap" style={{ marginBottom: 16 }}>
-        <select className="select" style={{ maxWidth: 280 }} value={client} onChange={(e) => setClient(e.target.value)} aria-label="Filter by client">
-          <option value="">All clients</option>{clients.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}
+        <select className="select" style={{ maxWidth: 280 }} value={client} onChange={e => setClient(e.target.value)} aria-label="Filter by client">
+          <option value="">All clients</option>{(clients.data || []).map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
         </select>
         <div className="spacer" />
-        <select className="select" style={{ width: 'auto', minHeight: 40, borderRadius: 999 }} value={bucket} onChange={(e) => setBucket(e.target.value)} aria-label="Show">
-          <option value="today">Due today</option><option value="active">All actionable work</option><option value="overdue">Overdue</option>
-          <option value="upcoming">Weekly / monthly · next 7 days</option><option value="done">Completed</option><option value="all">All</option>
+        <select className="select" style={{ width: 'auto', minHeight: 40, borderRadius: 999 }} value={bucket} onChange={e => setBucket(e.target.value)} aria-label="Show">
+          <option value="today">Due today</option><option value="overdue">Overdue</option>
+          <option value="upcoming">Weekly / monthly · next 7 days</option><option value="done">Recently completed</option>
+          <option value="active">All actionable work</option>
         </select>
-        <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search tasks or clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search tasks" /></div>
+        <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search tasks" value={q} onChange={e => setQ(e.target.value)} aria-label="Search tasks" /></div>
       </div>
-      <TaskListCard tasks={filtered} loading={tasks.loading} showPeople={view === 'clients'} onOpen={(t) => setOpenId(t._id)} onToggle={toggle}
-        emptyTitle={bucket === 'overdue' ? 'Nothing overdue — nice work' : 'No tasks match'} />
+      <TaskListCard tasks={tasks.data} loading={tasks.loading} showPeople={view === 'clients'} onOpen={t => setOpenId(t._id)} onToggle={toggle} emptyTitle="No tasks match" />
+      <TaskPagination {...tasks} />
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
       {creating && <TaskForm onClose={() => setCreating(false)} onSaved={reload} />}
     </>
