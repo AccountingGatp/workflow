@@ -235,20 +235,32 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
   tpl.assignees = assignees;
   tpl.owner = assignees.includes(b.owner) ? b.owner : assignees[0];
   await tpl.save();
-  // Existing occurrences are retained as historical tasks; new ones use revised values.
-  await generateRecurringTasks(tpl._id);
-  audit(req.user, 'template.edit', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `Edited recurring task “${tpl.title}”` });
-  res.json(tpl);
+  // Change upcoming, untouched occurrences to the new schedule while preserving all
+  // completed, in-progress, waiting, overdue and partially checked tasks.
+  const now = new Date();
+  const cleared = await Task.deleteMany({
+    template: tpl._id, dueDate: { $gt: now }, status: 'todo',
+    'checklist.done': { $ne: true },
+  });
+  const created = tpl.active ? await generateRecurringTasks(tpl._id) : 0;
+  audit(req.user, 'template.edit', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `Edited recurring task “${tpl.title}”: ${cleared.deletedCount} future untouched occurrences replaced, ${created} scheduled` });
+  res.json({ template: tpl, cleared: cleared.deletedCount, created });
 }));
 
 r.delete('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
   if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can delete recurring tasks');
-  // Stop future occurrences while keeping already generated tasks and their audit history.
+  // Cancel only future untouched occurrences. Never erase finished work or
+  // tasks that someone has already started or partially checked off.
+  const cancelled = await Task.deleteMany({
+    template: tpl._id, dueDate: { $gt: new Date() }, status: 'todo',
+    'checklist.done': { $ne: true },
+  });
   await tpl.deleteOne();
-  audit(req.user, 'template.delete', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `Deleted recurring schedule “${tpl.title}”; existing tasks retained` });
-  res.json({ ok: true });
+  audit(req.user, 'template.delete', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client,
+    summary: `Deleted recurring schedule “${tpl.title}”; cancelled ${cancelled.deletedCount} future untouched occurrences, retained active/history` });
+  res.json({ ok: true, cancelled: cancelled.deletedCount });
 }));
 
 /* ---------- Dashboard / workload ---------- */
