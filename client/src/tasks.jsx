@@ -20,7 +20,7 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
           {task.title}{task.template && <Repeat size={12} style={{ marginLeft: 6, verticalAlign: -1, color: 'var(--text-3)' }} aria-label="Recurring" />}
         </div>
         <div className="li-meta">
-          <span>{task.client?.name}</span>
+          <span>{task.client?.name}{task.project?.name ? ' · ' + task.project.name : ''}</span>
           {task.checklist?.length > 0 && <><span>·</span><span className="mono">{doneCount}/{task.checklist.length} steps</span></>}
           {showPeople && <><span>·</span><span>{task.assignees.map((a) => a.name).join(', ') || 'Unassigned'}</span></>}
           {task.status === 'done' && task.completedBy && <><span>·</span><span style={{ color: 'var(--success)' }}>Done by {task.completedBy.name}</span></>}
@@ -82,6 +82,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
 
               <div className="card" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '12px 16px', alignItems: 'center' }}>
                 <span className="muted row"><Building2 size={16} />Client</span><strong>{task.client.name}</strong>
+                {task.project && <><span className="muted row">Project</span><strong>{task.project.name}</strong></>}
                 <span className="muted row"><Calendar size={16} />Due</span><span>{fmtDate(task.dueDate)}</span>
                 <span className="muted row">Assigned</span>
                 <div className="row-wrap">
@@ -151,16 +152,18 @@ export function TaskDrawer({ id, onClose, onChanged }) {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export function TaskForm({ recurring = false, presetClient, template = null, onClose, onSaved }) {
+export function TaskForm({ recurring = false, presetClient, presetProject, template = null, onClose, onSaved }) {
   const clients = useApi('/clients');
   const users = useApi('/users');
   const toast = useToast();
   const [f, setF] = useState({
-    title: template?.title || '', client: presetClient || template?.client?._id || '', assignees: template?.assignees?.map(a => a._id || a) || [], owner: template?.owner?._id || template?.owner || '', dueDate: toInputDate(new Date()),
+    title: template?.title || '', client: presetClient || template?.client?._id || '', project: presetProject || template?.project?._id || '', assignees: template?.assignees?.map(a => a._id || a) || [], owner: template?.owner?._id || template?.owner || '', dueDate: toInputDate(new Date()),
     priority: template?.priority || 'normal', sop: template?.sop || '', checklist: template?.checklist?.length ? [...template.checklist] : [''], frequency: template?.frequency || 'weekly', weekday: template?.weekday ?? 1, monthDay: template?.monthDay ?? 1,
   });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
+  const projectOptions = useApi(f.client ? `/clients/${f.client}/projects` : null, [f.client]);
+  const projects = projectOptions.data || [];
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e?.target ? e.target.value : e }));
 
   const manageable = (clients.data || []).filter((c) => c.canManage);
@@ -174,7 +177,7 @@ export function TaskForm({ recurring = false, presetClient, template = null, onC
   const submit = async (e) => {
     e.preventDefault(); setError(null); setSaving(true);
     const body = {
-      title: f.title, client: f.client, assignees: f.assignees, owner: f.owner || undefined,
+      title: f.title, client: f.client, project: f.project || undefined, assignees: f.assignees, owner: f.owner || undefined,
       priority: f.priority, sop: f.sop, checklist: f.checklist.map((s) => s.trim()).filter(Boolean),
       ...(recurring
         ? { frequency: f.frequency, weekday: Number(f.weekday), monthDay: Number(f.monthDay) }
@@ -190,13 +193,16 @@ export function TaskForm({ recurring = false, presetClient, template = null, onC
   return (
     <Modal wide title={template ? 'Edit recurring task' : recurring ? 'Schedule recurring work' : 'New task'} onClose={onClose} footer={<>
       <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-      <button className="btn btn-primary" form="task-form" disabled={saving || !f.title || !f.client}>{saving ? 'Saving…' : template ? 'Save changes' : recurring ? 'Schedule' : 'Create task'}</button>
+      <button className="btn btn-primary" form="task-form" disabled={saving || !f.title || !f.client || (projects.length > 0 && !f.project)}>{saving ? 'Saving…' : template ? 'Save changes' : recurring ? 'Schedule' : 'Create task'}</button>
     </>}>
       <form id="task-form" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
         {template && <div className="form-note">Saving changes replaces unstarted future occurrences with the updated schedule. Completed, in-progress, and past tasks are preserved.</div>}
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
-        <Field label="Client"><select className="select" value={f.client} onChange={set('client')} required disabled={!!template}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
+        <Field label="Client"><select className="select" value={f.client} onChange={e => setF(v => ({ ...v, client: e.target.value, project: '' }))} required disabled={!!template || !!presetProject}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
+        {projects.length > 0 && <Field label="Project" hint="Tasks are organized separately under each project."><select className="select" required value={f.project} onChange={set('project')} disabled={!!presetProject}>
+          <option value="">Select project…</option>{projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+        </select></Field>}
         {recurring ? (
           <div className="grid grid-2">
             <Field label="Repeats">
