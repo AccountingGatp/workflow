@@ -7,10 +7,12 @@ import authRoutes from './routes/auth.js';
 import peopleRoutes from './routes/people.js';
 import clientRoutes from './routes/clients.js';
 import workRoutes from './routes/work.js';
+import projectRoutes from './routes/projects.js';
 import mailRoutes, { mailPublic } from './routes/mail.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
 import { seedIfEmpty } from './seed.js';
+import { seedRepublicProjects } from './seed-projects.js';
 import { ensureActivityRetention } from './models/index.js';
 
 async function connect() {
@@ -27,6 +29,7 @@ async function connect() {
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
+  await seedRepublicProjects();
 }
 
 // Connect once per process; serverless invocations reuse the same connection while warm.
@@ -50,7 +53,7 @@ app.get('/api/cron/mail', cronAuth, async (_req, res) => { await syncAllAccounts
 
 app.use('/api/auth', authRoutes);
 app.use('/api', mailPublic);
-app.use('/api', requireAuth, peopleRoutes, clientRoutes, workRoutes, mailRoutes);
+app.use('/api', requireAuth, peopleRoutes, clientRoutes, projectRoutes, workRoutes, mailRoutes);
 
 export function handleErrors(app) {
   app.use((err, _req, res, _next) => {
