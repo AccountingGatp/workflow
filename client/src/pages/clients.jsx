@@ -148,7 +148,6 @@ export function ClientDetail() {
               </>}
             </div>
           )}
-        </div>
       </div>
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="row-wrap" style={{ justifyContent: 'space-between' }}>
