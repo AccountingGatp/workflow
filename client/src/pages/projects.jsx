@@ -104,9 +104,9 @@ export function ClientProjects() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   const [creatingTask, setCreatingTask] = useState(null);
-  const [workView, setWorkView] = useState('open');
+  const [workView, setWorkView] = useState('due');
   const [openTask, setOpenTask] = useState(null);
-  const tasks = usePaginatedTasks(`scope=all&client=${id}&project=${projectId || 'unassigned'}&view=${workView === 'done' ? 'completed' : workView}`);
+  const tasks = usePaginatedTasks(`scope=all&client=${id}&project=${projectId || 'unassigned'}&view=${workView}`);
   const toggleTask = useTaskToggle(tasks.reload);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
@@ -158,7 +158,7 @@ export function ClientProjects() {
       <section style={{ marginBottom: 20 }}>
         <div className="row-wrap" style={{ marginBottom: 12 }}>
           <h3>Project tasks</h3><div className="spacer" />
-          <div className="chips">{[['open','Open'],['done','Completed'],['all','All']].map(([v,l]) =>
+          <div className="chips">{[['due','Due now'],['upcoming','Weekly / monthly · next 7 days'],['completed','Completed'],['open','All pending']].map(([v,l]) =>
             <button key={v} className={`chip ${workView === v ? 'on' : ''}`} onClick={() => setWorkView(v)}>{l}</button>
           )}</div>
         </div>
