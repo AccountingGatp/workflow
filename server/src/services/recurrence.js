@@ -6,7 +6,7 @@ const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); retur
 
 function matches(tpl, day) {
   if (tpl.frequency === 'daily') return day.getDay() !== 0 && day.getDay() !== 6; // working days
-  if (tpl.frequency === 'weekly') return day.getDay() === (tpl.weekday ?? 1);
+  if (tpl.frequency === 'weekly') return Array.isArray(tpl.weekdays) && tpl.weekdays.length > 0 ? tpl.weekdays.includes(day.getDay()) : day.getDay() === (tpl.weekday ?? 1);
   if (tpl.frequency === 'monthly') return day.getDate() === (tpl.monthDay ?? 1);
   return false;
 }
