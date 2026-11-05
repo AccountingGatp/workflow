@@ -161,7 +161,7 @@ export async function ensureActivityRetention() {
   if (!existing) {
     await collection.createIndex({ createdAt: 1 }, { expireAfterSeconds: ACTIVITY_RETENTION_SECONDS });
   } else if (existing.expireAfterSeconds !== ACTIVITY_RETENTION_SECONDS) {
-    await collection.db.command({ collMod: collection.collectionName, index: { name: existing.name, expireAfterSeconds: ACTIVITY_RETENTION_SECONDS } });
+    await mongoose.connection.db.command({ collMod: collection.collectionName, index: { name: existing.name, expireAfterSeconds: ACTIVITY_RETENTION_SECONDS } });
   }
 }
 
