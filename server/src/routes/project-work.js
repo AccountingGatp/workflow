@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Client, ClientProject, ProjectWorkItem } from '../models/index.js';
+import { Client, ClientProject, ProjectWorkItem, User } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import { canSeeClient, canManageClient, audit } from '../services/access.js';
 
@@ -33,7 +33,19 @@ function payload(body) {
   for (const k of allowed) if (body[k] !== undefined) result[k] = String(body[k] || '').trim().slice(0, 3000);
   if (body.automated !== undefined) result.automated = !!body.automated;
   if (body.links !== undefined) result.links = safeLinks(body.links);
+  if (body.responsibleUser !== undefined) {
+    if (body.responsibleUser && !mongoose.isValidObjectId(body.responsibleUser)) throw new HttpError(400, 'Invalid employee');
+    result.responsibleUser = body.responsibleUser || null;
+  }
   return result;
+}
+async function resolveAssignedEmployee(data) {
+  if (data.responsibleUser) {
+    const person = await User.findOne({ _id: data.responsibleUser, active: true, deletedAt: null }).select('name');
+    if (!person) throw new HttpError(400, 'Select an active employee');
+    data.responsible = person.name;
+  }
+  return data;
 }
 r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
   await authorized(req);
@@ -44,7 +56,7 @@ r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) =>
 r.post('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
   const project = await authorized(req, true);
   const doc = await ProjectWorkItem.create({
-    ...payload(req.body), client: project.client, project: project._id,
+    ...await resolveAssignedEmployee(payload(req.body)), client: project.client, project: project._id,
   });
   audit(req.user, 'project.work.create', { entity:'ProjectWorkItem', entityId:doc._id, client:project.client, summary:'Added project work item ' + doc.title });
   res.status(201).json(doc);
@@ -53,7 +65,7 @@ r.patch('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,r
   const project = await authorized(req, true);
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'Work item not found');
   const doc = await ProjectWorkItem.findOneAndUpdate({ _id: req.params.id, project:project._id },
-    { $set:payload(req.body) }, { new:true, runValidators:true });
+    { $set: await resolveAssignedEmployee(payload(req.body)) }, { new:true, runValidators:true });
   if (!doc) throw new HttpError(404, 'Work item not found');
   audit(req.user, 'project.work.update', { entity:'ProjectWorkItem', entityId:doc._id, client:project.client, summary:'Updated project work item ' + doc.title });
   res.json(doc);
