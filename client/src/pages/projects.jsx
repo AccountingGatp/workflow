@@ -184,6 +184,8 @@ export function ClientProjects() {
         {p.notes && group('Other notes', <p style={{ whiteSpace: 'pre-wrap' }}>{p.notes}</p>)}
       </div>
     </>}
+    {openTask && <TaskDrawer id={openTask} onClose={() => setOpenTask(null)} onChanged={tasks.reload} />}
+    {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId} recurring={creatingTask === 'recurring'} onClose={() => setCreatingTask(null)} onSaved={() => { tasks.reload(); setCreatingTask(null); }} />}
     {adding && <Modal title="New client project" onClose={() => setAdding(false)} footer={<>
       <button className="btn btn-ghost" onClick={() => setAdding(false)}>Cancel</button><button className="btn btn-primary" form="new-project" disabled={!newName.trim()}>Create project</button>
     </>}><form id="new-project" className="stack" onSubmit={create}>
