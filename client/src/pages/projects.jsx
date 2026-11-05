@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck } from 'lucide-react';
-import { api, useApi, useToast } from '../lib.jsx';
+import { api, useApi, usePaginatedTasks, useToast } from '../lib.jsx';
+import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
 import { Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
 const lines = text => text.split('\n').map(s => s.trim()).filter(Boolean);
@@ -102,6 +103,11 @@ export function ClientProjects() {
   const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [creatingTask, setCreatingTask] = useState(null);
+  const [workView, setWorkView] = useState('open');
+  const [openTask, setOpenTask] = useState(null);
+  const tasks = usePaginatedTasks(`scope=all&client=${id}&project=${projectId || 'unassigned'}&view=${workView === 'done' ? 'completed' : workView}`);
+  const toggleTask = useTaskToggle(tasks.reload);
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [error, setError] = useState(null);
@@ -126,7 +132,11 @@ export function ClientProjects() {
     <PageHead title={projectId ? p?.name || 'Project' : parent + ' · Projects'}
       subtitle={projectId ? 'Project details, responsibilities, procedures and key links' : 'Separate project workspaces under this client.'}>
       {!projectId && client.data?.canManage && <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16}/>New project</button>}
-      {projectId && client.data?.canManage && p && <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>}
+      {projectId && client.data?.canManage && p && <>
+        <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>
+        <button className="btn btn-primary" onClick={() => setCreatingTask('once')}><Plus size={16}/>New task</button>
+        <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>
+      </>}
     </PageHead>
     {!projectId ? (
       projects.loading ? <div className="card card-pad"><Skeleton/></div> :
