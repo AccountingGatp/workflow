@@ -5,12 +5,18 @@ import { ah, HttpError } from '../middleware/auth.js';
 import { canSeeClient, canManageClient, audit } from '../services/access.js';
 
 const r = Router();
+async function canEditMasterList(user, clientId) {
+  // Super Admin, assigned client managers / team leads, or an Admin / TL
+  // with explicit access to this client may maintain its task references.
+  if (await canManageClient(user, clientId)) return true;
+  return user.role === 'admin' && await canSeeClient(user, clientId);
+}
 async function authorized(req, manager = false) {
   const { clientId, projectId } = req.params;
   if (!mongoose.isValidObjectId(clientId) || !mongoose.isValidObjectId(projectId)) throw new HttpError(404, 'Project not found');
   const project = await ClientProject.findOne({ _id: projectId, client: clientId }).select('_id client');
   if (!project) throw new HttpError(404, 'Project not found');
-  if (!(await (manager ? canManageClient : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Project access denied');
+  if (!(await (manager ? canEditMasterList : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Project access denied');
   return project;
 }
 function safeLinks(links) {
@@ -71,7 +77,8 @@ r.patch('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,r
   res.json(doc);
 }));
 r.delete('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,res) => {
-  const project = await authorized(req, true);
+  const project = await authorized(req);
+  if (!(await canManageClient(req.user, req.params.clientId))) throw new HttpError(403, 'Only client managers may archive project work');
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'Work item not found');
   const doc = await ProjectWorkItem.findOneAndUpdate({ _id:req.params.id, project:project._id },
     { $set:{ active:false } }, { new:true });
