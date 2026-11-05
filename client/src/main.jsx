@@ -6,6 +6,7 @@ import { AuthProvider, ToastProvider, useAuth } from './lib.jsx';
 import Layout from './Layout.jsx';
 import { MyWork, Overview } from './pages/work.jsx';
 import { Clients, ClientDetail } from './pages/clients.jsx';
+import { ClientProjects } from './pages/projects.jsx';
 import { Mail, MailInboxes } from './pages/mail.jsx';
 import { People, Recurring, Access, Audit, Login } from './pages/org.jsx';
 
@@ -23,6 +24,8 @@ function App() {
         <Route path="overview" element={guard(can.manage, <Overview />)} />
         <Route path="clients" element={<Clients />} />
         <Route path="clients/:id" element={<ClientDetail />} />
+        <Route path="clients/:id/projects" element={<ClientProjects />} />
+        <Route path="clients/:id/projects/:projectId" element={<ClientProjects />} />
         <Route path="mail" element={<Mail />} />
         <Route path="mail/inboxes" element={guard(can.manage, <MailInboxes />)} />
         <Route path="teams" element={<Navigate to="/clients" replace />} />
