@@ -155,6 +155,16 @@ export function ClientProjects() {
           {safeUrl(p.website) && <a href={p.website} target="_blank" rel="noopener noreferrer">Website <ExternalLink size={12} style={{ display: 'inline' }}/></a>}
         </div>
       </div>
+      <section style={{ marginBottom: 20 }}>
+        <div className="row-wrap" style={{ marginBottom: 12 }}>
+          <h3>Project tasks</h3><div className="spacer" />
+          <div className="chips">{[['open','Open'],['done','Completed'],['all','All']].map(([v,l]) =>
+            <button key={v} className={`chip ${workView === v ? 'on' : ''}`} onClick={() => setWorkView(v)}>{l}</button>
+          )}</div>
+        </div>
+        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenTask(t._id)} onToggle={toggleTask} showPeople emptyTitle="No tasks for this project yet" />
+        <TaskPagination {...tasks} />
+      </section>
       <div className="grid grid-2">
         {group('Client contacts', <PersonList people={p.contacts}/>)}
         {group('Project team', <PersonList people={p.team}/>)}
