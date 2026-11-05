@@ -156,7 +156,7 @@ export function ClientProjects() {
           {safeUrl(p.website) && <a href={p.website} target="_blank" rel="noopener noreferrer">Website <ExternalLink size={12} style={{ display: 'inline' }}/></a>}
         </div>
       </div>
-      <ProjectWorkRegister clientId={id} projectId={projectId} canManage={!!client.data?.canManage} />
+      <ProjectWorkRegister clientId={id} projectId={projectId} canManage={!!client.data?.canEditMasterList} canArchive={!!client.data?.canManage} />
       <section style={{ marginBottom: 20 }}>
         <div className="row-wrap" style={{ marginBottom: 12 }}>
           <h3>Scheduled tasks & completion</h3><div className="spacer" />
