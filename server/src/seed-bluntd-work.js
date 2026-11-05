@@ -4,7 +4,7 @@ import { Client, ClientProject, ProjectWorkItem } from './models/index.js';
    It is a catalog for reference, NOT automatic calendar tasks.
    Source contradictions remain in the schedule fields for management review.
    Re-import never changes manager edits (insert-only). */
-const workItems = [
+export const bluntdSourceWorkItems = [
   {
     "sourceKey": "bluntd-sheet-row-1",
     "title": "Mail Checking",
@@ -691,7 +691,7 @@ export async function seedBluntdWorkItems() {
   if (!client) return;
   const project = await ClientProject.findOne({ client: client._id, name: 'Bluntd' }).select('_id');
   if (!project) return;
-  await ProjectWorkItem.bulkWrite(workItems.map(item => ({
+  await ProjectWorkItem.bulkWrite(bluntdSourceWorkItems.map(item => ({
     updateOne: {
       filter: { project: project._id, sourceKey: item.sourceKey },
       update: { $setOnInsert: { ...item, client: client._id, project: project._id } },
@@ -699,6 +699,6 @@ export async function seedBluntdWorkItems() {
     },
   })), { ordered: false });
   const stored = await ProjectWorkItem.countDocuments({ project: project._id, sourceKey: /^bluntd-sheet-row-/ });
-  console.info('Bluntd source task register verified in MongoDB:', { expected: workItems.length, stored });
+  console.info('Bluntd source task register verified in MongoDB:', { expected: bluntdSourceWorkItems.length, stored });
   if (stored !== workItems.length) throw new Error('Bluntd task register import did not fully verify');
 }
