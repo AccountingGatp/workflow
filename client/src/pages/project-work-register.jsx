@@ -88,6 +88,9 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
 export default function ProjectWorkRegister({ clientId, projectId, canManage, canArchive = canManage }) {
   const url = basePath(clientId, projectId);
   const register = useApi(url, [clientId, projectId]);
+  const access = useApi(url.replace(/\/work-items$/, '/work-items/access'), [clientId, projectId]);
+  const canEdit = !!access.data?.canEdit;
+  const mayArchive = !!access.data?.canArchive;
   const [q, setQ] = useState('');
   const [frequency, setFrequency] = useState('all');
   const [editing, setEditing] = useState(undefined);
@@ -110,7 +113,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
   return <section style={{ marginBottom: 28 }}>
     <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div><h2>Master task list</h2><p className="small muted">Original source frequency and execution day are shown in separate columns. Master records do not always have a dated employee schedule.</p></div>
-      {canManage && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
+      {canEdit && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
     </div>
     <div className="row-wrap" style={{ marginBottom: 14 }}>
       <div className="search" style={{ flex: '1 1 220px', maxWidth: 390 }}><Search size={16}/><input className="input" placeholder="Search project tasks, software or person..." value={q} onChange={e => setQ(e.target.value)}/></div>
@@ -121,10 +124,10 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
     </div>
     {register.error && <ErrorBox error={register.error}/>}
     {register.loading && !register.data ? <div className="card card-pad"><Skeleton rows={4}/></div> :
-    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canManage ? 'Use Add important task to add one.' : ''}</p></div> :
+    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit ? 'Use Add important task to add one.' : ''}</p></div> :
     <div className="card" style={{ overflow: 'hidden' }}><div className="table-wrap">
       <table>
-        <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Source frequency</th><th>Execution day (source)</th><th>Software & time</th><th>References</th>{canManage && <th>Manage</th>}</tr></thead>
+        <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Source frequency</th><th>Execution day (source)</th><th>Software & time</th><th>References</th>{canEdit && <th>Manage</th>}</tr></thead>
         <tbody>{filtered.map(item => <tr key={item._id}>
           <td><strong>{item.title}</strong>
             {item.category === 'Payroll' && <div className="small muted">Payroll</div>}
@@ -142,9 +145,9 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
           <td>{(item.links || []).length ? <div className="stack" style={{ gap: 5 }}>
             {item.links.map((l,i) => <a key={i} href={l.url} target="_blank" rel="noopener noreferrer" className="row small" style={{ gap: 5 }}><Link2 size={13}/>{l.label}<ExternalLink size={11}/></a>)}
           </div> : <span className="small muted">No links</span>}</td>
-          {canManage && <td><div className="row-wrap">
+          {canEdit && <td><div className="row-wrap">
             <button className="btn btn-outline btn-sm" onClick={() => setEditing(item)}><Pencil size={14}/>Edit</button>
-            {canArchive && <button className="btn btn-ghost btn-sm" disabled={savingDelete === item._id} onClick={() => archive(item)}><Archive size={14}/>Archive</button>}
+            {mayArchive && <button className="btn btn-ghost btn-sm" disabled={savingDelete === item._id} onClick={() => archive(item)}><Archive size={14}/>Archive</button>}
           </div></td>}
         </tr>)}</tbody>
       </table>
