@@ -150,6 +150,7 @@ export const ProjectWorkItem = model('ProjectWorkItem', workItemSchema, 'project
 
 export const TaskTemplate = model('TaskTemplate', new Schema({
   project: ref('ClientProject'),
+  masterItem: ref('ProjectWorkItem'),
   title: { type: String, required: true },
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
@@ -169,6 +170,7 @@ export const TaskTemplate = model('TaskTemplate', new Schema({
 
 const taskSchema = new Schema({
   project: ref('ClientProject'),
+  masterItem: ref('ProjectWorkItem'),
   title: { type: String, required: true },
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
