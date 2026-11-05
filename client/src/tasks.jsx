@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2 } from 'lucide-react';
+import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2, ExternalLink, Link2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
 import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, TeamTag, ErrorBox } from './ui.jsx';
 
@@ -110,6 +110,17 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                 ))}
               </div>
 
+              {(task.masterItem?.links || []).length > 0 && <>
+                <div className="section-title"><Link2 size={14}/>Task-specific references</div>
+                <div className="card card-pad stack" style={{ gap: 8 }}>
+                  {task.masterItem.links.map((link, i) =>
+                    <a key={link._id || i} className="row small" href={link.url} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink size={14}/>{link.label}
+                    </a>
+                  )}
+                  <p className="small muted">These links come from the project master task list and remain available with each scheduled occurrence.</p>
+                </div>
+              </>}
               {task.sop && <>
                 <div className="section-title"><BookOpen size={14} />Standard operating procedure</div>
                 <div className="sop">{task.sop}</div>
