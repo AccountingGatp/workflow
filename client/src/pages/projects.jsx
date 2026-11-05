@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck } from 'lucide-react';
 import { api, useApi, usePaginatedTasks, useToast } from '../lib.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import ProjectWorkRegister from './project-work-register.jsx';
 import { Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
 const lines = text => text.split('\n').map(s => s.trim()).filter(Boolean);
@@ -155,9 +156,10 @@ export function ClientProjects() {
           {safeUrl(p.website) && <a href={p.website} target="_blank" rel="noopener noreferrer">Website <ExternalLink size={12} style={{ display: 'inline' }}/></a>}
         </div>
       </div>
+      <ProjectWorkRegister clientId={id} projectId={projectId} canManage={!!client.data?.canManage} />
       <section style={{ marginBottom: 20 }}>
         <div className="row-wrap" style={{ marginBottom: 12 }}>
-          <h3>Project tasks</h3><div className="spacer" />
+          <h3>Scheduled tasks & completion</h3><div className="spacer" />
           <div className="chips">{[['due','Due now'],['upcoming','Weekly / monthly · next 7 days'],['completed','Completed'],['open','All pending']].map(([v,l]) =>
             <button key={v} className={`chip ${workView === v ? 'on' : ''}`} onClick={() => setWorkView(v)}>{l}</button>
           )}</div>
