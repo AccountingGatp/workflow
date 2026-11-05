@@ -85,7 +85,7 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
     </form>
   </Modal>;
 }
-export default function ProjectWorkRegister({ clientId, projectId, canManage }) {
+export default function ProjectWorkRegister({ clientId, projectId, canManage, canArchive = canManage }) {
   const url = basePath(clientId, projectId);
   const register = useApi(url, [clientId, projectId]);
   const [q, setQ] = useState('');
@@ -144,7 +144,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage }) 
           </div> : <span className="small muted">No links</span>}</td>
           {canManage && <td><div className="row-wrap">
             <button className="btn btn-outline btn-sm" onClick={() => setEditing(item)}><Pencil size={14}/>Edit</button>
-            <button className="btn btn-ghost btn-sm" disabled={savingDelete === item._id} onClick={() => archive(item)}><Archive size={14}/>Archive</button>
+            {canArchive && <button className="btn btn-ghost btn-sm" disabled={savingDelete === item._id} onClick={() => archive(item)}><Archive size={14}/>Archive</button>}
           </div></td>}
         </tr>)}</tbody>
       </table>
