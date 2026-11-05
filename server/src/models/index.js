@@ -43,6 +43,34 @@ export const Client = model('Client', new Schema({
   emailMatches: [{ type: String, lowercase: true, trim: true }], // addresses or domains that identify this client's email
 }, opts));
 
+/** Separate project workspaces belonging to one existing client. */
+const projectLinkSchema = new Schema({
+  label: { type: String, required: true },
+  url: { type: String, required: true },
+  restricted: { type: Boolean, default: false },
+}, { _id: false });
+const projectContactSchema = new Schema({
+  name: String, role: String, email: String, profileUrl: String,
+}, { _id: false });
+export const ClientProject = model('ClientProject', new Schema({
+  client: { ...ref('Client'), required: true },
+  name: { type: String, required: true, trim: true },
+  description: String,
+  businessType: String,
+  website: String,
+  contacts: [projectContactSchema],
+  team: [projectContactSchema],
+  scope: [String],
+  excluded: [String],
+  links: [projectLinkSchema],
+  tools: [{ name: String, purpose: String, url: String }],
+  automations: [String],
+  quality: [{ title: String, items: [String] }],
+  guarantees: [String],
+  notes: String,
+}, opts));
+ClientProject.schema.index({ client: 1, name: 1 }, { unique: true });
+
 /**
  * Who manages a client: a team, and the admins (managers/TLs) accountable for it.
  * Several admins can manage one client. Reassignment ends a row (`endedAt`) instead of
