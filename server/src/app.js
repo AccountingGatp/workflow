@@ -11,6 +11,7 @@ import mailRoutes, { mailPublic } from './routes/mail.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
 import { seedIfEmpty } from './seed.js';
+import { ensureActivityRetention } from './models/index.js';
 
 async function connect() {
   let uri = process.env.MONGODB_URI;
@@ -23,7 +24,8 @@ async function connect() {
     console.log('⚠  MONGODB_URI not set — using a temporary in-memory MongoDB (data resets on restart).');
   }
   await mongoose.connect(uri);
-  console.log('✓ MongoDB connected');
+  await ensureActivityRetention();
+  console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
 }
 
