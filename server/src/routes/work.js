@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client, ClientProject } from '../models/index.js';
+import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client, ClientProject, ProjectWorkItem } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
   audit, isSuper, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter, canGrantDirectly,
@@ -122,33 +122,62 @@ r.get('/manager-workload', ah(async (req, res) => {
   if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
   const managed = await managedClientIds(req.user);
   const clientId = req.query.client;
+  const projectId = req.query.project;
   if (clientId && (!mongoose.isValidObjectId(clientId) || !(await canManageClient(req.user, clientId)))) throw new HttpError(403, 'Client unavailable');
+  if (projectId && projectId !== 'unassigned') {
+    if (!mongoose.isValidObjectId(projectId)) throw new HttpError(400, 'Invalid project');
+    const project = await ClientProject.findById(projectId).select('client');
+    if (!project || (clientId && String(project.client) !== String(clientId)) || !(await canManageClient(req.user, project.client))) throw new HttpError(403, 'Project unavailable');
+  }
+  if (projectId === 'unassigned' && !clientId) throw new HttpError(400, 'Choose a client first');
   const ids = clientId ? [clientId] : managed;
   const match = ids === null ? {} : { client: { $in: ids.map(id => new mongoose.Types.ObjectId(String(id))) } };
-  const { start, end } = dayBounds();
+  if (projectId) match.project = projectId === 'unassigned' ? null : new mongoose.Types.ObjectId(projectId);
+  const { start, end, week } = dayBounds();
+  const done = { $eq: ['$status', 'done'] };
+  const pending = { $ne: ['$status', 'done'] };
+  const dueToday = { $and: [pending, { $gte: ['$dueDate', start] }, { $lte: ['$dueDate', end] }] };
+  const overdue = { $and: [pending, { $lt: ['$dueDate', start] }] };
+  const future = { $and: [pending, { $gt: ['$dueDate', end] }] };
+  const recentlyDone = { $and: [done, { $gte: ['$completedAt', new Date(Date.now() - 7 * 864e5)] }] };
+  const values = {
+    pending: pending, completed: done, overdue: overdue, today: dueToday,
+    future: future, dueNow: { $and: [pending, { $lte: ['$dueDate', end] }] },
+    completedRecent: recentlyDone,
+  };
+  const metrics = Object.fromEntries(Object.entries(values).map(([k, condition]) => [k, { $sum: { $cond: [condition, 1, 0] } }]));
   const [report] = await Task.aggregate([
     { $match: match },
     { $facet: {
-      totals: [{ $group: {
-        _id: null, pending: { $sum: { $cond: [{ $ne: ['$status', 'done'] }, 1, 0] } },
-        completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
-        overdue: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $lt: ['$dueDate', start] }] }, 1, 0] } },
-        today: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $gte: ['$dueDate', start] }, { $lte: ['$dueDate', end] }] }, 1, 0] } },
-      } }],
+      totals: [{ $group: { _id: null, ...metrics } }],
       people: [
-        { $unwind: '$assignees' }, { $group: {
-          _id: '$assignees',
-          pending: { $sum: { $cond: [{ $ne: ['$status', 'done'] }, 1, 0] } },
-          completed: { $sum: { $cond: [{ $eq: ['$status', 'done'] }, 1, 0] } },
-          overdue: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $lt: ['$dueDate', start] }] }, 1, 0] } },
-          today: { $sum: { $cond: [{ $and: [{ $ne: ['$status', 'done'] }, { $gte: ['$dueDate', start] }, { $lte: ['$dueDate', end] }] }, 1, 0] } },
-        } }, { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'person' } },
-        { $project: { pending: 1, completed: 1, overdue: 1, today: 1, name: { $first: '$person.name' } } },
-        { $sort: { overdue: -1, pending: -1 } }
+        { $unwind: '$assignees' }, { $group: { _id: '$assignees', ...metrics } },
+        { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'person' } },
+        { $project: { pending: 1, completed: 1, overdue: 1, today: 1, future: 1, dueNow: 1, completedRecent: 1,
+          name: { $ifNull: [{ $first: '$person.name' }, 'Unknown employee'] } } },
+        { $sort: { overdue: -1, today: -1, pending: -1 } },
+      ],
+      byProject: [
+        { $group: { _id: '$project', ...metrics } },
+        { $lookup: { from: 'clientprojects', localField: '_id', foreignField: '_id', as: 'project' } },
+        { $project: { pending: 1, completed: 1, today: 1, overdue: 1, future: 1, dueNow: 1, completedRecent: 1,
+          name: { $ifNull: [{ $first: '$project.name' }, 'Unassigned to project'] } } },
+        { $sort: { name: 1 } },
       ],
     } },
   ]);
-  res.json({ totals: report.totals[0] || { pending: 0, completed: 0, overdue: 0, today: 0 }, people: report.people });
+  const zero = { pending: 0, completed: 0, overdue: 0, today: 0, future: 0, dueNow: 0, completedRecent: 0 };
+  const projectQuery = projectId === 'unassigned' ? null : projectId;
+  const masterFilter = projectQuery ? { project: projectQuery, active: { $ne: false } } : (ids === null ? { active: { $ne: false } } : { client: { $in: ids }, active: { $ne: false } });
+  const templatesFilter = projectId ? { project: projectId === 'unassigned' ? null : projectId } : (ids === null ? {} : { client: { $in: ids } });
+  if (clientId) { masterFilter.client = clientId; templatesFilter.client = clientId; }
+  const [masterItems, recurringSchedules, activeSchedules] = await Promise.all([
+    ProjectWorkItem.countDocuments(projectId === 'unassigned' ? { ...masterFilter, project: null } : masterFilter),
+    TaskTemplate.countDocuments(templatesFilter),
+    TaskTemplate.countDocuments({ ...templatesFilter, active: true }),
+  ]);
+  res.json({ totals: report.totals[0] || zero, people: report.people,
+    byProject: report.byProject, masterItems, recurringSchedules, activeSchedules });
 }));
 
 r.get('/tasks/:id', ah(async (req, res) => {
