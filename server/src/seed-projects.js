@@ -1,4 +1,4 @@
-import { Client, ClientProject } from './models/index.js';
+import { Client, ClientProject, Task, TaskTemplate } from './models/index.js';
 
 /**
  * One-time project profile import from the Republic Supply / Bluntd overview
@@ -107,6 +107,27 @@ export async function seedRepublicProjects() {
   await ClientProject.updateOne({ client: client._id, name: 'Bravura' }, { $setOnInsert: {
     client: client._id, name: 'Bravura', description: 'Project workspace created under Republic Supply Company LLC. Scope, contacts, deadlines and links to be added by the manager.',
   } }, { upsert: true });
+  // Classify the four existing Republic recurring workflows that match the
+  // supplied Bluntd scope. Keep all other tasks unassigned for manual review.
+  // Never overwrite a project already chosen by a manager.
+  const bluntdProject = await ClientProject.findOne({ client: client._id, name: 'Bluntd' }).select('_id');
+  const legacyTitles = [
+    /^mail checking$/i,
+    /^bank\s*(?:&|and)\s*cc updating$/i,
+    /^bill updating\s*(?:&|and)\s*payment$/i,
+    /^po checking$/i,
+  ];
+  const matches = { $in: legacyTitles };
+  const templateMove = await TaskTemplate.updateMany({
+    client: client._id, project: null, title: matches,
+  }, { $set: { project: bluntdProject._id } });
+  const taskMove = await Task.updateMany({
+    client: client._id, project: null, title: matches,
+  }, { $set: { project: bluntdProject._id } });
+  console.info('Republic legacy tasks grouped under Bluntd:', {
+    recurringSchedules: templateMove.modifiedCount,
+    taskOccurrences: taskMove.modifiedCount,
+  });
   const stored = await ClientProject.find({ client: client._id, name: { $in: ['Bluntd', 'Bravura'] } })
     .select('name contacts scope team links').lean();
   const bluntdStored = stored.find(p => p.name === 'Bluntd');
