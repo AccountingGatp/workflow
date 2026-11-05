@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client } from '../models/index.js';
+import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client, ClientProject } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
   audit, isSuper, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter, canGrantDirectly,
@@ -8,8 +8,20 @@ import {
 import { generateRecurringTasks } from '../services/recurrence.js';
 
 const r = Router();
+const validateProject = async (clientId, projectId) => {
+  const available = await ClientProject.exists({ client: clientId });
+  if (!projectId) {
+    if (available) throw new HttpError(400, 'Choose a project for this client');
+    return undefined;
+  }
+  if (!mongoose.isValidObjectId(projectId) || !(await ClientProject.exists({ _id: projectId, client: clientId }))) {
+    throw new HttpError(400, 'Project does not belong to this client');
+  }
+  return projectId;
+};
+
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
+  .populate('template', 'frequency').populate('project', 'name client').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
@@ -52,7 +64,7 @@ const viewFilter = (view, dates, weeklyMonthly) => {
   return {};
 };
 const taskFilters = async (req, dates, weeklyMonthly) => {
-  const { scope = 'mine', status, client, team, assignee, from, to, view = 'all', q } = req.query;
+  const { scope = 'mine', status, client, project, team, assignee, from, to, view = 'all', q } = req.query;
   const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly)];
   if (scope === 'mine') clauses.push({ assignees: req.user._id });
   if (scope === 'managed') {
@@ -64,6 +76,13 @@ const taskFilters = async (req, dates, weeklyMonthly) => {
   if (client) {
     if (!mongoose.isValidObjectId(client)) throw new HttpError(400, 'Invalid client');
     clauses.push({ client });
+  }
+  if (project) {
+    if (project === 'unassigned') clauses.push({ project: null });
+    else {
+      if (!mongoose.isValidObjectId(project)) throw new HttpError(400, 'Invalid project');
+      clauses.push({ project });
+    }
   }
   if (team) clauses.push({ team });
   if (assignee) {
@@ -140,12 +159,13 @@ r.get('/tasks/:id', ah(async (req, res) => {
 }));
 
 r.post('/tasks', ah(async (req, res) => {
-  const { title, client, team, assignees = [], owner, dueDate, priority, sop, checklist = [] } = req.body || {};
+  const { title, client, project, team, assignees = [], owner, dueDate, priority, sop, checklist = [] } = req.body || {};
   if (!title || !client || !dueDate) throw new HttpError(400, 'Title, client and due date are required');
   if (!(await canManageClient(req.user, client))) throw new HttpError(403, 'You can only create work for clients you manage');
+  const validProject = await validateProject(client, project);
   await assertAssignable(req.user, client, assignees);
   const task = await Task.create({
-    title, client, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
+    title, client, project: validProject, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
     checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: req.user._id,
   });
   audit(req.user, 'task.create', { entity: 'Task', entityId: task._id, client, summary: `Created “${title}”` });
@@ -176,6 +196,10 @@ r.patch('/tasks/:id', ah(async (req, res) => {
     notes.push(`${item.done ? 'ticked' : 'unticked'} “${item.text}”`);
   }
   if (manager) {
+    if (body.project !== undefined) {
+      task.project = await validateProject(task.client, body.project);
+      notes.push('changed project');
+    }
     for (const k of ['title', 'dueDate', 'priority', 'sop', 'owner', 'team']) {
       if (body[k] !== undefined) { task[k] = body[k] || undefined; notes.push(`changed ${k}`); }
     }
@@ -196,15 +220,16 @@ r.get('/templates', ah(async (req, res) => {
   const managed = await managedClientIds(req.user);
   const filter = managed === null ? {} : { client: { $in: managed } };
   res.json(await TaskTemplate.find(filter).sort({ createdAt: -1 })
-    .populate('client', 'name').populate('team', 'name color').populate('assignees', 'name').lean());
+    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name').lean());
 }));
 
 r.post('/templates', ah(async (req, res) => {
   const b = req.body || {};
   if (!b.title || !b.client || !b.frequency) throw new HttpError(400, 'Title, client and frequency are required');
   if (!(await canManageClient(req.user, b.client))) throw new HttpError(403, 'You can only schedule work for clients you manage');
+  const validProject = await validateProject(b.client, b.project);
   await assertAssignable(req.user, b.client, b.assignees || []);
-  const tpl = await TaskTemplate.create({ ...b, team: b.team || undefined, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
+  const tpl = await TaskTemplate.create({ ...b, project: validProject, team: b.team || undefined, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
   const created = await generateRecurringTasks(tpl._id);
   audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });
   res.status(201).json({ template: tpl, created });
@@ -229,7 +254,9 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
   if (!String(b.title || '').trim()) throw new HttpError(400, 'Task name is required');
   if (!['daily', 'weekly', 'monthly'].includes(b.frequency)) throw new HttpError(400, 'Invalid frequency');
   const assignees = Array.isArray(b.assignees) ? b.assignees : [];
+  const validProject = await validateProject(tpl.client, b.project ?? tpl.project);
   await assertAssignable(req.user, tpl.client, assignees);
+  tpl.project = validProject;
   tpl.title = String(b.title).trim();
   tpl.frequency = b.frequency;
   tpl.weekday = b.frequency === 'weekly' ? Number(b.weekday ?? 1) : undefined;
