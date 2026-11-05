@@ -28,14 +28,34 @@ r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
 }));
 
 r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
-  const allowed = ['name', 'role', 'title', 'active'];
+  const allowed = ['name', 'email', 'role', 'title', 'active'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
-  if (String(req.params.id) === String(req.user._id) && (update.role && update.role !== 'super_admin' || update.active === false)) {
+  const user = await User.findOne({ _id: req.params.id, deletedAt: null });
+  if (!user) throw new HttpError(404, 'User not found');
+  if (String(user._id) === String(req.user._id) && (update.role && update.role !== 'super_admin' || update.active === false)) {
     throw new HttpError(400, 'You cannot demote or deactivate yourself');
   }
-  const user = await User.findByIdAndUpdate(req.params.id, update, { new: true });
-  if (!user) throw new HttpError(404, 'User not found');
-  audit(req.user, 'user.update', { entity: 'User', entityId: user._id, summary: `Updated ${user.name}` });
+  if (update.name !== undefined) {
+    update.name = String(update.name).trim();
+    if (!update.name || update.name.length > 150) throw new HttpError(400, 'Enter a valid name (1–150 characters)');
+  }
+  if (update.title !== undefined) update.title = String(update.title).trim().slice(0, 150);
+  if (update.email !== undefined) {
+    update.email = String(update.email).trim().toLowerCase();
+    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(update.email) || update.email.length > 254) throw new HttpError(400, 'Enter a valid work email address');
+    if (update.email !== user.email && await User.exists({ email: update.email, _id: { $ne: user._id } })) {
+      throw new HttpError(409, 'That email address is already used by another person');
+    }
+  }
+  if (update.role !== undefined && !['super_admin', 'admin', 'employee'].includes(update.role)) throw new HttpError(400, 'Invalid role');
+  const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '' };
+  Object.assign(user, update);
+  try { await user.save(); } catch (err) {
+    if (err.code === 11000) throw new HttpError(409, 'That email address is already used by another person');
+    throw err;
+  }
+  const changed = ['name', 'email', 'role', 'title', 'active'].filter(k => update[k] !== undefined && previous[k] !== update[k]);
+  audit(req.user, 'user.update', { entity: 'User', entityId: user._id, summary: `Updated ${user.name}: ${changed.join(', ') || 'no changes'}` });
   res.json(user);
 }));
 
