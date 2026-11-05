@@ -43,6 +43,7 @@ export function MyWork() {
   const [creating, setCreating] = useState(false);
   const clients = useApi('/clients');
   const projects = useApi(client ? `/clients/${client}/projects` : null, [client]);
+  const clientDetails = useApi(client ? `/clients/${client}` : null, [client]);
   const projectData = projects.data || [];
   const selectedProject = projectData.find(p => p._id === project);
   const master = useApi(project && project !== 'unassigned' && client ? `/clients/${client}/projects/${project}/work-items` : null, [client, project]);
@@ -107,7 +108,8 @@ export function MyWork() {
         key={project}
         clientId={client}
         projectId={project}
-        canManage={view === 'clients' && !!(clients.data || []).find(c => c._id === client)?.canManage}
+        canManage={!!clientDetails.data?.canEditMasterList}
+        canArchive={!!clientDetails.data?.canManage}
       />}
       <div className="row-wrap" style={{ marginBottom: 10 }}>
         <h3>Scheduled tasks &amp; completion</h3>
