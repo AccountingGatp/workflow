@@ -301,7 +301,7 @@ export function Audit() {
   const { data, loading } = useApi('/audit');
   return (
     <>
-      <PageHead title="Activity log" subtitle="Who did what, and when. Kept for every access change and task update." />
+      <PageHead title="Activity log" subtitle="Recent activity is kept for 7 days, then automatically deleted to reduce database storage." />
       <div className="card" style={{ overflow: 'hidden' }}>
         {loading && !data ? <Skeleton /> : data.length === 0 ? <Empty icon={History} title="No activity yet" /> : (
           <div className="table-wrap"><table>
