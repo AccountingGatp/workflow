@@ -140,5 +140,28 @@ const auditSchema = new Schema({
   client: ref('Client'),
   summary: String,
 }, { timestamps: { createdAt: true, updatedAt: false } });
-auditSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 }); // auto-delete after 30 days
+export const ACTIVITY_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+auditSchema.index({ createdAt: 1 }, { expireAfterSeconds: ACTIVITY_RETENTION_SECONDS }); // purge activity only after 7 days
 export const AuditLog = model('AuditLog', auditSchema, 'audit_logs');
+
+/** Apply the 7-day retention to an existing MongoDB TTL index as well as new installs. */
+export async function ensureActivityRetention() {
+  const collection = AuditLog.collection;
+  let indexes;
+  try {
+    indexes = await collection.listIndexes().toArray();
+  } catch (err) {
+    if (err.code === 26 || err.codeName === 'NamespaceNotFound') {
+      await collection.createIndex({ createdAt: 1 }, { expireAfterSeconds: ACTIVITY_RETENTION_SECONDS });
+      return;
+    }
+    throw err;
+  }
+  const existing = indexes.find(i => Object.keys(i.key || {}).length === 1 && i.key.createdAt === 1);
+  if (!existing) {
+    await collection.createIndex({ createdAt: 1 }, { expireAfterSeconds: ACTIVITY_RETENTION_SECONDS });
+  } else if (existing.expireAfterSeconds !== ACTIVITY_RETENTION_SECONDS) {
+    await collection.db.command({ collMod: collection.collectionName, index: { name: existing.name, expireAfterSeconds: ACTIVITY_RETENTION_SECONDS } });
+  }
+}
+
