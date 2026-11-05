@@ -133,6 +133,7 @@ const workItemSchema = new Schema({
   category: String,
   responsible: String,
   responsibleUser: ref('User'),
+  scheduledTemplate: ref('TaskTemplate'),
   weeklyHours: String,
   frequency: String,
   executionDay: String,
