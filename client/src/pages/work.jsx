@@ -91,57 +91,91 @@ export function MyWork() {
 function ManagerOverview() {
   const clients = useApi('/clients');
   const [clientId, setClientId] = useState('');
+  const [projectId, setProjectId] = useState('');
   const [personId, setPersonId] = useState('');
   const [statusFilter, setStatusFilter] = useState('due');
   const [openId, setOpenId] = useState(null);
   const managed = (clients.data || []).filter(c => c.canManage);
-  const workload = useApi(`/manager-workload?${clientId ? 'client=' + clientId : ''}`, [clientId]);
+  const projectData = useApi(clientId ? `/clients/${clientId}/projects` : null, [clientId]);
+  const workload = useApi(`/manager-workload?client=${clientId}&project=${projectId}`, [clientId, projectId]);
   const people = workload.data?.people || [];
   const totals = workload.data?.totals || {};
-  const query = `scope=managed&client=${clientId}&assignee=${personId}&view=${statusFilter}`;
+  const byProject = workload.data?.byProject || [];
+  const query = `scope=managed&client=${clientId}&project=${projectId}&assignee=${personId}&view=${statusFilter}`;
   const tasks = usePaginatedTasks(query);
   const refresh = () => { tasks.reload(); workload.reload(); };
   const selectedName = people.find(p => p._id === personId)?.name;
-
+  const number = key => workload.data ? totals[key] || 0 : '—';
   return <>
-    <PageHead title="Manager overview" subtitle="Track tasks for your managed clients, with accurate totals across all task history." />
-    <div className="row-wrap" style={{ marginBottom: 20, gap: 12 }}>
-      <select className="select" aria-label="Select client" style={{ maxWidth: 360 }} value={clientId} onChange={e => { setClientId(e.target.value); setPersonId(''); }}>
+    <PageHead title="Manager overview" subtitle="Current deadlines, employee progress and project workload for the clients you manage." />
+    <div className="row-wrap" style={{ marginBottom: 18, gap: 12 }}>
+      <select className="select" aria-label="Select client" style={{ maxWidth: 360 }} value={clientId} onChange={e => { setClientId(e.target.value); setProjectId(''); setPersonId(''); }}>
         <option value="">All my clients</option>
         {managed.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
       </select>
-      <span className="small muted">{managed.length} managed clients</span>
+      {clientId && <select className="select" aria-label="Select project" style={{ maxWidth: 310 }} value={projectId} onChange={e => { setProjectId(e.target.value); setPersonId(''); }}>
+        <option value="">All projects</option>
+        {(projectData.data || []).map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+        <option value="unassigned">Needs project assignment</option>
+      </select>}
+      <span className="small muted">{managed.length} managed client{managed.length === 1 ? '' : 's'}</span>
     </div>
-    <div className="grid grid-4" style={{ marginBottom: 20 }}>
-      <div className="card card-pad"><div className="small muted">Pending tasks</div><h2>{workload.data ? totals.pending : '—'}</h2></div>
-      <div className="card card-pad"><div className="small muted">Due today</div><h2>{workload.data ? totals.today : '—'}</h2></div>
-      <div className="card card-pad"><div className="small muted">Overdue</div><h2>{workload.data ? totals.overdue : '—'}</h2></div>
-      <div className="card card-pad"><div className="small muted">Completed tasks</div><h2>{workload.data ? totals.completed : '—'}</h2></div>
+    <div className="grid grid-4" style={{ marginBottom: 12 }}>
+      <div className="card card-pad"><div className="small muted">Due now (today + overdue)</div><h2>{number('dueNow')}</h2></div>
+      <div className="card card-pad"><div className="small muted">Due today</div><h2>{number('today')}</h2></div>
+      <div className="card card-pad"><div className="small muted">Overdue</div><h2>{number('overdue')}</h2></div>
+      <div className="card card-pad"><div className="small muted">Completed · last 7 days</div><h2>{number('completedRecent')}</h2></div>
     </div>
+    <p className="small muted" style={{ marginBottom: 20 }}>
+      {workload.data ? `${totals.pending || 0} unfinished scheduled occurrences in total, including ${totals.future || 0} future occurrences; ${totals.completed || 0} completed occurrences in history.` : 'Loading workload totals…'}
+      {' '}Future daily tasks are not shown in the actionable task list.
+    </p>
+    <div className="grid grid-2" style={{ marginBottom: 20 }}>
+      <div className="card card-pad">
+        <div className="small muted">Master work items</div>
+        <h2>{workload.data ? workload.data.masterItems : '—'}</h2>
+        <p className="small muted">Scope and SOP reference items. These are not dated employee tasks.</p>
+      </div>
+      <div className="card card-pad">
+        <div className="small muted">Recurring schedules</div>
+        <h2>{workload.data ? workload.data.activeSchedules : '—'}</h2>
+        <p className="small muted">{workload.data ? `${workload.data.recurringSchedules} total, including paused schedules` : 'Loading…'}</p>
+      </div>
+    </div>
+    {clientId && !projectId && byProject.length > 0 && <div className="card" style={{ marginBottom: 20 }}>
+      <div className="card-head"><h3>Work by project</h3><span className="small muted">Click a project to view its work</span></div>
+      <div className="table-wrap"><table>
+        <thead><tr><th>Project</th><th>Due now</th><th>Future</th><th>Completed</th></tr></thead>
+        <tbody>{byProject.map(p => <tr key={p._id || 'unassigned'} className="clickable" onClick={() => { setProjectId(p._id || 'unassigned'); setPersonId(''); }}>
+          <td><strong>{p.name}</strong></td><td className="mono">{p.dueNow || 0}</td><td className="mono">{p.future || 0}</td><td className="mono">{p.completed || 0}</td>
+        </tr>)}</tbody>
+      </table></div>
+    </div>}
     <div className="card" style={{ marginBottom: 20 }}>
-      <div className="card-head"><h3>Employee workload</h3><span className="small muted">Select a person to review tasks</span></div>
-      {clients.loading || workload.loading ? <Skeleton /> : people.length === 0 ? <Empty icon={Users} title="No tasks assigned for these clients" /> :
+      <div className="card-head"><h3>Employee workload</h3><span className="small muted">Select an employee to review assigned work</span></div>
+      {clients.loading || workload.loading ? <Skeleton /> : people.length === 0 ? <Empty icon={Users} title="No task occurrences assigned for this selection" /> :
         <div className="table-wrap"><table>
-          <thead><tr><th>Employee</th><th>Pending</th><th>Due today</th><th>Overdue</th><th>Completed</th></tr></thead>
+          <thead><tr><th>Employee</th><th>Due now</th><th>Due today</th><th>Overdue</th><th>Future</th><th>Completed · 7 days</th></tr></thead>
           <tbody>{people.map(p => <tr key={p._id} className="clickable" style={personId === p._id ? { background: 'var(--primary-soft)' } : undefined} onClick={() => setPersonId(old => old === p._id ? '' : p._id)}>
             <td><span className="row"><Avatar name={p.name} size="sm"/>{p.name}</span></td>
-            <td className="mono">{p.pending}</td><td className="mono">{p.today}</td>
+            <td className="mono">{p.dueNow}</td><td className="mono">{p.today}</td>
             <td>{p.overdue ? <Badge cls="b-danger">{p.overdue}</Badge> : '0'}</td>
-            <td><Badge cls="b-success">{p.completed}</Badge></td>
+            <td className="mono">{p.future}</td>
+            <td><Badge cls="b-success">{p.completedRecent}</Badge></td>
           </tr>)}</tbody>
         </table></div>
       }
     </div>
     <div className="row-wrap" style={{ marginBottom: 12 }}>
-      <h3>{selectedName ? `Tasks · ${selectedName}` : 'Client tasks'}</h3><div className="spacer" />
+      <h3>{selectedName ? `Tasks · ${selectedName}` : 'Scheduled task occurrences'}</h3><div className="spacer" />
       {personId && <button className="btn btn-ghost btn-sm" onClick={() => setPersonId('')}>All employees</button>}
       <div className="chips">
-        {[['due','Due now'], ['pending','Actionable'], ['completed','Completed'], ['open','All pending history']].map(([id,label]) =>
+        {[['due','Due now'], ['pending','Actionable'], ['upcoming','Weekly/monthly · next 7 days'], ['completed','Completed history']].map(([id,label]) =>
           <button key={id} className={`chip ${statusFilter === id ? 'on' : ''}`} onClick={() => setStatusFilter(id)}>{label}</button>
         )}
       </div>
     </div>
-    <TaskListCard tasks={tasks.data} loading={tasks.loading} showPeople={!personId} onOpen={t => setOpenId(t._id)} emptyTitle="No tasks for this selection" />
+    <TaskListCard tasks={tasks.data} loading={tasks.loading} showPeople={!personId} onOpen={t => setOpenId(t._id)} emptyTitle="No scheduled tasks for this selection" />
     <TaskPagination {...tasks} />
     {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={refresh} />}
   </>;
