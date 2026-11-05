@@ -21,7 +21,7 @@ const validateProject = async (clientId, projectId) => {
 };
 
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('project', 'name client').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
+  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
