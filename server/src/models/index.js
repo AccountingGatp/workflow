@@ -120,6 +120,32 @@ const checklistItem = new Schema({
 });
 
 /** Recurring work definition; the scheduler materialises Tasks from it. */
+/** Project SOP/task register: one reference row per work item, not a dated task occurrence. */
+const workLinkSchema = new Schema({
+  label: { type: String, required: true, trim: true },
+  url: { type: String, required: true, trim: true },
+}, { _id: true });
+const workItemSchema = new Schema({
+  project: { ...ref('ClientProject'), required: true },
+  client: { ...ref('Client'), required: true },
+  title: { type: String, required: true, trim: true },
+  sourceKey: String,
+  category: String,
+  responsible: String,
+  weeklyHours: String,
+  frequency: String,
+  executionDay: String,
+  software: String,
+  automated: Boolean,
+  reminder: String,
+  notes: String,
+  links: [workLinkSchema],
+  active: { type: Boolean, default: true },
+}, opts);
+workItemSchema.index({ project: 1, sourceKey: 1 }, { unique: true, partialFilterExpression: { sourceKey: { $type: 'string' } } });
+workItemSchema.index({ project: 1, title: 1 });
+export const ProjectWorkItem = model('ProjectWorkItem', workItemSchema, 'project_work_items');
+
 export const TaskTemplate = model('TaskTemplate', new Schema({
   project: ref('ClientProject'),
   title: { type: String, required: true },
