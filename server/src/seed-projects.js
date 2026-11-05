@@ -107,4 +107,18 @@ export async function seedRepublicProjects() {
   await ClientProject.updateOne({ client: client._id, name: 'Bravura' }, { $setOnInsert: {
     client: client._id, name: 'Bravura', description: 'Project workspace created under Republic Supply Company LLC. Scope, contacts, deadlines and links to be added by the manager.',
   } }, { upsert: true });
+  const stored = await ClientProject.find({ client: client._id, name: { $in: ['Bluntd', 'Bravura'] } })
+    .select('name contacts scope team links').lean();
+  const bluntdStored = stored.find(p => p.name === 'Bluntd');
+  const bravuraStored = stored.find(p => p.name === 'Bravura');
+  if (!bluntdStored || !bravuraStored || !bluntdStored.scope?.length || !bluntdStored.contacts?.length) {
+    throw new Error('Republic project import verification failed');
+  }
+  console.info('Republic projects verified in MongoDB:', {
+    names: stored.map(p => p.name),
+    bluntdContacts: bluntdStored.contacts.length,
+    bluntdScopeItems: bluntdStored.scope.length,
+    bluntdTeamMembers: bluntdStored.team.length,
+    bluntdReferenceLinks: bluntdStored.links.length,
+  });
 }
