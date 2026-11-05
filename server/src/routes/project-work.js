@@ -53,6 +53,12 @@ async function resolveAssignedEmployee(data) {
   }
   return data;
 }
+r.get('/clients/:clientId/projects/:projectId/work-items/access', ah(async (req, res) => {
+  await authorized(req);
+  const canEdit = await canEditMasterList(req.user, req.params.clientId);
+  const canArchive = await canManageClient(req.user, req.params.clientId);
+  res.json({ canEdit, canArchive, role: req.user.role });
+}));
 r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
   await authorized(req);
   const items = await ProjectWorkItem.find({ project: req.params.projectId, active: { $ne: false } })
