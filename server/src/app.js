@@ -13,8 +13,6 @@ import mailRoutes, { mailPublic } from './routes/mail.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
 import { seedIfEmpty } from './seed.js';
-import { seedRepublicProjects } from './seed-projects.js';
-import { seedBluntdWorkItems } from './seed-bluntd-work.js';
 import { ensureActivityRetention } from './models/index.js';
 
 async function connect() {
@@ -31,8 +29,6 @@ async function connect() {
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
-  await seedRepublicProjects();
-  await seedBluntdWorkItems();
 }
 
 // Connect once per process; serverless invocations reuse the same connection while warm.
