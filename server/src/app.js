@@ -14,6 +14,7 @@ import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
 import { seedIfEmpty } from './seed.js';
 import { ensureActivityRetention } from './models/index.js';
+import { importBluntdTasksOnce } from './import-bluntd-employee-tasks.js';
 
 async function connect() {
   let uri = process.env.MONGODB_URI;
@@ -29,6 +30,7 @@ async function connect() {
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
+  await importBluntdTasksOnce();
 }
 
 // Connect once per process; serverless invocations reuse the same connection while warm.
