@@ -42,7 +42,7 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   if (update.title !== undefined) update.title = String(update.title).trim().slice(0, 150);
   if (update.email !== undefined) {
     update.email = String(update.email).trim().toLowerCase();
-    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(update.email) || update.email.length > 254) throw new HttpError(400, 'Enter a valid work email address');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(update.email) || update.email.length > 254) throw new HttpError(400, 'Enter a valid work email address');
     if (update.email !== user.email && await User.exists({ email: update.email, _id: { $ne: user._id } })) {
       throw new HttpError(409, 'That email address is already used by another person');
     }
