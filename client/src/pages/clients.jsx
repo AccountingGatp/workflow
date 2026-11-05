@@ -105,6 +105,12 @@ export function ClientDetail() {
       <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></span>}>
         {c.canManage && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
+      <div className="card card-pad" style={{ marginBottom: 16 }}>
+        <div className="row-wrap" style={{ justifyContent: 'space-between' }}>
+          <div><h3>Projects</h3><p className="small muted">Separate project scope, teams, SOP references and links under one client.</p></div>
+          <Link className="btn btn-outline" to={`/clients/${id}/projects`}>View projects →</Link>
+        </div>
+      </div>
       <div className="split">
         <div>
           <div className="row" style={{ marginBottom: 12 }}>
