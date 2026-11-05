@@ -109,7 +109,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage }) 
   };
   return <section style={{ marginBottom: 28 }}>
     <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-      <div><h2>Master task list</h2><p className="small muted">All project work, responsibilities, frequency and task-specific references — not just what is due today.</p></div>
+      <div><h2>Master task list</h2><p className="small muted">Original source frequency and execution day are shown in separate columns. Master records do not always have a dated employee schedule.</p></div>
       {canManage && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
     </div>
     <div className="row-wrap" style={{ marginBottom: 14 }}>
@@ -124,7 +124,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage }) 
     !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canManage ? 'Use Add important task to add one.' : ''}</p></div> :
     <div className="card" style={{ overflow: 'hidden' }}><div className="table-wrap">
       <table>
-        <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Frequency / execution</th><th>Software & time</th><th>References</th>{canManage && <th>Manage</th>}</tr></thead>
+        <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Source frequency</th><th>Execution day (source)</th><th>Software & time</th><th>References</th>{canManage && <th>Manage</th>}</tr></thead>
         <tbody>{filtered.map(item => <tr key={item._id}>
           <td><strong>{item.title}</strong>
             {item.category === 'Payroll' && <div className="small muted">Payroll</div>}
@@ -133,7 +133,11 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage }) 
             {item.automated && <span className="small" style={{ color: 'var(--success)' }}>Automation noted</span>}
             {item.notes && <div className="small muted" style={{ marginTop: 4 }}>{item.notes}</div>}
           </td>
-          <td><div className="row small"><Clock3 size={13}/>{item.frequency || 'Not specified'}</div><div className="small muted" style={{ marginTop: 4 }}>{item.executionDay || 'Day not specified'}</div></td>
+          <td><div className="row small"><Clock3 size={13}/><strong>{item.frequency || 'Not specified'}</strong></div></td>
+          <td><div className="small"><strong>{item.executionDay || 'Not specified'}</strong></div>
+            {!item.executionDay && item.frequency?.toLowerCase().includes('wednesday') && <div className="small muted">Frequency indicates Wednesday; execution day not separately specified</div>}
+            {item.notes?.includes('Source frequency says') && <div className="small" style={{ marginTop: 5, color: 'var(--warning)' }}>Source columns differ — review before changing schedule</div>}
+          </td>
           <td><div className="small">{item.software || '—'}</div><div className="small muted" style={{ marginTop: 5 }}>{item.weeklyHours || '—'}</div></td>
           <td>{(item.links || []).length ? <div className="stack" style={{ gap: 5 }}>
             {item.links.map((l,i) => <a key={i} href={l.url} target="_blank" rel="noopener noreferrer" className="row small" style={{ gap: 5 }}><Link2 size={13}/>{l.label}<ExternalLink size={11}/></a>)}
