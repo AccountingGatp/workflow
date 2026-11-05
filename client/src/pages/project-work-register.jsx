@@ -5,6 +5,7 @@ import { ErrorBox, Modal, Skeleton } from '../ui.jsx';
 
 const initial = {
   title: '', category: 'Bookkeeping & Operations', frequency: '', executionDay: '',
+  responsibleUser: '',
   responsible: '', weeklyHours: '', software: '', automated: false, reminder: '', notes: '',
   links: [],
 };
@@ -20,6 +21,8 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
+  const people = useApi('/users');
+  const activePeople = (people.data || []).filter(u => u.active && !u.deletedAt);
   const set = (key, value) => setF(v => ({ ...v, [key]: value }));
   const setLink = (index, key, value) => setF(v => ({
     ...v, links: v.links.map((l, i) => i === index ? { ...l, [key]: value } : l),
@@ -50,7 +53,14 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
       {field('title','Task name','e.g. Weekly AP / AR review')}
       <div className="grid grid-2">
         {field('category','Category')}
-        {field('responsible','Responsible person')}
+        <label className="stack" style={{ gap: 4 }}>
+          <strong className="small">Assigned employee (existing Workflow account)</strong>
+          <select className="select" value={f.responsibleUser || ''} onChange={e => set('responsibleUser', e.target.value)}>
+            <option value="">Not assigned / source only</option>
+            {activePeople.map(person => <option key={person._id} value={person._id}>{person.name} · {person.email}</option>)}
+          </select>
+          <span className="small muted">Source owner: {f.responsible || 'Not specified'}. Changing this register does not change an existing recurring schedule; edit the schedule separately.</span>
+        </label>
         {field('frequency','Frequency','Daily, Weekly, Monthly, As needed')}
         {field('executionDay','Execution day','e.g. Friday')}
         {field('weeklyHours','Estimated hours','e.g. 1 hour')}
@@ -118,7 +128,8 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage }) 
         <tbody>{filtered.map(item => <tr key={item._id}>
           <td><strong>{item.title}</strong>
             {item.category === 'Payroll' && <div className="small muted">Payroll</div>}
-            <div className="small muted" style={{ marginTop: 5 }}>{item.responsible ? 'Owner: ' + item.responsible : 'Owner not specified'}</div>
+            <div className="small muted" style={{ marginTop: 5 }}>{item.responsible ? 'Owner: ' + item.responsible : 'Owner not specified'}{item.responsibleUser ? ' · Workflow account linked' : ' · No account assigned'}</div>
+            <div className="small" style={{ marginTop: 5, color: item.scheduledTemplate ? 'var(--success)' : 'var(--text-3)' }}>{item.scheduledTemplate ? 'Scheduled · appears in My Work' : 'Master list only · no dated assignment'}</div>
             {item.automated && <span className="small" style={{ color: 'var(--success)' }}>Automation noted</span>}
             {item.notes && <div className="small muted" style={{ marginTop: 4 }}>{item.notes}</div>}
           </td>
