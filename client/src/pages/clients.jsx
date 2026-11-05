@@ -80,6 +80,8 @@ export function ClientDetail() {
   const { data: c, error, reload } = useApi(`/clients/${id}`, [id]);
   const [show, setShow] = useState('open');
   const tasks = usePaginatedTasks(`scope=all&client=${id}&view=${show === 'done' ? 'completed' : show}`);
+  const projects = useApi(`/clients/${id}/projects`, [id]);
+  const hasProjects = (projects.data || []).length > 0;
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [granting, setGranting] = useState(false);
@@ -103,22 +105,35 @@ export function ClientDetail() {
     <>
       <Link to="/clients" className="row small" style={{ color: 'var(--text-3)', marginBottom: 8 }}><ArrowLeft size={16} />Clients</Link>
       <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></span>}>
-        {c.canManage && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
+        {c.canManage && !hasProjects && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
       <div className="card card-pad" style={{ marginBottom: 16 }}>
         <div className="row-wrap" style={{ justifyContent: 'space-between' }}>
-          <div><h3>Projects</h3><p className="small muted">Separate project scope, teams, SOP references and links under one client.</p></div>
-          <Link className="btn btn-outline" to={`/clients/${id}/projects`}>View projects →</Link>
+          <div><h3>Projects</h3><p className="small muted">Open a project to view its tasks, schedule and scope separately.</p></div>
+          <Link className="btn btn-outline" to={`/clients/${id}/projects`}>View all projects →</Link>
         </div>
+        {hasProjects && <div className="grid grid-2" style={{ marginTop: 14 }}>
+          {projects.data.map(p => <Link key={p._id} className="card card-pad" to={`/clients/${id}/projects/${p._id}`} style={{ color: 'var(--text)', border: '1px solid var(--border)' }}>
+            <strong>{p.name}</strong><p className="small muted" style={{ marginTop: 6 }}>{p.description || 'Open project tasks and details'}</p>
+            <span className="small">Open project →</span>
+          </Link>)}
+        </div>}
       </div>
       <div className="split">
         <div>
+          {!hasProjects && <>
           <div className="row" style={{ marginBottom: 12 }}>
             <h3>Work</h3><div className="spacer" />
             <div className="chips">{[['open', 'Open'], ['done', 'Completed'], ['all', 'All']].map(([k, l]) => <button key={k} className={`chip ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{l}</button>)}</div>
           </div>
           <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={(t) => setOpenId(t._id)} onToggle={toggle} emptyTitle="No tasks for this client" />
           <TaskPagination {...tasks} />
+          </>}
+          {hasProjects && <div className="card card-pad">
+            <h3>Project-based work</h3>
+            <p className="small muted" style={{ marginTop: 10 }}>Choose Bluntd or Bravura above to view and manage that project's tasks. The parent client holds shared details, managers and access settings.</p>
+            <Link className="btn btn-primary" style={{ marginTop: 12 }} to={`/clients/${id}/projects`}>Open projects →</Link>
+          </div>}
         </div>
         <div className="stack" style={{ gap: 16 }}>
           <div className="card card-pad stack" style={{ gap: 10 }}>
