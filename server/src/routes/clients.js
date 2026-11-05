@@ -81,7 +81,9 @@ r.get('/clients/:id', ah(async (req, res) => {
     ...client,
     teams: assignments.filter((a) => a.team).map((a) => ({ ...a.team, assignmentId: a._id, lead: leads[String(a.team._id)] || null })),
     admins: assignments.filter((a) => a.admin).map((a) => ({ ...a.admin, assignmentId: a._id })),
-    permissions, requests, canManage: manage, isSuper: isSuper(req.user),
+    permissions, requests, canManage: manage,
+    canEditMasterList: manage || req.user.role === 'admin',
+    isSuper: isSuper(req.user),
   });
 }));
 
