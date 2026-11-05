@@ -184,6 +184,14 @@ export function ClientProjects() {
         {p.notes && group('Other notes', <p style={{ whiteSpace: 'pre-wrap' }}>{p.notes}</p>)}
       </div>
     </>}
+    {!projectId && client.data?.canManage && tasks.total > 0 && <section style={{ marginTop: 22 }}>
+      <div className="row-wrap" style={{ marginBottom: 10 }}>
+        <h3>Tasks needing a project</h3>
+        <p className="small muted">Open an older unassigned task and choose Bluntd or Bravura.</p>
+      </div>
+      <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenTask(t._id)} emptyTitle="All work assigned" />
+      <TaskPagination {...tasks} />
+    </section>}
     {openTask && <TaskDrawer id={openTask} onClose={() => setOpenTask(null)} onChanged={tasks.reload} />}
     {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId} recurring={creatingTask === 'recurring'} onClose={() => setCreatingTask(null)} onSaved={() => { tasks.reload(); setCreatingTask(null); }} />}
     {adding && <Modal title="New client project" onClose={() => setAdding(false)} footer={<>
