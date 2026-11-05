@@ -121,6 +121,7 @@ const checklistItem = new Schema({
 
 /** Recurring work definition; the scheduler materialises Tasks from it. */
 export const TaskTemplate = model('TaskTemplate', new Schema({
+  project: ref('ClientProject'),
   title: { type: String, required: true },
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
@@ -138,6 +139,7 @@ export const TaskTemplate = model('TaskTemplate', new Schema({
 }, opts), 'task_templates');
 
 const taskSchema = new Schema({
+  project: ref('ClientProject'),
   title: { type: String, required: true },
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
@@ -157,6 +159,7 @@ const taskSchema = new Schema({
 taskSchema.index({ template: 1, dueDate: 1 }, { unique: true, partialFilterExpression: { template: { $exists: true } } });
 taskSchema.index({ assignees: 1, dueDate: 1 });
 taskSchema.index({ client: 1, dueDate: 1, _id: 1 });
+taskSchema.index({ client: 1, project: 1, dueDate: 1, _id: 1 });
 taskSchema.index({ client: 1, status: 1, completedAt: -1 });
 export const Task = model('Task', taskSchema);
 
