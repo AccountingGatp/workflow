@@ -50,6 +50,7 @@ export function useTaskToggle(reload) {
 
 export function TaskDrawer({ id, onClose, onChanged }) {
   const { data: task, loading, error, reload } = useApi(`/tasks/${id}`, [id]);
+  const projectChoices = useApi(task?.client?._id ? `/clients/${task.client._id}/projects` : null, [task?.client?._id]);
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const refresh = () => { reload(); onChanged?.(); };
@@ -83,6 +84,13 @@ export function TaskDrawer({ id, onClose, onChanged }) {
               <div className="card" style={{ padding: 16, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '12px 16px', alignItems: 'center' }}>
                 <span className="muted row"><Building2 size={16} />Client</span><strong>{task.client.name}</strong>
                 {task.project && <><span className="muted row">Project</span><strong>{task.project.name}</strong></>}
+                {task.canEdit && (projectChoices.data || []).length > 0 && <>
+                  <span className="muted row">Move to project</span>
+                  <select className="select" aria-label="Project for task" value={task.project?._id || ''} disabled={busy} onChange={e => patch({ project: e.target.value })}>
+                    <option value="">Select project</option>
+                    {projectChoices.data.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+                  </select>
+                </>}
                 <span className="muted row"><Calendar size={16} />Due</span><span>{fmtDate(task.dueDate)}</span>
                 <span className="muted row">Assigned</span>
                 <div className="row-wrap">
