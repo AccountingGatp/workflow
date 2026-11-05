@@ -170,7 +170,7 @@ export function ClientDetail() {
         </div>
         <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenId(t._id)} onToggle={toggle} emptyTitle="No tasks for this client" />
         <TaskPagination {...tasks} />
-      </div>
+      </div>}
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={tasks.reload} />}
       {creating && <TaskForm presetClient={id} onClose={() => setCreating(false)} onSaved={tasks.reload} />}
       {granting && <GrantAccess client={c} onClose={() => setGranting(false)} onSaved={reload} />}
