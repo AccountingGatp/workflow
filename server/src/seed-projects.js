@@ -135,6 +135,18 @@ export async function seedRepublicProjects() {
   if (!bluntdStored || !bravuraStored || !bluntdStored.scope?.length || !bluntdStored.contacts?.length) {
     throw new Error('Republic project import verification failed');
   }
+  const taskAudit = await Task.aggregate([
+    { $match: { client: client._id } },
+    { $group: { _id: { title: '$title', project: '$project', status: '$status' }, count: { $sum: 1 }, recurring: { $sum: { $cond: [{ $ifNull: ['$template', false] }, 1, 0] } } } },
+    { $sort: { '_id.title': 1, '_id.status': 1 } },
+  ]);
+  console.info('Republic scheduled-task database audit:', taskAudit.map(row => ({
+    title: row._id.title,
+    project: String(row._id.project || 'unassigned'),
+    status: row._id.status,
+    count: row.count,
+    recurring: row.recurring,
+  })));
   console.info('Republic projects verified in MongoDB:', {
     names: stored.map(p => p.name),
     bluntdContacts: bluntdStored.contacts.length,
