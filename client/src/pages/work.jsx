@@ -4,6 +4,7 @@ import { CalendarClock, AlertTriangle, CalendarRange, Plus, Search, Users, Clock
 import { useApi, usePaginatedTasks, useAuth, dueInfo, STATUS, fmtDate } from '../lib.jsx';
 import { Avatar, Badge, Empty, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import ProjectWorkRegister from './project-work-register.jsx';
 
 function Stat({ icon: Icon, label, value, tone, selected, onClick }) {
   return (
@@ -102,6 +103,12 @@ export function MyWork() {
             <Link to={`/clients/${client}/projects`} className="btn btn-outline">View project task lists</Link>}
         </div>
       </div>}
+      {client && project && project !== 'unassigned' && <ProjectWorkRegister
+        key={project}
+        clientId={client}
+        projectId={project}
+        canManage={view === 'clients' && !!(clients.data || []).find(c => c._id === client)?.canManage}
+      />}
       <div className="row-wrap" style={{ marginBottom: 10 }}>
         <h3>Scheduled tasks &amp; completion</h3>
         <span className="small muted">Only dated assignments appear here; master work items are listed separately.</span>
