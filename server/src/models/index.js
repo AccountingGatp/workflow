@@ -132,6 +132,7 @@ const workItemSchema = new Schema({
   sourceKey: String,
   category: String,
   responsible: String,
+  responsibleUser: ref('User'),
   weeklyHours: String,
   frequency: String,
   executionDay: String,
@@ -155,6 +156,7 @@ export const TaskTemplate = model('TaskTemplate', new Schema({
   owner: ref('User'),
   frequency: { type: String, enum: ['daily', 'weekly', 'monthly'], required: true },
   weekday: { type: Number, min: 0, max: 6 },    // weekly: 0=Sun
+  weekdays: [{ type: Number, min: 0, max: 6 }], // optional two or more days per week
   monthDay: { type: Number, min: 1, max: 28 },  // monthly
   priority: { type: String, enum: ['low', 'normal', 'high'], default: 'normal' },
   sop: String,
