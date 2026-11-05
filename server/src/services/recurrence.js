@@ -31,7 +31,7 @@ export async function generateRecurringTasks(templateId) {
       const res = await Task.updateOne(
         { template: tpl._id, dueDate: due },
         { $setOnInsert: {
-          title: tpl.title, client: tpl.client, team: tpl.team, assignees: tpl.assignees,
+          title: tpl.title, client: tpl.client, project: tpl.project, team: tpl.team, assignees: tpl.assignees,
           owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
           checklist: tpl.checklist.map((text) => ({ text })), createdBy: tpl.createdBy,
         } },
