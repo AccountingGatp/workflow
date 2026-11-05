@@ -115,6 +115,7 @@ export function People() {
   const { data, loading, reload } = useApi('/users');
   const toast = useToast();
   const [creating, setCreating] = useState(false);
+  const [editingPerson, setEditingPerson] = useState(null);
   const update = async (u, body) => { try { await api(`/users/${u._id}`, { method: 'PATCH', body }); toast('Saved'); reload(); } catch (e) { toast(e.message); } };
   const remove = async (u) => {
     if (!confirm(`Remove ${u.name}? They can no longer sign in and lose all team and client access. Their name stays on past tasks.`)) return;
@@ -138,15 +139,48 @@ export function People() {
                 <td>{u._id === me._id ? <Badge cls="b-primary">You</Badge> : (
                   <button className={`btn btn-sm ${u.active ? 'btn-outline' : 'btn-tonal'}`} onClick={() => update(u, { active: !u.active })}>{u.active ? 'Deactivate' : 'Reactivate'}</button>
                 )}</td>
-                <td style={{ textAlign: 'right' }}>{u._id !== me._id && <button className="btn btn-danger btn-sm" onClick={() => remove(u)}><Trash2 size={14} />Remove</button>}</td>
+                <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}><button className="btn btn-outline btn-sm" onClick={() => setEditingPerson(u)}><Pencil size={14} />Edit</button>{u._id !== me._id && <button className="btn btn-danger btn-sm" onClick={() => remove(u)}><Trash2 size={14} />Remove</button>}</div></td>
               </tr>
             ))}</tbody>
           </table></div>
         )}
       </div>
       {creating && <NewPerson onClose={() => setCreating(false)} onSaved={reload} />}
+      {editingPerson && <EditPerson person={editingPerson} isSelf={editingPerson._id === me._id} onClose={() => setEditingPerson(null)} onSaved={() => { reload(); setEditingPerson(null); }} />}
     </>
   );
+}
+
+function EditPerson({ person, isSelf, onClose, onSaved }) {
+  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role });
+  const [error, setError] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const toast = useToast();
+  const set = (field) => (event) => setForm(v => ({ ...v, [field]: event.target.value }));
+  const save = async event => {
+    event.preventDefault(); setError(null); setSaving(true);
+    try {
+      await api(`/users/${person._id}`, { method: 'PATCH', body: form });
+      toast('Person updated'); onSaved();
+    } catch (err) { setError(err); } finally { setSaving(false); }
+  };
+  return <Modal title={`Edit person · ${person.name}`} onClose={onClose} footer={<>
+    <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+    <button type="submit" form="edit-person" className="btn btn-primary" disabled={saving || !form.name.trim() || !form.email.trim()}>{saving ? 'Saving…' : 'Save changes'}</button>
+  </>}>
+    <form id="edit-person" className="stack" onSubmit={save} style={{ gap: 16 }}>
+      <ErrorBox error={error} />
+      <Field label="Full name"><input className="input" value={form.name} onChange={set('name')} required maxLength={150} autoFocus /></Field>
+      <Field label="Job title"><input className="input" value={form.title} onChange={set('title')} maxLength={150} /></Field>
+      <Field label="Work email"><input className="input" type="email" value={form.email} onChange={set('email')} required maxLength={254} /></Field>
+      <Field label="Role" hint={isSelf ? 'You cannot change your own Super Admin role.' : 'Changing roles updates this person’s permissions.'}>
+        <select className="select" value={form.role} onChange={set('role')} disabled={isSelf}>
+          {Object.entries(ROLE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </select>
+      </Field>
+      <p className="small muted">Account details are updated without deleting the employee’s assigned tasks, history or access records.</p>
+    </form>
+  </Modal>;
 }
 
 function NewPerson({ onClose, onSaved }) {
