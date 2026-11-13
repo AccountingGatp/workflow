@@ -12,6 +12,7 @@ import projectWorkRoutes from './routes/project-work.js';
 import mailRoutes, { mailPublic } from './routes/mail.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
+import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
 import { ensureActivityRetention } from './models/index.js';
 
@@ -29,6 +30,8 @@ async function connect() {
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
+  const loanImport = await seedLoanReminders();
+  console.info('Bluntd loan reminder import:', loanImport);
 }
 
 // Connect once per process; serverless invocations reuse the same connection while warm.
@@ -56,6 +59,8 @@ app.use('/api', requireAuth, peopleRoutes, clientRoutes, projectRoutes, projectW
 
 export function handleErrors(app) {
   app.use((err, _req, res, _next) => {
+    if (err.code === 11000) return res.status(409).json({ error: 'A record already exists for those details. Refresh and choose a different name or date.' });
+    if (err.name === 'VersionError') return res.status(409).json({ error: 'Task changed during review. Refresh and try again.' });
     if (err.name === 'CastError') return res.status(400).json({ error: 'Invalid id' });
     if (err.name === 'ValidationError') return res.status(400).json({ error: err.message });
     if (!err.status) console.error(err);

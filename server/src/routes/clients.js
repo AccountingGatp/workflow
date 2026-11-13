@@ -27,7 +27,7 @@ r.get('/clients', ah(async (req, res) => {
   const assignments = await ClientAssignment.find({ client: { $in: clients.map((c) => c._id) }, endedAt: null })
     .populate('team', 'name color').populate('admin', 'name').lean();
   const openCounts = await Task.aggregate([
-    { $match: { client: { $in: clients.map((c) => c._id) }, status: { $ne: 'done' } } },
+    { $match: { deletedAt: null, client: { $in: clients.map((c) => c._id) }, status: { $ne: 'done' } } },
     { $group: { _id: '$client', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $lt: ['$dueDate', new Date()] }, 1, 0] } } } },
   ]);
   const counts = Object.fromEntries(openCounts.map((c) => [String(c._id), c]));
@@ -91,8 +91,13 @@ r.patch('/clients/:id', ah(async (req, res) => {
   if (!(await canManageClient(req.user, req.params.id))) throw new HttpError(403, 'Only managing admins can edit this client');
   const allowed = ['name', 'accountingId', 'contactName', 'contactEmail', 'contactPhone', 'status', 'notes'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
+  if (update.name !== undefined) {
+    update.name = String(update.name).trim();
+    if (!update.name || update.name.length > 120) throw new HttpError(400, 'Client name must be 1–120 characters');
+  }
   if (req.body?.emailMatches !== undefined) update.emailMatches = cleanEmailMatches(req.body.emailMatches);
-  const client = await Client.findByIdAndUpdate(req.params.id, update, { new: true });
+  const client = await Client.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
+  if (!client) throw new HttpError(404, 'Client not found');
   if (update.emailMatches) await retagUntagged();
   audit(req.user, 'client.update', { entity: 'Client', entityId: client._id, client: client._id, summary: `Updated ${client.name}` });
   res.json(client);

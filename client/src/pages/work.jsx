@@ -28,7 +28,7 @@ const upcomingWeekTask = (t) => {
   const nextWeek = new Date();
   nextWeek.setDate(nextWeek.getDate() + 7);
   nextWeek.setHours(23, 59, 59, 999);
-  return due <= nextWeek.getTime() && ['weekly', 'monthly'].includes(t.template?.frequency);
+  return due <= nextWeek.getTime() && ['weekly', 'monthly', 'semimonthly'].includes(t.template?.frequency);
 };
 
 
@@ -228,7 +228,7 @@ function GlobalOverview() {
   const all = usePaginatedTasks(`scope=all&view=${person ? 'due' : 'overdue'}&assignee=${person}`);
   const d = dash.data;
   const statusTotal = (d?.byStatus || []).reduce((a, s) => a + s.n, 0) || 1;
-  const statusColor = { todo: 'var(--text-3)', in_progress: 'var(--info)', waiting: 'var(--warning)', done: 'var(--success)' };
+  const statusColor = { todo: 'var(--text-3)', in_progress: 'var(--info)', waiting: 'var(--warning)', pending_review: 'var(--warning)', done: 'var(--success)' };
 
   return (
     <>

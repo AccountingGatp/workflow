@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2, ExternalLink, Link2 } from 'lucide-react';
-import { api, useApi, useAuth, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
-import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, TeamTag, ErrorBox } from './ui.jsx';
+import { api, useApi, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
+import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, ErrorBox } from './ui.jsx';
 
 /* ---------- List ---------- */
 
@@ -12,7 +12,7 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
     <div className="list-item" role="button" tabIndex={0} onClick={() => onOpen(task)} onKeyDown={(e) => e.key === 'Enter' && onOpen(task)}>
       <button
         className={`check ${task.status === 'done' ? 'done' : ''}`}
-        aria-label={task.status === 'done' ? 'Mark as not done' : 'Mark as done'}
+        aria-label={task.status === 'done' ? 'Reopen task' : task.status === 'pending_review' ? 'Withdraw submission' : 'Submit for TL confirmation'}
         onClick={(e) => { e.stopPropagation(); onToggle?.(task); }}
       ><Check size={14} strokeWidth={3} /></button>
       <div className="li-main">
@@ -40,8 +40,8 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
 export function useTaskToggle(reload) {
   const toast = useToast();
   return async (task) => {
-    const status = task.status === 'done' ? 'todo' : 'done';
-    try { await api(`/tasks/${task._id}`, { method: 'PATCH', body: { status } }); toast(status === 'done' ? `“${task.title}” completed` : 'Task reopened'); reload(); }
+    const status = task.status === 'done' || task.status === 'pending_review' ? 'todo' : 'pending_review';
+    try { await api(`/tasks/${task._id}`, { method: 'PATCH', body: { status } }); toast(status === 'pending_review' ? 'Submitted for TL confirmation' : 'Task reopened'); reload(); }
     catch (e) { toast(e.message); }
   };
 }
@@ -50,6 +50,9 @@ export function useTaskToggle(reload) {
 
 export function TaskDrawer({ id, onClose, onChanged }) {
   const { data: task, loading, error, reload } = useApi(`/tasks/${id}`, [id]);
+  const [confirmedSubmission, setConfirmedSubmission] = useState(null);
+  const submissionKey = task?.status === 'pending_review' ? `${id}:${task.submittedAt}` : null;
+  const confirmation = !!submissionKey && confirmedSubmission === submissionKey;
   const projectChoices = useApi(task?.client?._id ? `/clients/${task.client._id}/projects` : null, [task?.client?._id]);
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -57,7 +60,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
 
   const patch = async (body) => {
     setBusy(true);
-    try { await api(`/tasks/${id}`, { method: 'PATCH', body }); refresh(); } catch (e) { toast(e.message); } finally { setBusy(false); }
+    try { await api(`/tasks/${id}`, { method: 'PATCH', body }); setConfirmedSubmission(null); refresh(); } catch (e) { toast(e.message); } finally { setBusy(false); }
   };
 
   return (
@@ -103,9 +106,20 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                 </div>
               </div>
 
+              {task.canEdit && <div className="stack" style={{ marginTop: 16 }}>
+                <Field label="Task name"><input key={task.title} className="input" defaultValue={task.title} onBlur={e => { if (e.target.value.trim() && e.target.value !== task.title) patch({ title: e.target.value.trim() }); }} /></Field>
+                <Field label="Due date"><input type="date" className="input" value={toInputDate(task.dueDate)} disabled={busy} onChange={e => { if (e.target.value) patch({ dueDate: new Date(`${e.target.value}T17:00:00`).toISOString() }); }} /></Field>
+              </div>}
+              {task.submittedBy && <p className="small" style={{ marginTop: 16 }}>Submitted by {task.submittedBy.name} · {fmtTime(task.submittedAt)}</p>}
+              {task.reviewedBy && <p className="small" style={{ color: 'var(--success)', marginTop: 12 }}>✓ Confirmed by {task.reviewedBy.name} · {fmtTime(task.reviewedAt)}</p>}
+              {task.canEdit && task.status === 'pending_review' && <div className="card card-pad stack" style={{ marginTop: 16 }}>
+                <label className="row"><input type="checkbox" checked={confirmation} onChange={e => setConfirmedSubmission(e.target.checked ? submissionKey : null)} />I have confirmed with the employee and reviewed the completed work.</label>
+                <button className="btn btn-primary" disabled={busy || !confirmation} onClick={() => patch({ confirmCompletion: true })}>✓ Confirm completion</button>
+                <button className="btn btn-outline" disabled={busy} onClick={() => patch({ status: 'in_progress' })}>Return to employee</button>
+              </div>}
               <div className="section-title">Status</div>
               <div className="chips" role="radiogroup" aria-label="Status">
-                {Object.entries(STATUS).map(([k, v]) => (
+                {Object.entries(STATUS).filter(([k]) => k !== 'done').map(([k, v]) => (
                   <button key={k} className={`chip ${task.status === k ? 'on' : ''}`} role="radio" aria-checked={task.status === k} disabled={busy} onClick={() => patch({ status: k })}>{v.label}</button>
                 ))}
               </div>
@@ -143,6 +157,12 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                 </div>
               </>}
 
+              {task.canDelete && <button className="btn btn-outline" style={{ marginTop: 20 }} disabled={busy} onClick={async () => {
+                if (!window.confirm('Delete this task occurrence? For recurring work, the remaining schedule will continue.')) return;
+                setBusy(true);
+                try { await api(`/tasks/${id}`, { method: 'DELETE' }); toast('Task deleted'); onChanged?.(); onClose(); }
+                catch (e) { toast(e.message); } finally { setBusy(false); }
+              }}><Trash2 size={16}/>Delete task</button>}
               <div className="section-title"><History size={14} />Activity</div>
               {task.activity.length === 0 ? <p className="small muted">No activity yet.</p> : (
                 <div className="timeline">
@@ -154,9 +174,9 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                   ))}
                 </div>
               )}
-              {task.status !== 'done' && (
-                <button className="btn btn-primary" style={{ width: '100%', marginTop: 24 }} disabled={busy} onClick={() => patch({ status: 'done' })}>
-                  <Check size={18} />Mark task completed
+              {task.status !== 'done' && task.status !== 'pending_review' && (
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: 24 }} disabled={busy} onClick={() => patch({ status: 'pending_review' })}>
+                  <Check size={18} />Submit completion for TL review
                 </button>
               )}
             </>
@@ -177,7 +197,7 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
   const toast = useToast();
   const [f, setF] = useState({
     title: template?.title || '', client: presetClient || template?.client?._id || '', project: presetProject || template?.project?._id || '', assignees: template?.assignees?.map(a => a._id || a) || [], owner: template?.owner?._id || template?.owner || '', dueDate: toInputDate(new Date()),
-    priority: template?.priority || 'normal', sop: template?.sop || '', checklist: template?.checklist?.length ? [...template.checklist] : [''], frequency: template?.frequency || 'weekly', weekday: template?.weekday ?? 1, monthDay: template?.monthDay ?? 1,
+    priority: template?.priority || 'normal', sop: template?.sop || '', checklist: template?.checklist?.length ? [...template.checklist] : [''], frequency: template?.frequency || 'weekly', weekday: template?.weekday ?? 1, monthDay: template?.monthDay ?? 1, monthDays: template?.monthDays?.length === 2 ? [...template.monthDays] : [1, 15], weekdays: template?.weekdays || [], startsOn: toInputDate(template?.startsOn || new Date()),
   });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -199,7 +219,7 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
       title: f.title, client: f.client, project: f.project || undefined, assignees: f.assignees, owner: f.owner || undefined,
       priority: f.priority, sop: f.sop, checklist: f.checklist.map((s) => s.trim()).filter(Boolean),
       ...(recurring
-        ? { frequency: f.frequency, weekday: Number(f.weekday), monthDay: Number(f.monthDay) }
+        ? { frequency: f.frequency, weekday: Number(f.weekday), weekdays: f.weekdays, monthDay: Number(f.monthDay), monthDays: f.monthDays.map(Number), startsOn: new Date(`${f.startsOn}T00:00:00`).toISOString() }
         : { dueDate: new Date(`${f.dueDate}T17:00:00`).toISOString() }),
     };
     try {
@@ -226,11 +246,18 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
           <div className="grid grid-2">
             <Field label="Repeats">
               <select className="select" value={f.frequency} onChange={set('frequency')}>
-                <option value="daily">Every working day</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+                <option value="daily">Every working day</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="semimonthly">Twice monthly (two dates)</option>
               </select>
             </Field>
-            {f.frequency === 'weekly' && <Field label="On"><select className="select" value={f.weekday} onChange={set('weekday')}>{WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</select></Field>}
-            {f.frequency === 'monthly' && <Field label="Day of month"><select className="select" value={f.monthDay} onChange={set('monthDay')}>{Array.from({ length: 28 }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}</select></Field>}
+            {f.frequency === 'weekly' && <Field label="On"><select className="select" value={f.weekday} onChange={e => setF(s => ({ ...s, weekday: e.target.value, weekdays: [] }))}>{WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}</select></Field>}
+            {f.frequency === 'monthly' && <Field label="Day of month"><select className="select" value={f.monthDay} onChange={set('monthDay')}>{Array.from({ length: 31 }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}</select></Field>}
+            {f.frequency === 'semimonthly' && [0,1].map(index => <Field key={index} label={index === 0 ? 'First date each month' : 'Second date each month'}>
+              <select className="select" value={f.monthDays[index]} onChange={e => setF(s => ({ ...s, monthDays: s.monthDays.map((d,i) => i === index ? Number(e.target.value) : d) }))}>
+                {Array.from({ length: 31 }, (_, i) => <option key={i} value={i + 1}>{i + 1}</option>)}
+              </select>
+            </Field>)}
+            <Field label="Start date"><input type="date" className="input" required value={f.startsOn} onChange={set('startsOn')} /></Field>
+            <p className="small muted">Two dates means twice per month. Dates 29–31 fall on the last day in shorter months.</p>
           </div>
         ) : (
           <div className="grid grid-2">

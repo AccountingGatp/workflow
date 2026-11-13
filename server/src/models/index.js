@@ -156,10 +156,12 @@ export const TaskTemplate = model('TaskTemplate', new Schema({
   team: ref('Team'),
   assignees: [ref('User')],
   owner: ref('User'),
-  frequency: { type: String, enum: ['daily', 'weekly', 'monthly'], required: true },
+  frequency: { type: String, enum: ['daily', 'weekly', 'monthly', 'semimonthly'], required: true },
   weekday: { type: Number, min: 0, max: 6 },    // weekly: 0=Sun
   weekdays: [{ type: Number, min: 0, max: 6 }], // optional two or more days per week
-  monthDay: { type: Number, min: 1, max: 28 },  // monthly
+  monthDays: [{ type: Number, min: 1, max: 31 }],
+  importKey: { type: String, unique: true, sparse: true },
+  monthDay: { type: Number, min: 1, max: 31 },  // monthly; dates beyond month end use the last day
   priority: { type: String, enum: ['low', 'normal', 'high'], default: 'normal' },
   sop: String,
   checklist: [String],
@@ -177,16 +179,23 @@ const taskSchema = new Schema({
   assignees: [ref('User')],
   owner: ref('User'), // single accountable person even when several are assigned
   dueDate: { type: Date, required: true },
-  status: { type: String, enum: ['todo', 'in_progress', 'waiting', 'done'], default: 'todo' },
+  scheduledDate: Date, // original recurring slot, retained if the due date is moved
+  status: { type: String, enum: ['todo', 'in_progress', 'waiting', 'pending_review', 'done', 'cancelled'], default: 'todo' },
   priority: { type: String, enum: ['low', 'normal', 'high'], default: 'normal' },
   sop: String,
   checklist: [checklistItem],
   template: ref('TaskTemplate'),
   mailThread: ref('MailThread'),
+  submittedAt: Date,
+  submittedBy: ref('User'),
+  reviewedAt: Date,
+  reviewedBy: ref('User'),
+  deletedAt: Date,
   completedAt: Date,
   completedBy: ref('User'),
   createdBy: ref('User'),
 }, opts);
+taskSchema.set('optimisticConcurrency', true);
 taskSchema.index({ template: 1, dueDate: 1 }, { unique: true, partialFilterExpression: { template: { $exists: true } } });
 taskSchema.index({ assignees: 1, dueDate: 1 });
 taskSchema.index({ client: 1, dueDate: 1, _id: 1 });

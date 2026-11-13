@@ -4,10 +4,12 @@ const LOOKAHEAD_DAYS = 14;
 
 const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 
-function matches(tpl, day) {
+export function matches(tpl, day) {
   if (tpl.frequency === 'daily') return day.getDay() !== 0 && day.getDay() !== 6; // working days
   if (tpl.frequency === 'weekly') return Array.isArray(tpl.weekdays) && tpl.weekdays.length > 0 ? tpl.weekdays.includes(day.getDay()) : day.getDay() === (tpl.weekday ?? 1);
-  if (tpl.frequency === 'monthly') return day.getDate() === (tpl.monthDay ?? 1);
+  const lastDay = new Date(day.getFullYear(), day.getMonth() + 1, 0).getDate();
+  if (tpl.frequency === 'monthly') return day.getDate() === Math.min(tpl.monthDay ?? 1, lastDay);
+  if (tpl.frequency === 'semimonthly') return (tpl.monthDays || []).some(d => day.getDate() === Math.min(d, lastDay));
   return false;
 }
 
@@ -29,9 +31,9 @@ export async function generateRecurringTasks(templateId) {
       if (!matches(tpl, day)) continue;
       const due = new Date(day); due.setHours(17, 0, 0, 0);
       const res = await Task.updateOne(
-        { template: tpl._id, dueDate: due },
+        { template: tpl._id, $or: [{ dueDate: due }, { scheduledDate: due }] },
         { $setOnInsert: {
-          title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees: tpl.assignees,
+          scheduledDate: due, dueDate: due, template: tpl._id, title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees: tpl.assignees,
           owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
           checklist: tpl.checklist.map((text) => ({ text })), createdBy: tpl.createdBy,
         } },

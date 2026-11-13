@@ -1,0 +1,87 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import mongoose from 'mongoose';
+import jwt from 'jsonwebtoken';
+import { MongoMemoryServer } from 'mongodb-memory-server';
+import app, { handleErrors } from '../src/app.js';
+import { User, Client, Team, TeamMembership, ClientAssignment, ClientProject, Task, TaskTemplate, ProjectWorkItem } from '../src/models/index.js';
+import { JWT_SECRET } from '../src/middleware/auth.js';
+import { seedLoanReminders } from '../src/seed-loan-reminders.js';
+import { generateRecurringTasks } from '../src/services/recurrence.js';
+
+test('API roles, scheduling, reviewed completion, deletion and loan migration', async () => {
+  const db = await MongoMemoryServer.create({ instance: { args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] } });
+  let server;
+  try {
+    await mongoose.connect(db.getUri());
+    await Promise.all([Task.init(),TaskTemplate.init(),ProjectWorkItem.init()]);
+    handleErrors(app);
+    server = app.listen(0);
+    const base = `http://127.0.0.1:${server.address().port}/api`;
+    const person = (name,role,email) => User.create({ name,role,email,passwordHash:'fixture-only',active:true });
+    const admin = await person('Owner','super_admin','owner@test.example');
+    const tl = await person('TL','admin','tl@test.example');
+    const outsider = await person('Other TL','admin','other@test.example');
+    const sathya = await person('Sathya Priya','employee','sathya.p@gatpsolutions.com');
+    const client = await Client.create({ name:'Republic Supply Company LLC' });
+    const project = await ClientProject.create({ client:client._id,name:'Bluntd' });
+    const team = await Team.create({ name:'Bluntd team' });
+    await TeamMembership.create([{ user:tl._id,team:team._id,teamRole:'lead' },{ user:sathya._id,team:team._id }]);
+    await ClientAssignment.create({ client:client._id,team:team._id });
+    async function request(user,path,method='GET',body,status=200) {
+      const response = await fetch(base+path,{ method,headers:{ 'content-type':'application/json',authorization:'Bearer '+jwt.sign({sub:String(user._id)},JWT_SECRET) },body:body && JSON.stringify(body) });
+      const data=await response.json();
+      assert.equal(response.status,status,JSON.stringify(data));return data;
+    }
+    const draft={ title:'API fixture',client:String(client._id),project:String(project._id),assignees:[String(sathya._id)],dueDate:new Date().toISOString(),checklist:['Verify'] };
+    await request(sathya,'/tasks','POST',draft,403);
+    await request(outsider,'/tasks','POST',draft,403);
+    const task=await request(tl,'/tasks','POST',draft,201);
+    await request(sathya,`/tasks/${task._id}`,'PATCH',{status:'done'},400);
+    await request(sathya,`/tasks/${task._id}`,'PATCH',{checklistItem:{ id:task.checklist[0]._id,done:true }});
+    const submitted=await request(sathya,`/tasks/${task._id}`,'PATCH',{status:'done'});
+    assert.equal(submitted.status,'pending_review');
+    await request(sathya,`/tasks/${task._id}`,'PATCH',{confirmCompletion:true},403);
+    await request(outsider,`/tasks/${task._id}`,'PATCH',{confirmCompletion:true},404);
+    const approved=await request(tl,`/tasks/${task._id}`,'PATCH',{confirmCompletion:true});
+    assert.equal(approved.status,'done');assert.equal(approved.reviewedBy,String(tl._id));
+    await request(sathya,`/tasks/${task._id}`,'PATCH',{checklistItem:{id:task.checklist[0]._id,done:false}},400);
+    const reopened=await request(tl,`/tasks/${task._id}`,'PATCH',{title:'Updated by TL'});
+    assert.equal(reopened.status,'in_progress');assert.equal(reopened.reviewedBy,undefined);
+    await request(tl,`/tasks/${task._id}`,'DELETE',undefined,403);
+    await request(admin,`/tasks/${task._id}`,'DELETE');
+    await request(admin,`/tasks/${task._id}`,'GET',undefined,404);
+    const listed=await request(admin,'/tasks?scope=all');assert.equal(listed.total,0);
+    const semi = await request(tl,'/templates','POST',{...draft,frequency:'semimonthly',monthDays:[5,20],startsOn:'2026-01-01'},201);
+    assert.deepEqual(semi.template.monthDays,[5,20]);
+    await request(tl,'/templates','POST',{...draft,frequency:'semimonthly',monthDays:[5,5]},400);
+    const daily=await request(tl,'/templates','POST',{...draft,frequency:'daily'},201);
+    const moved=await Task.findOne({template:daily.template._id});
+    const originalDate=moved.dueDate;
+    await request(tl,`/tasks/${moved._id}`,'PATCH',{dueDate:new Date(new Date(originalDate).getTime()+60*60000).toISOString()});
+    await generateRecurringTasks(daily.template._id);
+    assert.equal(await Task.countDocuments({template:daily.template._id,scheduledDate:originalDate}),1);
+    const occurrence=await Task.findOne({template:daily.template._id,_id:{$ne:moved._id}});
+    await request(admin,`/tasks/${occurrence._id}`,'DELETE');
+    await generateRecurringTasks(daily.template._id);
+    assert.equal(await Task.countDocuments({template:daily.template._id,dueDate:occurrence.dueDate}),1);
+    assert.ok((await Task.findById(occurrence._id)).deletedAt);
+    await request(admin,`/clients/${client._id}`,'PATCH',{name:'Renamed client'});
+    await request(admin,`/clients/${client._id}`,'PATCH',{name:'  '},400);
+    await request(admin,`/clients/${client._id}`,'PATCH',{name:'Republic Supply Company LLC'});
+    await request(admin,`/clients/${client._id}/projects/${project._id}`,'PATCH',{name:'Bluntd renamed'});
+    await request(admin,`/clients/${client._id}/projects/${project._id}`,'PATCH',{name:'Bluntd'});
+    assert.equal((await seedLoanReminders()).created,4);
+    assert.equal((await seedLoanReminders()).alreadyApplied,true);
+    const loans=await TaskTemplate.find({importKey:{$exists:true}});
+    assert.equal(loans.length,4);
+    assert.equal(loans.filter(t=>t.assignees.length===0&&t.monthDay===20).length,3);
+    assert.equal(String(loans.find(t=>t.monthDay===12).assignees[0]),String(sathya._id));
+    assert.equal(await ProjectWorkItem.countDocuments({project:project._id}),4);
+    const mercedes=loans.find(t=>t.monthDay===12);await mercedes.deleteOne();
+    await seedLoanReminders();assert.equal(await TaskTemplate.countDocuments({importKey:{$exists:true}}),3);
+  } finally {
+    if (server) await new Promise(resolve=>server.close(resolve));
+    await mongoose.disconnect();await db.stop();
+  }
+});

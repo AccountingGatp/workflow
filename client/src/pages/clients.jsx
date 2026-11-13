@@ -84,6 +84,8 @@ export function ClientDetail() {
   const hasProjects = (projects.data || []).length > 0;
   const [openId, setOpenId] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [editingClient, setEditingClient] = useState(false);
+  const [recurring, setRecurring] = useState(false);
   const [granting, setGranting] = useState(false);
   const [assigning, setAssigning] = useState(false);
   const toast = useToast();
@@ -105,6 +107,8 @@ export function ClientDetail() {
     <>
       <Link to="/clients" className="row small" style={{ color: 'var(--text-3)', marginBottom: 8 }}><ArrowLeft size={16} />Clients</Link>
       <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></span>}>
+        {c.isSuper && <button className="btn btn-outline" onClick={() => setEditingClient(true)}>Edit client / company</button>}
+        {c.canManage && !hasProjects && <button className="btn btn-outline" onClick={() => setRecurring(true)}>Recurring task</button>}
         {c.canManage && !hasProjects && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
       <div className="grid grid-2" style={{ marginBottom: 20 }}>
@@ -172,6 +176,8 @@ export function ClientDetail() {
         <TaskPagination {...tasks} />
       </div>}
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={tasks.reload} />}
+      {editingClient && <ClientDetailsEditor client={c} onClose={() => setEditingClient(false)} onSaved={reload} />}
+      {recurring && <TaskForm recurring presetClient={id} onClose={() => setRecurring(false)} onSaved={tasks.reload} />}
       {creating && <TaskForm presetClient={id} onClose={() => setCreating(false)} onSaved={tasks.reload} />}
       {granting && <GrantAccess client={c} onClose={() => setGranting(false)} onSaved={reload} />}
       {assigning && <AssignManager client={c} onClose={() => setAssigning(false)} onSaved={reload} />}
@@ -252,4 +258,18 @@ function AssignManager({ client, onClose, onSaved }) {
       ))}</div></Field>
     </Modal>
   );
+}
+
+function ClientDetailsEditor({ client, onClose, onSaved }) {
+  const [form, setForm] = useState(() => Object.fromEntries(['name', 'accountingId', 'contactName', 'contactEmail', 'contactPhone', 'notes'].map(k => [k, client[k] || ''])));
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const fields = { name: 'Client / company name', accountingId: 'Accounting ID', contactName: 'Contact name', contactEmail: 'Contact email', contactPhone: 'Contact phone', notes: 'Notes' };
+  return <Modal title="Edit client / company" onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button form="edit-client" className="btn btn-primary" disabled={busy || !form.name.trim()}>Save changes</button></>}>
+    <form id="edit-client" className="stack" style={{ gap: 12 }} onSubmit={async e => {
+      e.preventDefault(); setBusy(true); setError(null);
+      try { await api(`/clients/${client._id}`, { method: 'PATCH', body: form }); onSaved(); onClose(); }
+      catch (e) { setError(e); } finally { setBusy(false); }
+    }}><ErrorBox error={error}/>{Object.entries(fields).map(([key,label]) => <Field key={key} label={label}><input className="input" required={key === 'name'} maxLength={key === 'name' ? 120 : undefined} value={form[key]} onChange={e => setForm(s => ({ ...s, [key]: e.target.value }))}/></Field>)}</form>
+  </Modal>;
 }

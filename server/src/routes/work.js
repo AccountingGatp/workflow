@@ -6,6 +6,8 @@ import {
   audit, isSuper, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter, canGrantDirectly,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
+import { scheduleFields } from '../services/schedule.js';
+import { applyTaskTransition } from '../services/task-review.js';
 
 const r = Router();
 const validateProject = async (clientId, projectId) => {
@@ -21,7 +23,7 @@ const validateProject = async (clientId, projectId) => {
 };
 
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name');
+  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name').populate('submittedBy', 'name').populate('reviewedBy', 'name');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
@@ -49,7 +51,7 @@ const dayBounds = () => {
   const week = new Date(end); week.setDate(week.getDate() + 7);
   return { start, end, week };
 };
-const upcomingTemplateIds = async () => TaskTemplate.find({ frequency: { $in: ['weekly', 'monthly'] } }).distinct('_id');
+const upcomingTemplateIds = async () => TaskTemplate.find({ frequency: { $in: ['weekly', 'monthly', 'semimonthly'] } }).distinct('_id');
 const viewFilter = (view, dates, weeklyMonthly) => {
   const { start, end, week } = dates;
   const nextWeek = { dueDate: { $gt: end, $lte: week }, template: { $in: weeklyMonthly }, status: { $ne: 'done' } };
@@ -131,7 +133,7 @@ r.get('/manager-workload', ah(async (req, res) => {
   }
   if (projectId === 'unassigned' && !clientId) throw new HttpError(400, 'Choose a client first');
   const ids = clientId ? [clientId] : managed;
-  const match = ids === null ? {} : { client: { $in: ids.map(id => new mongoose.Types.ObjectId(String(id))) } };
+  const match = { deletedAt: null, ...(ids === null ? {} : { client: { $in: ids.map(id => new mongoose.Types.ObjectId(String(id))) } }) };
   if (projectId) match.project = projectId === 'unassigned' ? null : new mongoose.Types.ObjectId(projectId);
   const { start, end, week } = dayBounds();
   const done = { $eq: ['$status', 'done'] };
@@ -184,7 +186,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
-  res.json({ ...task, activity, canEdit: await canManageClient(req.user, task.client._id) });
+  res.json({ ...task, activity, canEdit: await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user) });
 }));
 
 r.post('/tasks', ah(async (req, res) => {
@@ -210,11 +212,25 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   const body = req.body || {};
   const notes = [];
 
-  if (body.status && body.status !== task.status) {
-    notes.push(`status ${task.status} → ${body.status}`);
-    task.status = body.status;
-    task.completedAt = body.status === 'done' ? new Date() : undefined;
-    task.completedBy = body.status === 'done' ? req.user._id : undefined;
+  if (body.confirmCompletion && Object.keys(body).some(k => k !== 'confirmCompletion')) throw new HttpError(400, 'Save other changes before confirming completion');
+  if (body.checklistItem && (body.confirmCompletion || ['done', 'pending_review'].includes(body.status))) throw new HttpError(400, 'Save checklist changes before submitting or reviewing');
+  if (['done', 'pending_review'].includes(task.status) && manager && (body.checklistItem || ['title', 'dueDate', 'sop', 'assignees', 'project'].some(k => body[k] !== undefined))) {
+    task.status = 'in_progress'; task.completedAt = undefined; task.completedBy = undefined;
+    task.submittedAt = undefined; task.submittedBy = undefined; task.reviewedAt = undefined; task.reviewedBy = undefined;
+    notes.push('reopened after approved work changed');
+  }
+  if (body.status || body.confirmCompletion) {
+    const previous = task.status;
+    applyTaskTransition(task, body, { manager, isAssignee, actorId: req.user._id });
+    if (previous !== task.status) notes.push(`status ${previous} → ${task.status}`);
+  }
+  if (!manager && task.status === 'done' && body.checklistItem) {
+    throw new HttpError(400, 'Reopen the task before changing approved work');
+  }
+  if (body.checklistItem && task.status === 'pending_review') {
+    task.status = 'in_progress';
+    task.submittedAt = undefined; task.submittedBy = undefined;
+    notes.push('review reset after checklist changed');
   }
   if (body.checklistItem) {
     const item = task.checklist.id(body.checklistItem.id);
@@ -230,7 +246,9 @@ r.patch('/tasks/:id', ah(async (req, res) => {
       notes.push('changed project');
     }
     for (const k of ['title', 'dueDate', 'priority', 'sop', 'owner', 'team']) {
-      if (body[k] !== undefined) { task[k] = body[k] || undefined; notes.push(`changed ${k}`); }
+      if (body[k] !== undefined) {
+        if (k === 'dueDate' && task.template && !task.scheduledDate) task.scheduledDate = task.dueDate;
+        task[k] = body[k] || undefined; notes.push(`changed ${k}`); }
     }
     if (body.assignees) {
       await assertAssignable(req.user, task.client, body.assignees);
@@ -241,6 +259,16 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   await task.save();
   if (notes.length) audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, summary: notes.join(', ') });
   res.json(task);
+}));
+
+r.delete('/tasks/:id', ah(async (req, res) => {
+  if (!isSuper(req.user)) throw new HttpError(403, 'Only Super Admins can delete tasks');
+  const task = await Task.findOne({ _id: req.params.id, deletedAt: null });
+  if (!task) throw new HttpError(404, 'Task not found');
+  task.deletedAt = new Date(); task.status = 'cancelled';
+  await task.save();
+  await audit(req.user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, summary: `Deleted task occurrence “${task.title}”` });
+  res.json({ ok: true });
 }));
 
 /* ---------- Recurring templates ---------- */
@@ -258,7 +286,8 @@ r.post('/templates', ah(async (req, res) => {
   if (!(await canManageClient(req.user, b.client))) throw new HttpError(403, 'You can only schedule work for clients you manage');
   const validProject = await validateProject(b.client, b.project);
   await assertAssignable(req.user, b.client, b.assignees || []);
-  const tpl = await TaskTemplate.create({ ...b, project: validProject, team: b.team || undefined, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
+  const schedule = scheduleFields(b);
+  const tpl = await TaskTemplate.create({ title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined, assignees: b.assignees || [], owner: (b.assignees || []).includes(b.owner) ? b.owner : b.assignees?.[0], priority: b.priority, sop: b.sop, ...schedule, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
   const created = await generateRecurringTasks(tpl._id);
   audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });
   res.status(201).json({ template: tpl, created });
@@ -281,15 +310,13 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
   if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can edit recurring tasks');
   const b = req.body || {};
   if (!String(b.title || '').trim()) throw new HttpError(400, 'Task name is required');
-  if (!['daily', 'weekly', 'monthly'].includes(b.frequency)) throw new HttpError(400, 'Invalid frequency');
+  const schedule = scheduleFields(b);
   const assignees = Array.isArray(b.assignees) ? b.assignees : [];
   const validProject = await validateProject(tpl.client, b.project ?? tpl.project);
   await assertAssignable(req.user, tpl.client, assignees);
   tpl.project = validProject;
   tpl.title = String(b.title).trim();
-  tpl.frequency = b.frequency;
-  tpl.weekday = b.frequency === 'weekly' ? Number(b.weekday ?? 1) : undefined;
-  tpl.monthDay = b.frequency === 'monthly' ? Number(b.monthDay ?? 1) : undefined;
+  Object.assign(tpl, schedule);
   tpl.priority = b.priority || 'normal';
   tpl.sop = String(b.sop || '');
   tpl.checklist = (Array.isArray(b.checklist) ? b.checklist : []).map(x => String(x).trim()).filter(Boolean);

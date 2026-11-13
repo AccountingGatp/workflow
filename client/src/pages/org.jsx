@@ -210,7 +210,7 @@ function NewPerson({ onClose, onSaved }) {
 
 const FREQ = (t) => t.frequency === 'daily' ? 'Every working day'
   : t.frequency === 'weekly' ? `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][t.weekday ?? 1]}`
-  : `Monthly on day ${t.monthDay}`;
+  : t.frequency === 'semimonthly' ? `Twice monthly on ${(t.monthDays || []).join(' and ')}` : `Monthly on day ${t.monthDay}`;
 
 export function Recurring() {
   const { data, loading, reload } = useApi('/templates');

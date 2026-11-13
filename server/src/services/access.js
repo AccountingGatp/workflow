@@ -81,12 +81,13 @@ export async function canGrantDirectly(actor, clientId, targetUserId) {
 
 /** Mongo filter for tasks the user can see. */
 export async function taskScope(user) {
-  if (isSuper(user)) return {};
+  if (isSuper(user)) return { deletedAt: null };
   const managed = await managedClientIds(user);
   const visible = await visibleClientIds(user);
   // Admins see every task on clients they manage; anyone sees their own assigned tasks
   // provided they still have access to that client.
   return {
+    deletedAt: null,
     $or: [
       { client: { $in: managed } },
       { assignees: user._id, client: { $in: visible } },

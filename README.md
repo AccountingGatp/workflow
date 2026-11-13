@@ -96,3 +96,15 @@ Emails are stored as plain text, and attachments are listed by name only for now
 
 **Try it without Google:** run `node scripts/fake-gmail.js` from `server/` (settings are at the top of that file).
 With a fresh database, `bash scripts/test-mail.sh` runs the full access and review test against it.
+
+## Scheduling and completion review
+
+Super Admins can edit client/company details from **Edit client / company**, edit project names from **Edit project**, and delete individual task occurrences from the task drawer. Deleting an occurrence leaves a cancellation record so the scheduler will not recreate it. Cancel a recurring schedule from **Recurring work** to stop future occurrences.
+
+Client managers and team leaders can create tasks, edit a task's title and due date in its drawer, and maintain recurring schedules. Weekly schedules select a weekday; monthly schedules select day 1–31; **Twice monthly (two dates)** selects two different dates each month, rather than every 14 days. Dates beyond the end of a month run on that month's last day. Existing server calendar/timezone behavior is retained.
+
+Assigned employees complete the checklist and submit work for review. It stays open as **Awaiting TL confirmation** until a client manager ticks the confirmation checkbox and confirms completion. The employee, reviewer and timestamps are recorded. A user cannot approve their own submission. Managers can return work to the employee. Changing approved work reopens it for review. Existing completed history is preserved.
+
+A one-time, resumable import adds four Bluntd loan reminders from the November 13 screenshots: Auto Loan Mercedes on the 12th (Sathya Priya's existing account), and First insurance funding, Ford van, and TD Auto finance on the 20th (unassigned pending clarification). Screenshot last-paid dates are historical references only. The import uses existing accounts/project, never creates people or changes existing schedules, and does not recreate reminders after they are cancelled.
+
+Validation: `npm test --prefix server` (temporary MongoDB for API tests), `npm run build --prefix client`, and `npm run lint --prefix client`. If your environment cannot run the default bundled MongoDB binary, set `MONGOMS_VERSION` to a supported MongoDB version.
