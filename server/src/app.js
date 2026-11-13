@@ -12,6 +12,7 @@ import projectWorkRoutes from './routes/project-work.js';
 import mailRoutes, { mailPublic } from './routes/mail.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
+import { assignLoanReviewers } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
 import { ensureActivityRetention } from './models/index.js';
@@ -32,6 +33,7 @@ async function connect() {
   await seedIfEmpty();
   const loanImport = await seedLoanReminders();
   console.info('Bluntd loan reminder import:', loanImport);
+  console.info('Bluntd loan assignments:', await assignLoanReviewers());
 }
 
 // Connect once per process; serverless invocations reuse the same connection while warm.

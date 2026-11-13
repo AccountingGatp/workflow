@@ -91,6 +91,7 @@ export async function taskScope(user) {
     $or: [
       { client: { $in: managed } },
       { assignees: user._id, client: { $in: visible } },
+      { reviewer: user._id, client: { $in: visible } },
     ],
   };
 }

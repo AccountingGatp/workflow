@@ -268,12 +268,13 @@ export function Recurring() {
           <div className="card" style={{ overflow: 'hidden' }}>
             {loading && !data ? <Skeleton /> : templates.length === 0 ? <Empty icon={Repeat} title="No recurring tasks for this client yet" /> : (
               <div className="table-wrap"><table>
-                <thead><tr><th>Task</th><th>Schedule</th><th>Assigned</th><th>Status</th><th /></tr></thead>
+                <thead><tr><th>Task</th><th>Schedule</th><th>Assigned</th><th>Reviewer</th><th>Status</th><th /></tr></thead>
                 <tbody>{templates.map((t) => (
                   <tr key={t._id} style={!t.active ? { opacity: .55 } : undefined}>
                     <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
                     <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
                     <td><Avatars people={t.assignees} /></td>
+                    <td>{t.reviewer?.name || 'Client TL / Admin'}</td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
                     <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>
                       <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>

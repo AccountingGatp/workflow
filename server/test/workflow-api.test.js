@@ -7,6 +7,7 @@ import app, { handleErrors } from '../src/app.js';
 import { User, Client, Team, TeamMembership, ClientAssignment, ClientProject, Task, TaskTemplate, ProjectWorkItem } from '../src/models/index.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import { seedLoanReminders } from '../src/seed-loan-reminders.js';
+import { assignLoanReviewers } from '../src/assign-loan-reviewers.js';
 import { generateRecurringTasks } from '../src/services/recurrence.js';
 
 test('API roles, scheduling, reviewed completion, deletion and loan migration', async () => {
@@ -22,6 +23,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const admin = await person('Owner','super_admin','owner@test.example');
     const tl = await person('TL','admin','tl@test.example');
     const outsider = await person('Other TL','admin','other@test.example');
+    const krupali = await person('Krupali','admin','krupali.s@gatpsolutions.com');
     const sathya = await person('Sathya Priya','employee','sathya.p@gatpsolutions.com');
     const client = await Client.create({ name:'Republic Supply Company LLC' });
     const project = await ClientProject.create({ client:client._id,name:'Bluntd' });
@@ -78,6 +80,19 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     assert.equal(loans.filter(t=>t.assignees.length===0&&t.monthDay===20).length,3);
     assert.equal(String(loans.find(t=>t.monthDay===12).assignees[0]),String(sathya._id));
     assert.equal(await ProjectWorkItem.countDocuments({project:project._id}),4);
+    assert.equal((await assignLoanReviewers()).schedulesUpdated,4);
+    assert.equal((await assignLoanReviewers()).alreadyApplied,true);
+    const assignedLoans=await TaskTemplate.find({importKey:{$exists:true}});
+    assert.ok(assignedLoans.every(t=>String(t.assignees[0])===String(sathya._id)&&String(t.reviewer)===String(krupali._id)));
+    const loanTask=await Task.findOne({template:{$in:assignedLoans.map(t=>t._id)}});
+    const detail=await request(krupali,`/tasks/${loanTask._id}`);
+    assert.equal(detail.reviewer.name,'Krupali');assert.equal(detail.canReview,true);
+    const reviewList=await request(krupali,'/tasks?scope=mine');assert.ok(reviewList.items.some(t=>t._id===String(loanTask._id)));
+    await request(sathya,`/tasks/${loanTask._id}`,'PATCH',{checklistItem:{id:loanTask.checklist[0]._id,done:true}});
+    await request(sathya,`/tasks/${loanTask._id}`,'PATCH',{status:'pending_review'});
+    await request(tl,`/tasks/${loanTask._id}`,'PATCH',{confirmCompletion:true},403);
+    const reviewed=await request(krupali,`/tasks/${loanTask._id}`,'PATCH',{confirmCompletion:true});
+    assert.equal(reviewed.status,'done');assert.equal(reviewed.reviewedBy,String(krupali._id));
     const mercedes=loans.find(t=>t.monthDay===12);await mercedes.deleteOne();
     await seedLoanReminders();assert.equal(await TaskTemplate.countDocuments({importKey:{$exists:true}}),3);
   } finally {

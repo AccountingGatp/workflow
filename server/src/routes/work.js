@@ -7,7 +7,7 @@ import {
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 import { scheduleFields } from '../services/schedule.js';
-import { applyTaskTransition } from '../services/task-review.js';
+import { applyTaskTransition, mayReview } from '../services/task-review.js';
 
 const r = Router();
 const validateProject = async (clientId, projectId) => {
@@ -23,7 +23,7 @@ const validateProject = async (clientId, projectId) => {
 };
 
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name').populate('submittedBy', 'name').populate('reviewedBy', 'name');
+  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name').populate('owner', 'name').populate('completedBy', 'name').populate('submittedBy', 'name').populate('reviewedBy', 'name').populate('reviewer', 'name');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
@@ -68,7 +68,7 @@ const viewFilter = (view, dates, weeklyMonthly) => {
 const taskFilters = async (req, dates, weeklyMonthly) => {
   const { scope = 'mine', status, client, project, team, assignee, from, to, view = 'all', q } = req.query;
   const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly)];
-  if (scope === 'mine') clauses.push({ assignees: req.user._id });
+  if (scope === 'mine') clauses.push({ $or: [{ assignees: req.user._id }, { reviewer: req.user._id }] });
   if (scope === 'managed') {
     if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
     const managed = await managedClientIds(req.user);
@@ -186,7 +186,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
-  res.json({ ...task, activity, canEdit: await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user) });
+  res.json({ ...task, activity, canEdit: await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user), canReview: mayReview(task, { manager: await canManageClient(req.user, task.client._id), actorId: req.user._id, isSuper: isSuper(req.user) }) });
 }));
 
 r.post('/tasks', ah(async (req, res) => {
@@ -208,9 +208,11 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   if (!task) throw new HttpError(404, 'Task not found');
   const manager = await canManageClient(req.user, task.client);
   const isAssignee = task.assignees.some((a) => String(a) === String(req.user._id));
-  if (!manager && !isAssignee) throw new HttpError(403, 'Only assignees or managing admins can update this task');
+  const isReviewer = String(task.reviewer) === String(req.user._id);
+  if (!manager && !isAssignee && !isReviewer) throw new HttpError(403, 'Only assignees, reviewers or managing admins can update this task');
   const body = req.body || {};
   const notes = [];
+  if (!manager && !isAssignee && (body.checklistItem || (body.status && !['in_progress', 'waiting'].includes(body.status)))) throw new HttpError(403, 'Reviewers may confirm completion or return work to the employee');
 
   if (body.confirmCompletion && Object.keys(body).some(k => k !== 'confirmCompletion')) throw new HttpError(400, 'Save other changes before confirming completion');
   if (body.checklistItem && (body.confirmCompletion || ['done', 'pending_review'].includes(body.status))) throw new HttpError(400, 'Save checklist changes before submitting or reviewing');
@@ -221,7 +223,7 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   }
   if (body.status || body.confirmCompletion) {
     const previous = task.status;
-    applyTaskTransition(task, body, { manager, isAssignee, actorId: req.user._id });
+    applyTaskTransition(task, body, { manager: manager || isReviewer, isAssignee, actorId: req.user._id, isSuper: isSuper(req.user) });
     if (previous !== task.status) notes.push(`status ${previous} → ${task.status}`);
   }
   if (!manager && task.status === 'done' && body.checklistItem) {
@@ -277,7 +279,7 @@ r.get('/templates', ah(async (req, res) => {
   const managed = await managedClientIds(req.user);
   const filter = managed === null ? {} : { client: { $in: managed } };
   res.json(await TaskTemplate.find(filter).sort({ createdAt: -1 })
-    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name').lean());
+    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name').populate('reviewer', 'name').lean());
 }));
 
 r.post('/templates', ah(async (req, res) => {
@@ -358,7 +360,7 @@ r.get('/dashboard', ah(async (req, res) => {
   const sod = new Date(now); sod.setHours(0, 0, 0, 0);
   const eod = new Date(now); eod.setHours(23, 59, 59, 999);
   const scope = await taskScope(req.user);
-  const mine = { ...scope, assignees: req.user._id, status: { $ne: 'done' } };
+  const mine = { $and: [scope, { $or: [{ assignees: req.user._id }, { reviewer: req.user._id }] }], status: { $ne: 'done' } };
   const [dueToday, overdue, upcoming] = await Promise.all([
     Task.countDocuments({ ...mine, dueDate: { $gte: sod, $lte: eod } }),
     Task.countDocuments({ ...mine, dueDate: { $lt: sod } }),

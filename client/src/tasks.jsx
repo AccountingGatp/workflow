@@ -95,6 +95,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                   </select>
                 </>}
                 <span className="muted row"><Calendar size={16} />Due</span><span>{fmtDate(task.dueDate)}</span>
+                {task.reviewer && <><span className="muted row">Reviewer</span><strong>{task.reviewer.name}</strong></>}
                 <span className="muted row">Assigned</span>
                 <div className="row-wrap">
                   {task.assignees.map((a) => (
@@ -112,7 +113,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
               </div>}
               {task.submittedBy && <p className="small" style={{ marginTop: 16 }}>Submitted by {task.submittedBy.name} · {fmtTime(task.submittedAt)}</p>}
               {task.reviewedBy && <p className="small" style={{ color: 'var(--success)', marginTop: 12 }}>✓ Confirmed by {task.reviewedBy.name} · {fmtTime(task.reviewedAt)}</p>}
-              {task.canEdit && task.status === 'pending_review' && <div className="card card-pad stack" style={{ marginTop: 16 }}>
+              {task.canReview && task.status === 'pending_review' && <div className="card card-pad stack" style={{ marginTop: 16 }}>
                 <label className="row"><input type="checkbox" checked={confirmation} onChange={e => setConfirmedSubmission(e.target.checked ? submissionKey : null)} />I have confirmed with the employee and reviewed the completed work.</label>
                 <button className="btn btn-primary" disabled={busy || !confirmation} onClick={() => patch({ confirmCompletion: true })}>✓ Confirm completion</button>
                 <button className="btn btn-outline" disabled={busy} onClick={() => patch({ status: 'in_progress' })}>Return to employee</button>

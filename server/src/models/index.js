@@ -155,6 +155,7 @@ export const TaskTemplate = model('TaskTemplate', new Schema({
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
   assignees: [ref('User')],
+  reviewer: ref('User'),
   owner: ref('User'),
   frequency: { type: String, enum: ['daily', 'weekly', 'monthly', 'semimonthly'], required: true },
   weekday: { type: Number, min: 0, max: 6 },    // weekly: 0=Sun
@@ -177,6 +178,7 @@ const taskSchema = new Schema({
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
   assignees: [ref('User')],
+  reviewer: ref('User'),
   owner: ref('User'), // single accountable person even when several are assigned
   dueDate: { type: Date, required: true },
   scheduledDate: Date, // original recurring slot, retained if the due date is moved

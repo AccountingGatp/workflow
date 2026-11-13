@@ -1,9 +1,14 @@
 import { HttpError } from '../middleware/auth.js';
 
-export function applyTaskTransition(task, body, { manager, isAssignee, actorId }) {
+export function mayReview(task, { manager, actorId, isSuper = false }) {
+  const reviewer = task.reviewer?._id || task.reviewer;
+  return reviewer ? isSuper || String(reviewer) === String(actorId) : manager;
+}
+
+export function applyTaskTransition(task, body, { manager, isAssignee, actorId, isSuper = false }) {
   const now = new Date();
   if (body.confirmCompletion) {
-    if (!manager) throw new HttpError(403, 'Only the client TL or an admin can confirm completion');
+    if (!mayReview(task, { manager, actorId, isSuper })) throw new HttpError(403, 'Only the designated reviewer or Super Admin can confirm this task');
     if (task.status !== 'pending_review') throw new HttpError(400, 'Employee must submit the task for review first');
     if (String(task.submittedBy) === String(actorId)) throw new HttpError(400, 'Another manager must review your own submission');
     if (task.checklist.some(c => !c.done)) throw new HttpError(400, 'Complete all checklist steps first');
