@@ -274,7 +274,7 @@ export function Recurring() {
                     <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
                     <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
                     <td><Avatars people={t.assignees} /></td>
-                    <td>{t.reviewer?.name || 'Client TL / Admin'}</td>
+                    <td>{t.assignees.length > 0 && t.assignees.every(a => a.role !== 'employee') ? 'Not required' : t.reviewer?.name || 'Client TL'}</td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
                     <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>
                       <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>

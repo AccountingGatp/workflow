@@ -7,6 +7,7 @@ import app, { handleErrors } from '../src/app.js';
 import { User, Client, Team, TeamMembership, ClientAssignment, ClientProject, Task, TaskTemplate, ProjectWorkItem } from '../src/models/index.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import { seedLoanReminders } from '../src/seed-loan-reminders.js';
+import { applyEmployeeReviewPolicy } from '../src/employee-review-policy.js';
 import { assignLoanReviewers } from '../src/assign-loan-reviewers.js';
 import { generateRecurringTasks } from '../src/services/recurrence.js';
 
@@ -93,6 +94,16 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     await request(tl,`/tasks/${loanTask._id}`,'PATCH',{confirmCompletion:true},403);
     const reviewed=await request(krupali,`/tasks/${loanTask._id}`,'PATCH',{confirmCompletion:true});
     assert.equal(reviewed.status,'done');assert.equal(reviewed.reviewedBy,String(krupali._id));
+    const ownWork=await Task.create({ title:'Krupali own work', client:client._id, project:project._id, assignees:[krupali._id], reviewer:admin._id, dueDate:new Date(), status:'pending_review', submittedBy:krupali._id, submittedAt:new Date(), checklist:[] });
+    const policy=await applyEmployeeReviewPolicy();assert.equal(policy.reviewer,'Krupali');
+    assert.equal((await applyEmployeeReviewPolicy()).alreadyApplied,true);
+    const ownDetail=await request(krupali,`/tasks/${ownWork._id}`);assert.equal(ownDetail.canCompleteDirectly,true);assert.equal(ownDetail.reviewer,undefined);assert.equal(ownDetail.status,'in_progress');
+    const finished=await request(krupali,`/tasks/${ownWork._id}`,'PATCH',{status:'done'});assert.equal(finished.status,'done');assert.equal(finished.reviewedBy,undefined);
+    const newWork=await request(tl,'/tasks','POST',{...draft,title:'New employee work'},201);assert.equal(newWork.reviewer,String(krupali._id));
+    await request(sathya,`/tasks/${newWork._id}`,'PATCH',{checklistItem:{id:newWork.checklist[0]._id,done:true}});
+    await request(sathya,`/tasks/${newWork._id}`,'PATCH',{status:'done'});
+    await request(admin,`/tasks/${newWork._id}`,'PATCH',{confirmCompletion:true},403);
+    await request(krupali,`/tasks/${newWork._id}`,'PATCH',{confirmCompletion:true});
     const mercedes=loans.find(t=>t.monthDay===12);await mercedes.deleteOne();
     await seedLoanReminders();assert.equal(await TaskTemplate.countDocuments({importKey:{$exists:true}}),3);
   } finally {

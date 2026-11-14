@@ -11,6 +11,7 @@ export const User = model('User', new Schema({
   passwordHash: { type: String, required: true, select: false },
   role: { type: String, enum: ['super_admin', 'admin', 'employee'], default: 'employee' },
   title: String,
+  reviewLead: ref('User'), // employee's completion reviewer; TL/admin work completes directly
   active: { type: Boolean, default: true },
   deletedAt: Date, // removed people keep their name on past tasks and logs
 }, opts));
