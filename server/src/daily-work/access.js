@@ -2,8 +2,6 @@ import { User, TeamMembership, Client, ClientProject, Task } from '../models/ind
 import { HttpError } from '../middleware/auth.js';
 import { isSuper, ledTeamIds, managedClientIds, visibleClientIds } from '../services/access.js';
 
-export const manager = (user) => isSuper(user) || user.role === 'admin';
-
 export async function dailyScope(user) {
   const own = String(user._id);
   if (isSuper(user)) return { own, managed: null, visible: null, members: null };

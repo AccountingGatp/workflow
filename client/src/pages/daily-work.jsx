@@ -278,7 +278,7 @@ export default function DailyWork() {
   const tabs = [['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
   if (can.super || day.data?.hubstaffAccess) tabs.push(['hubstaff', 'Hubstaff']);
-  if (can.manage) tabs.push(['manage', 'Manage Data']);
+  if (can.super) tabs.push(['manage', 'Manage Data']);
   const requested = params.get('tab');
   const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
   const choose = (id) => {
