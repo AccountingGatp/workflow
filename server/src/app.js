@@ -25,8 +25,10 @@ async function connect() {
   if (!uri) {
     if (process.env.VERCEL) throw new Error('MONGODB_URI is not set in the Vercel project settings');
     // No database configured: run an in-memory MongoDB so the app works out of the box.
-    const { MongoMemoryServer } = await import('mongodb-memory-server');
-    const mem = await MongoMemoryServer.create();
+    const { MongoMemoryReplSet } = await import('mongodb-memory-server');
+    const mem = await MongoMemoryReplSet.create({
+      replSet: { count: 1, args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] },
+    });
     uri = mem.getUri('workflow');
     console.log('⚠  MONGODB_URI not set — using a temporary in-memory MongoDB (data resets on restart).');
   }

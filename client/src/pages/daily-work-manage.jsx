@@ -4,7 +4,8 @@ import { Badge, Empty, ErrorBox, Skeleton } from '../ui.jsx';
 
 const root = '/daily-work';
 const input = (value) => value ?? '';
-const editingItem = { title: '', description: '', hours: '' };
+const editingItem = { title: '', description: '', hours: '', period: 'daily' };
+const periodLimits = { daily: 24, weekly: 168, monthly: 744 };
 
 function Form({ children, submit, label = 'Save', cancel }) {
   const [busy, setBusy] = useState(false);
@@ -81,38 +82,43 @@ function Catalog({ project, items, save }) {
   return <section className="card daily-card stack">
     <h2>Task Name &amp; Description</h2>
     <Form label={task._id ? 'Update task' : 'Add task'} cancel={task._id ? () => setTask(editingItem) : undefined} submit={async () => {
-      const { title, hours, description } = task;
+      const { title, hours, description, period } = task;
       const result = await save(task._id ? `/catalog/${task._id}` : `/projects/${project._id}/catalog`, task._id ? 'PATCH' : 'POST',
-        { title, hours, description }, 'Catalog task saved.');
+        { title, hours, description, period }, 'Catalog task saved.');
       if (result) setTask(editingItem);
     }}>
       <div className="row-wrap daily-controls">
         <TextField label="Task name" value={task.title} set={field('title')} required maxLength={230} />
-        <TextField label="Required hours" value={task.hours} set={field('hours')} type="number" min="0" max="24" step="0.01" required />
+        <Select label="Limit period" value={task.period || 'daily'} set={field('period')} required>
+          <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+        </Select>
+        <TextField label="Hours per period" value={task.hours} set={field('hours')} type="number" min="0"
+          max={periodLimits[task.period || 'daily']} step="0.01" required />
       </div>
       <label className="field"><span>Description</span><textarea className="input" value={input(task.description)} maxLength={800}
         onChange={(event) => field('description')(event.target.value)} /></label>
     </Form>
-    {items.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Task</th><th>Description</th><th>Hours</th><th aria-label="Actions" /></tr></thead>
+    {items.length ? <div className="table-wrap"><table className="table"><thead><tr><th>Task</th><th>Description</th><th>Hour limit</th><th aria-label="Actions" /></tr></thead>
       <tbody>{items.map((item) => <tr key={item._id}><td>{item.title} {item.archived && <Badge>Archived</Badge>}</td>
-        <td>{item.description || '—'}</td><td>{item.hours}</td><td><div className="row-wrap">
+        <td>{item.description || '—'}</td><td>{item.hours} h · {item.period || 'daily'}</td><td>
+          {item.title.trim().toLowerCase() === 'review' ? <Badge>Named team leads only</Badge> : <div className="row-wrap">
           <button className="btn btn-sm" onClick={() => setTask(item)}>Edit</button>
           <button className="btn btn-sm" onClick={() => save(`/catalog/${item._id}`, 'PATCH', { archived: !item.archived }, item.archived ? 'Task restored.' : 'Task archived.')}>
             {item.archived ? 'Restore' : 'Archive'}
-          </button></div></td></tr>)}</tbody></table></div> : <Empty title="No catalog tasks for this project" />}
+          </button></div>}</td></tr>)}</tbody></table></div> : <Empty title="No catalog tasks for this project" />}
     <details><summary>Import tasks from a spreadsheet</summary>
       <div className="stack daily-import">
-        <p className="muted">Paste up to 200 rows without headers. Copy three columns in this order: task name, hours, description. Existing task names are updated.</p>
+        <p className="muted">Paste up to 200 rows without headers in this order: task name, hours, optional description, and optional period (daily, weekly, monthly).</p>
         <ErrorBox error={importError} />
         <Form label="Import tasks" submit={async () => {
           setImportError(null);
           const rows = text.split(/\r?\n/).filter((line) => line.trim()).map((line) => line.split('\t'));
-          if (!rows.length || rows.some((row) => row.length < 2 || row.length > 3)) {
-            setImportError(new Error('Copy task name, hours, and optional description as separate spreadsheet columns.'));
+          if (!rows.length || rows.some((row) => row.length < 2 || row.length > 4)) {
+            setImportError(new Error('Copy task name, hours, optional description, and optional period as separate spreadsheet columns.'));
             return;
           }
           const result = await save(`/projects/${project._id}/catalog`, 'POST', {
-            items: rows.map(([title, hours, description]) => ({ title, hours, description })),
+            items: rows.map(([title, hours, description, period]) => ({ title, hours, description, period: period?.trim().toLowerCase() || undefined })),
           }, 'Catalog tasks imported.');
           if (result) setText('');
         }}><label className="field"><span>Spreadsheet rows</span><textarea className="input" rows={5} value={text} required

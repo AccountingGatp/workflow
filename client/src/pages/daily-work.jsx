@@ -8,6 +8,7 @@ import { ManageDailyWork } from './daily-work-manage.jsx';
 const root = '/daily-work';
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' }).format(new Date());
 const hours = (number) => Number(number || 0).toFixed(2);
+const nameKey = (value) => value.trim().toLowerCase();
 const totalHours = (rows) => hours(rows.reduce((sum, item) => sum + Number(item.hours || 0), 0));
 const deliveryLabel = {
   sent: 'Saved and sent to Slack.',
@@ -37,19 +38,36 @@ function EntryEditor({ date, data, onSaved }) {
     !rows.some((row) => row.workflowTaskId === suggestion.id));
   const update = (key, patch) => setRows((old) => old.map((row) => row.key === key ? { ...row, ...patch } : row));
 
+  function taskFor(row) {
+    return data.catalog.find((task) => task.projectId === row.projectId &&
+      (task._id === row.catalogId || nameKey(task.title) === nameKey(row.title)));
+  }
+
+  function available(task, excludedKey) {
+    const used = rows.reduce((sum, row) => {
+      if (row.key === excludedKey) return sum;
+      const matches = task.review ? nameKey(row.title) === 'review' : taskFor(row)?._id === task._id;
+      return matches ? sum + Math.round(Number(row.hours || 0) * 100) : sum;
+    }, 0);
+    return Math.max(0, Math.round(task.remainingHours * 100) - used) / 100;
+  }
+
   function add(item, suggestion) {
     if (!item || rows.length >= 40) return;
     const assignment = data.assignments.find((row) => row.projectId === item._id);
+    const task = suggestion && taskFor({ projectId: item._id, title: suggestion.title });
     setRows((old) => [...old, {
-      key: crypto.randomUUID(), projectId: item._id, projectName: item.name, title: suggestion?.title || '',
-      workflowTaskId: suggestion?.id, hours: assignment?.hours ?? '', priority: suggestion?.priority || 'normal', status: 'incomplete',
+      key: crypto.randomUUID(), projectId: item._id, projectName: item.name, title: task?.title || suggestion?.title || '',
+      catalogId: task?._id, workflowTaskId: suggestion?.id,
+      hours: task ? Math.min(assignment?.hours ?? task.hours, available(task), 24) : assignment?.hours ?? '',
+      priority: suggestion?.priority || 'normal', status: 'incomplete',
     }]);
   }
 
   function chooseTask(row, id) {
     const task = data.catalog.find((item) => item._id === id);
     update(row.key, task
-      ? { catalogId: id, title: task.title, hours: task.hours, workflowTaskId: undefined }
+      ? { catalogId: id, title: task.title, hours: Math.min(task.hours, available(task, row.key), 24), workflowTaskId: undefined }
       : { catalogId: undefined, title: row.title });
   }
 
@@ -107,19 +125,27 @@ function EntryEditor({ date, data, onSaved }) {
       {!rows.length && <Empty title="No tasks entered">Choose a project or add a Workflow suggestion.</Empty>}
       {rows.map((row) => {
         const catalog = data.catalog.filter((item) => item.projectId === row.projectId);
+        const task = taskFor(row);
+        const remaining = task && available(task, row.key);
+        const original = submission?.entries.find((entry) => entry._id === row._id);
+        const existingHours = original && task &&
+          (original.catalogId === task._id || nameKey(original.title) === nameKey(task.title)) ? original.hours : 0;
+        const maxHours = task ? Math.min(24, Math.max(remaining, existingHours)) : 24;
         return <fieldset className="daily-entry" key={row.key} disabled={busy}>
           <legend>{row.projectName}</legend>
           <div className="daily-entry-grid">
             {!!catalog.length && <label className="field daily-entry-title"><span>Saved task</span><select className="select" value={catalog.some((item) => item._id === row.catalogId) ? row.catalogId : ''}
               onChange={(event) => chooseTask(row, event.target.value)}>
               <option value="">Custom task</option>
-              {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h</option>)}
+              {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h {item.period}</option>)}
             </select>{catalog.find((item) => item._id === row.catalogId)?.description &&
               <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</label>}
-            <label className="field daily-entry-title"><span>Task</span><input className="input" maxLength={230} required value={row.title}
+            <label className="field daily-entry-title"><span>Task</span><input className="input" maxLength={230} required readOnly={!!row.catalogId && !!task} value={row.title}
               onChange={(event) => update(row.key, { title: event.target.value, catalogId: undefined, workflowTaskId: undefined })} /></label>
-            <label className="field"><span>Hours</span><input className="input" type="number" min="0" max="24" step="0.01" required value={row.hours}
-              onChange={(event) => update(row.key, { hours: event.target.value })} /></label>
+            <label className="field"><span>Hours</span><input className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
+              onChange={(event) => update(row.key, { hours: event.target.value })} />
+              {task && <span className="hint">{hours(remaining)} h available · {task.period}{task.review ? ' · across projects' : ''}</span>}
+            </label>
             <label className="field"><span>Priority</span><select className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
               <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
             </select></label>

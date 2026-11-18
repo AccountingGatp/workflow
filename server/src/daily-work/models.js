@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { ensureReviewCatalog } from './budgets.js';
 
 const { Schema } = mongoose;
 const timestamps = { timestamps: true };
@@ -18,7 +19,8 @@ const catalogSchema = new Schema({
   projectId: text,
   title: text,
   description: String,
-  hours,
+  hours: { type: Number, min: 0, max: 744 },
+  period: { type: String, enum: ['daily', 'weekly', 'monthly'], default: 'daily' },
   archived: { type: Boolean, default: false },
 }, timestamps);
 catalogSchema.index({ projectId: 1, title: 1 }, { unique: true, collation: { locale: 'en', strength: 2 } });
@@ -67,10 +69,14 @@ const submissionSchema = new Schema({
   deliveryAfter: Date,
 }, options);
 submissionSchema.index({ date: 1, memberId: 1 });
+submissionSchema.index({ memberId: 1, date: 1 });
 submissionSchema.index({ delivery: 1, deliveryAfter: 1 });
 
 const reportSchema = new Schema({ _id: String, state: text, startedAt: Date, expiresAt: Date });
 reportSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const budgetRevisionSchema = new Schema({ _id: String, revision: Number });
+const catalogInitialization = new WeakMap();
 
 let dedicated;
 let dedicatedUri;
@@ -95,11 +101,21 @@ export async function dailyModels() {
     Project: model('DailyProject', projectSchema, 'projects'),
     CatalogTask: model('DailyCatalogTask', catalogSchema, 'task_catalog'),
     Assignment: model('DailyAssignment', assignmentSchema, 'work_distribution'),
+    BudgetRevision: model('DailyBudgetRevision', budgetRevisionSchema, 'budget_revisions'),
     Member: model('DailyMember', memberSchema, 'members'),
     Leave: model('DailyLeave', leaveSchema, 'leave'),
     Submission: model('DailySubmission', submissionSchema, 'daily_submissions'),
     Report: model('DailySlackReport', reportSchema, 'slack_report_runs'),
   };
   await Promise.all(Object.values(models).map((item) => item.init()));
+  if (!catalogInitialization.has(db)) {
+    const prepare = Promise.all([
+      models.CatalogTask.updateMany({ period: { $exists: false } }, { $set: { period: 'daily' } }, { timestamps: false }),
+      models.Project.find().select('_id').lean().then((projects) => ensureReviewCatalog(models, projects)),
+    ])
+      .catch((error) => { catalogInitialization.delete(db); throw error; });
+    catalogInitialization.set(db, prepare);
+  }
+  await catalogInitialization.get(db);
   return models;
 }

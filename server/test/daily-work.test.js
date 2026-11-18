@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import app, { handleErrors } from '../src/app.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, Task } from '../src/models/index.js';
@@ -11,7 +11,9 @@ import { clock, shiftDate } from '../src/daily-work/dates.js';
 import { runDailyWorkJobs } from '../src/daily-work/jobs.js';
 
 test('isolated daily work, scoped catalog and reports, Slack threads and scheduled attendance', async () => {
-  const db = await MongoMemoryServer.create({ instance: { args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] } });
+  const db = await MongoMemoryReplSet.create({
+    replSet: { count: 1, args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] },
+  });
   const realFetch = globalThis.fetch;
   const calls = [];
   let server;
@@ -35,7 +37,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
         body: body && JSON.stringify(body),
       });
       const data = await response.json();
-      assert.equal(response.status, status, JSON.stringify(data));
+      assert.ok([status].flat().includes(response.status), JSON.stringify(data));
+      if (Array.isArray(status)) return response.status;
       return data;
     }
 
@@ -43,7 +46,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
       return User.create({ name, role, email: `${name}@example.test`, passwordHash: 'fixture-only' });
     }
     const [owner, lead, employee, other] = await Promise.all([
-      person('owner', 'super_admin'), person('lead', 'admin'), person('employee', 'employee'), person('other', 'employee'),
+      person('owner', 'super_admin'), person('Simran', 'admin'), person('employee', 'employee'), person('other', 'employee'),
     ]);
     const [client, team] = await Promise.all([Client.create({ name: 'Company' }), Team.create({ name: 'Team' })]);
     const project = await ClientProject.create({ client: client._id, name: 'Accounting' });
@@ -53,6 +56,10 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const date = clock().date;
     const previousDate = shiftDate(date, -1);
     const source = await Task.create({ client: client._id, project: project._id, title: 'Review ledger', assignees: [employee._id], dueDate: new Date(date) });
+    const legacyProject = new mongoose.Types.ObjectId();
+    const legacyDatabase = mongoose.connection.useDb('daily_test', { useCache: true }).db;
+    await legacyDatabase.collection('projects').insertOne({ _id: legacyProject, clientId: String(client._id), name: 'Legacy', archived: false });
+    await legacyDatabase.collection('task_catalog').insertOne({ projectId: String(legacyProject), title: 'Untimed catalog', hours: 2, archived: false });
     const draft = { clientId: String(client._id), workflowProjectId: String(project._id), name: 'Accounting' };
     await request(employee, '/projects', 'POST', draft, 403);
     const daily = await request(lead, '/projects', 'POST', draft, 201);
@@ -66,6 +73,10 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(day.catalog.find((row) => row.title === 'Book payroll').hours, 1.5);
     assert.equal(day.assignments[0].hours, 2);
     assert.deepEqual((await request(other, `/day/${date}`)).projects, []);
+    assert.ok(!day.catalog.some((task) => task.title === 'Review'));
+    const managed = await request(lead, '/manage');
+    assert.ok(managed.catalog.some((task) => task.projectId === String(legacyProject) && task.title === 'Review'));
+    assert.equal(managed.catalog.find((task) => task.title === 'Untimed catalog').period, 'daily');
     assert.equal((await request(lead, `/missing/${date}`)).missing[0].id, String(employee._id));
     assert.equal((await request(other, `/missing/${date}`)).expected, 0);
     assert.equal((await request(lead, `/missing/${previousDate}`)).expected, 0);
@@ -110,6 +121,46 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal((await dailyModels()).Submission.db.name, 'daily_test');
     assert.equal(mongoose.connection.name, 'workflow_test');
     assert.equal((await Task.findById(source._id)).status, 'todo');
+
+    delete process.env.DAILY_WORK_SLACK_TOKEN;
+    await request(lead, `/projects/${daily._id}/catalog`, 'POST', { items: [
+      { title: 'Month end', hours: 8, period: 'monthly' },
+      { title: 'Weekly report', hours: 3, period: 'weekly' },
+      { title: 'Daily bank import', hours: 2, period: 'daily' },
+    ] }, 201);
+    const getDay = (user, day) => request(user, `/day/${day}`);
+    const log = (user, day, entries, expected = 200, version) =>
+      request(user, `/day/${day}`, 'PUT', { entries, version }, expected);
+    const time = (title, hours, projectId = daily._id) => ({ title, hours, projectId, status: 'complete', priority: 'normal' });
+
+    await log(employee, '2026-10-05', [time('Month end', 1), time('Weekly report', 2), time('Daily bank import', 2)]);
+    const available = (await getDay(employee, '2026-10-06')).catalog;
+    assert.equal(available.find((task) => task.title === 'Month end').remainingHours, 7);
+    assert.equal(available.find((task) => task.title === 'Weekly report').remainingHours, 1);
+    assert.equal(available.find((task) => task.title === 'Daily bank import').remainingHours, 2);
+    await log(employee, '2026-10-06', [time('MONTH END', 7.01)], 400);
+    await log(employee, '2026-10-06', [time('Weekly report', 1.01)], 400);
+    await log(employee, '2026-10-06', [time('Daily bank import', 1), time('daily bank import', 1.01)], 400);
+    await log(employee, '2026-10-06', [time(' Review ', 0.25)], 403);
+    const results = await Promise.all([
+      log(employee, '2026-10-06', [time('Month end', 4)], [200, 400]),
+      log(employee, '2026-10-07', [time('Month end', 4)], [200, 400]),
+    ]);
+    assert.deepEqual(results.sort(), [200, 400]);
+    const consumed = (await getDay(employee, '2026-10-06')).submission ? '2026-10-06' : '2026-10-07';
+    const consumedSubmission = (await getDay(employee, consumed)).submission;
+    await log(employee, consumed, [], 200, consumedSubmission.version);
+    assert.equal((await getDay(employee, '2026-10-08')).catalog.find((task) => task.title === 'Month end').remainingHours, 7);
+    assert.equal((await getDay(employee, '2026-10-12')).catalog.find((task) => task.title === 'Weekly report').remainingHours, 3);
+    assert.equal((await getDay(employee, '2026-11-01')).catalog.find((task) => task.title === 'Month end').remainingHours, 8);
+
+    const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
+    assert.equal(leadCatalog.filter((task) => task.review).length, 2);
+    await log(owner, '2026-10-05', [time('Review', 1)], 403);
+    await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.41, String(legacyProject))], 400);
+    await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.4, String(legacyProject))]);
+    await log(lead, '2026-10-06', [time('Review', 1)]);
+    assert.equal((await getDay(lead, '2026-10-05')).catalog.find((task) => task.title === 'Month end').remainingHours, 8);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));
