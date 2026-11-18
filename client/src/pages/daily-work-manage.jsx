@@ -38,11 +38,42 @@ function useForm(initial) {
   return [state, (field) => (value) => setState((old) => ({ ...old, [field]: value })), setState];
 }
 
-function ProjectSetup({ data, save, active, select }) {
+function ProjectImport({ save }) {
+  const [text, setText] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  return <details><summary>Import projects</summary>
+    <div className="stack daily-import">
+      <p className="muted">Upload a text file or paste one project name per line. Matching Workflow clients are reused. New clients start without team access.</p>
+      <ErrorBox error={error} />
+      <Form label="Import projects" submit={async () => {
+        const imported = await save('/projects/import', 'POST', { text }, 'Project import processed.');
+        if (imported) setResult(imported);
+      }}>
+        <label className="field"><span>Text file</span><input className="input" type="file" accept=".txt,.tsv,text/plain" onChange={async (event) => {
+          setError(null);
+          const file = event.target.files[0];
+          if (!file) return;
+          try { setText(await file.text()); }
+          catch { setError(new Error('The project file could not be read')); }
+        }} /></label>
+        <label className="field"><span>Project names</span><textarea className="input" rows={5} value={text} required
+          onChange={(event) => setText(event.target.value)} /></label>
+      </Form>
+      {result && <div role="status">
+        <p>{result.added} added · {result.existing} already present · {result.duplicates} duplicate rows · {result.skipped.length} need review</p>
+        {!!result.skipped.length && <ul>{result.skipped.map(({ name, reason }) => <li key={name}>{name} — {reason}</li>)}</ul>}
+      </div>}
+    </div>
+  </details>;
+}
+
+function ProjectSetup({ data, save, active, select, superAdmin }) {
   const [draft, field, reset] = useForm({ clientId: '', workflowProjectId: '', name: '' });
   const [renaming, setRenaming] = useState(null);
   return <section className="card daily-card stack">
     <h2>Projects</h2>
+    {superAdmin && <ProjectImport save={save} />}
     <Form label="Add project" submit={async () => {
       const added = await save('/projects', 'POST', draft, 'Project added.');
       if (added) { select(added._id); reset({ clientId: '', workflowProjectId: '', name: '' }); }
@@ -215,7 +246,7 @@ export function ManageDailyWork({ onSaved }) {
   if (!data) return <ErrorBox error={error} />;
   return <div className="stack">
     <ErrorBox error={saveError || error} />
-    <ProjectSetup data={data} save={save} active={active} select={setProject} />
+    <ProjectSetup data={data} save={save} active={active} select={setProject} superAdmin={can.super} />
     {active && <>
       <Catalog key={`catalog-${active._id}`} project={active} items={data.catalog.filter((row) => row.projectId === active._id)} save={save} />
       <Distribution key={`distribution-${active._id}`} project={active} members={data.members}

@@ -4,6 +4,7 @@ import { HttpError, ah } from '../middleware/auth.js';
 import { User } from '../models/index.js';
 import { isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
+import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, manager, roster, validateProjectLink, workflowProjects, workflowSuggestions } from './access.js';
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets } from './budgets.js';
 import { clock, dateValue, shiftDate } from './dates.js';
@@ -244,6 +245,11 @@ r.get('/manage', route(async (req, res, models, scope) => {
     models.Assignment.find({ projectId: { $in: projectIds }, ...(scope.members !== null && { memberId: { $in: scope.members } }) }).lean(),
   ]);
   res.json({ ...workflow, dailyProjects: projects, members, catalog, assignments, leave });
+}, true));
+
+r.post('/projects/import', route(async (req, res, models) => {
+  enforce(isSuper(req.user));
+  res.json(await importDailyProjects(models, req.body.text));
 }, true));
 
 r.post('/projects', route(async (req, res, models, scope) => {
