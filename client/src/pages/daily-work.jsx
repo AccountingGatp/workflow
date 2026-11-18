@@ -142,10 +142,15 @@ function EntryEditor({ date, data, onSaved }) {
               <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</label>}
             <label className="field daily-entry-title"><span>Task</span><input className="input" maxLength={230} required readOnly={!!row.catalogId && !!task} value={row.title}
               onChange={(event) => update(row.key, { title: event.target.value, catalogId: undefined, workflowTaskId: undefined })} /></label>
-            <label className="field"><span>Hours</span><input className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
-              onChange={(event) => update(row.key, { hours: event.target.value })} />
-              {task && <span className="hint">{hours(remaining)} h available · {task.period}{task.review ? ' · across projects' : ''}</span>}
-            </label>
+            <div className="field">
+              <label htmlFor={`hours-${row.key}`}>Hours</label>
+              <input id={`hours-${row.key}`} className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
+                aria-describedby={task ? `hours-limit-${row.key}` : undefined}
+                onChange={(event) => update(row.key, { hours: event.target.value })} />
+              {task && <span id={`hours-limit-${row.key}`} className="hint">
+                Up to {hours(remaining)} h · {task.period}{task.review ? ' · across projects' : ''}
+              </span>}
+            </div>
             <label className="field"><span>Priority</span><select className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
               <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
             </select></label>
