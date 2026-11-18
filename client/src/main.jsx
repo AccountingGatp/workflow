@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import './styles.css';
 import { AuthProvider, ToastProvider, useAuth } from './lib.jsx';
 import Layout from './Layout.jsx';
+import DailyWork from './pages/daily-work.jsx';
 import { MyWork, Overview } from './pages/work.jsx';
 import { Clients, ClientDetail } from './pages/clients.jsx';
 import { ClientProjects } from './pages/projects.jsx';
@@ -21,6 +22,7 @@ function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={can.super ? <Navigate to="/overview" replace /> : <MyWork />} />
+        <Route path="daily-work" element={<DailyWork />} />
         <Route path="overview" element={guard(can.manage, <Overview />)} />
         <Route path="clients" element={<Clients />} />
         <Route path="clients/:id" element={<ClientDetail />} />

@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import app, { ready, handleErrors } from './app.js';
 import { startMailSync } from './services/gmail.js';
+import { runDailyWorkJobs } from './daily-work/jobs.js';
 import { startScheduler } from './services/recurrence.js';
 
 const PORT = process.env.PORT || 4000;
@@ -21,4 +22,7 @@ handleErrors(app);
 await ready();
 startScheduler();
 startMailSync();
+const dailyWorkTick = () => runDailyWorkJobs().catch((error) => console.error('Daily Work jobs:', error.message));
+dailyWorkTick();
+setInterval(dailyWorkTick, 60000).unref();
 app.listen(PORT, () => console.log(`✓ API on http://localhost:${PORT}`));

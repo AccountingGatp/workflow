@@ -18,7 +18,7 @@ export async function api(path, { method = 'GET', body } = {}) {
   const data = await res.json().catch(() => null);
   // The dev proxy answers 5xx with no JSON body when the API server is down
   if (!data && res.status >= 500) throw offline();
-  if (res.status === 401 && path !== '/auth/login') { setToken(null); window.dispatchEvent(new Event('ka:logout')); }
+  if (res.status === 401 && !['/auth/login', '/auth/google', '/auth/google/nonce'].includes(path)) { setToken(null); window.dispatchEvent(new Event('ka:logout')); }
   if (!res.ok) throw Object.assign(new Error(data?.error || 'Request failed'), { status: res.status });
   return Object.assign(data, { __status: res.status });
 }
@@ -87,12 +87,16 @@ export function AuthProvider({ children }) {
     const d = await api('/auth/login', { method: 'POST', body: { email, password } });
     setToken(d.token); setUser(d.user);
   };
+  const loginGoogle = useCallback(async (credential) => {
+    const d = await api('/auth/google', { method: 'POST', body: { credential } });
+    setToken(d.token); setUser(d.user);
+  }, []);
   const logout = () => { setToken(null); setUser(null); };
   const can = {
     super: user?.role === 'super_admin',
     manage: user?.role === 'super_admin' || user?.role === 'admin',
   };
-  return <AuthCtx.Provider value={{ user, ready, offline, login, logout, can }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, ready, offline, login, loginGoogle, logout, can }}>{children}</AuthCtx.Provider>;
 }
 
 /* ---------- Toast ---------- */

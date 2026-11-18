@@ -21,6 +21,10 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/daily-work",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/mail",
       "schedule": "*/5 * * * *"
     },
