@@ -62,19 +62,25 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await legacyDatabase.collection('task_catalog').insertOne({ projectId: String(legacyProject), title: 'Untimed catalog', hours: 2, archived: false });
     const draft = { clientId: String(client._id), workflowProjectId: String(project._id), name: 'Accounting' };
     await request(employee, '/projects', 'POST', draft, 403);
-    const daily = await request(lead, '/projects', 'POST', draft, 201);
-    await request(lead, `/projects/${daily._id}/catalog`, 'POST', {
+    await request(lead, '/projects', 'POST', draft, 403);
+    await request(lead, '/manage', 'GET', undefined, 403);
+    await request(employee, '/manage', 'GET', undefined, 403);
+    const daily = await request(owner, '/projects', 'POST', draft, 201);
+    await request(lead, `/projects/${daily._id}/catalog`, 'POST', { title: 'Blocked', hours: 1 }, 403);
+    await request(lead, `/projects/${daily._id}/members/${employee._id}`, 'PUT', { hours: 2 }, 403);
+    await request(lead, '/projects/import', 'POST', { text: 'Blocked' }, 403);
+    await request(owner, `/projects/${daily._id}/catalog`, 'POST', {
       items: [{ title: 'Book payroll', hours: 1.5 }, { title: 'Check vendor statements', hours: 0.5 }],
     }, 201);
-    await request(lead, `/projects/${daily._id}/members/${employee._id}`, 'PUT', { hours: 2 });
-    await request(lead, `/members/${employee._id}`, 'PUT', { enrolled: true, shift: 'afternoon', reportFrom: date });
+    await request(owner, `/projects/${daily._id}/members/${employee._id}`, 'PUT', { hours: 2 });
+    await request(owner, `/members/${employee._id}`, 'PUT', { enrolled: true, shift: 'afternoon', reportFrom: date });
     const day = await request(employee, `/day/${date}`);
     assert.deepEqual(day.suggestions.map((row) => row.id), [String(source._id)]);
     assert.equal(day.catalog.find((row) => row.title === 'Book payroll').hours, 1.5);
     assert.equal(day.assignments[0].hours, 2);
     assert.deepEqual((await request(other, `/day/${date}`)).projects, []);
     assert.ok(!day.catalog.some((task) => task.title === 'Review'));
-    const managed = await request(lead, '/manage');
+    const managed = await request(owner, '/manage');
     assert.ok(managed.catalog.some((task) => task.projectId === String(legacyProject) && task.title === 'Review'));
     assert.equal(managed.catalog.find((task) => task.title === 'Untimed catalog').period, 'daily');
     assert.equal((await request(lead, `/missing/${date}`)).missing[0].id, String(employee._id));
@@ -116,14 +122,14 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
     await request(employee, `/day/${previousDate}`, 'PUT', { entries: [], version: localOnly.version });
     assert.equal(calls.length, 4);
-    await request(lead, `/members/${employee._id}/leave/${date}`, 'PUT', {});
+    await request(owner, `/members/${employee._id}/leave/${date}`, 'PUT', {});
     assert.equal((await request(owner, `/missing/${date}`)).expected, 0);
     assert.equal((await dailyModels()).Submission.db.name, 'daily_test');
     assert.equal(mongoose.connection.name, 'workflow_test');
     assert.equal((await Task.findById(source._id)).status, 'todo');
 
     delete process.env.DAILY_WORK_SLACK_TOKEN;
-    await request(lead, `/projects/${daily._id}/catalog`, 'POST', { items: [
+    await request(owner, `/projects/${daily._id}/catalog`, 'POST', { items: [
       { title: 'Month end', hours: 8, period: 'monthly' },
       { title: 'Weekly report', hours: 3, period: 'weekly' },
       { title: 'Daily bank import', hours: 2, period: 'daily' },

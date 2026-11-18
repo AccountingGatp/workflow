@@ -5,7 +5,7 @@ import { User } from '../models/index.js';
 import { isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
-import { dailyScope, includes, manager, roster, validateProjectLink, workflowProjects, workflowSuggestions } from './access.js';
+import { dailyScope, includes, roster, validateProjectLink, workflowProjects, workflowSuggestions } from './access.js';
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets } from './budgets.js';
 import { clock, dateValue, shiftDate } from './dates.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
@@ -31,8 +31,8 @@ const hoursValue = (value, limit = 24) => {
 const enforce = (access) => { if (!access) throw new HttpError(403, 'You do not have permission for this'); };
 const scoped = (ids) => ids === null ? {} : { clientId: { $in: ids } };
 const reportMember = (member, date) => member.enrolled && (!member.reportFrom || member.reportFrom <= date);
-const route = (handler, managed = false) => ah(async (req, res) => {
-  if (managed) enforce(manager(req.user));
+const route = (handler, superOnly = false) => ah(async (req, res) => {
+  if (superOnly) enforce(isSuper(req.user));
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
   const [models, scope] = await Promise.all([dailyModels(), dailyScope(req.user)]);
   await handler(req, res, models, scope);
@@ -248,7 +248,6 @@ r.get('/manage', route(async (req, res, models, scope) => {
 }, true));
 
 r.post('/projects/import', route(async (req, res, models) => {
-  enforce(isSuper(req.user));
   res.json(await importDailyProjects(models, req.body.text));
 }, true));
 
