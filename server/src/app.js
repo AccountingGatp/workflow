@@ -6,6 +6,8 @@ import { requireAuth } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import peopleRoutes from './routes/people.js';
 import clientRoutes from './routes/clients.js';
+import dailyWorkRoutes from './daily-work/routes.js';
+import { runDailyWorkJobs } from './daily-work/jobs.js';
 import workRoutes from './routes/work.js';
 import projectRoutes from './routes/projects.js';
 import projectWorkRoutes from './routes/project-work.js';
@@ -23,12 +25,15 @@ async function connect() {
   if (!uri) {
     if (process.env.VERCEL) throw new Error('MONGODB_URI is not set in the Vercel project settings');
     // No database configured: run an in-memory MongoDB so the app works out of the box.
-    const { MongoMemoryServer } = await import('mongodb-memory-server');
-    const mem = await MongoMemoryServer.create();
+    const { MongoMemoryReplSet } = await import('mongodb-memory-server');
+    const mem = await MongoMemoryReplSet.create({
+      replSet: { count: 1, args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] },
+    });
     uri = mem.getUri('workflow');
     console.log('⚠  MONGODB_URI not set — using a temporary in-memory MongoDB (data resets on restart).');
   }
-  await mongoose.connect(uri);
+  const dbName = process.env.WORKFLOW_MONGODB_DB_NAME;
+  await mongoose.connect(uri, dbName ? { dbName } : {});
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
@@ -50,12 +55,15 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
-app.get('/api/config', (_req, res) => res.json({ demo: process.env.SEED_DEMO === 'true' }));
+app.get('/api/config', (_req, res) => res.json({ demo: process.env.SEED_DEMO === 'true', googleSignInClientId: process.env.GOOGLE_SIGN_IN_CLIENT_ID || null }));
 
 // Background jobs, called by Vercel Cron (see vercel.json). Vercel sends CRON_SECRET as a bearer token.
 const cronAuth = (req, res, next) => (process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}` ? next() : res.status(401).json({ error: 'Unauthorized' }));
 app.get('/api/cron/recurring', cronAuth, async (_req, res) => res.json({ created: await generateRecurringTasks() }));
 app.get('/api/cron/mail', cronAuth, async (_req, res) => { await syncAllAccounts(); res.json({ ok: true }); });
+
+app.get('/api/cron/daily-work', cronAuth, async (_req, res) => { await runDailyWorkJobs(); res.json({ ok: true }); });
+app.use('/api/daily-work', requireAuth, dailyWorkRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api', mailPublic);

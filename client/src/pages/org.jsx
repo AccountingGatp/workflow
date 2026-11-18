@@ -1,3 +1,4 @@
+import GoogleSignIn from '../GoogleSignIn.jsx';
 import { useState } from 'react';
 import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Layers, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
@@ -401,6 +402,7 @@ export function Login() {
             <Field label="Password"><input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
             <button className="btn btn-primary" disabled={busy} style={{ minHeight: 48 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
+          {config.data?.googleSignInClientId && <GoogleSignIn clientId={config.data.googleSignInClientId} />}
           {config.data?.demo && <div>
             <div className="row" style={{ margin: '4px 0 10px' }}><Building2 size={14} className="muted" /><span className="small muted">Demo accounts — try each role</span></div>
             <div className="demo-grid">

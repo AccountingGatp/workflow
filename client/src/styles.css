@@ -346,3 +346,30 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   .page-head .btn { min-height: 36px; }
   html { scroll-padding-top: 180px; }
 }
+
+/* Daily Work */
+.daily-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.daily-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-2);
+  padding: 11px 12px; font: inherit; font-weight: 600; cursor: pointer; }
+.daily-tab:hover, .daily-tab.active { color: var(--primary); }
+.daily-tab.active { border-bottom-color: var(--primary); }
+.daily-card { padding: clamp(14px, 3vw, 22px); }
+.daily-header { justify-content: space-between; }
+.daily-controls { align-items: flex-end; margin-block: 10px; }
+.daily-controls .field { flex: 1 1 155px; min-width: 0; }
+.daily-suggestions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 10px; margin-top: 12px; }
+.daily-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+.daily-entry { border: 1px solid var(--border); border-radius: 8px; min-width: 0; margin: 0; padding: 12px; }
+.daily-entry legend { color: var(--text-2); font-weight: 600; padding-inline: 5px; }
+.daily-entry-grid { display: grid; grid-template-columns: minmax(140px, 3fr) minmax(72px, 1fr) minmax(105px, 1fr) minmax(125px, 1fr) auto; gap: 10px; align-items: end; }
+.daily-entry-grid > .field:first-child:has(select) { grid-column: 1 / -1; }
+.daily-entry-grid .input, .daily-entry-grid .select { min-width: 0; width: 100%; }
+.daily-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.daily-metrics .card { display: flex; flex-direction: column; gap: 5px; }
+.daily-metrics strong { font-size: 1.75rem; }
+.daily-status { text-transform: capitalize; }
+.daily-import { margin-top: 12px; }
+@media (max-width: 890px) {
+  .daily-entry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .daily-entry-title { grid-column: 1 / -1; }
+}

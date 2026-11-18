@@ -8,6 +8,7 @@ const opts = { timestamps: true };
 export const User = model('User', new Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  googleSubject: { type: String, unique: true, sparse: true, select: false },
   passwordHash: { type: String, required: true, select: false },
   role: { type: String, enum: ['super_admin', 'admin', 'employee'], default: 'employee' },
   title: String,
