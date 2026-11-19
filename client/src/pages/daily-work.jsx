@@ -254,11 +254,16 @@ function EntryEditor({ date, data }) {
         <div><h2 id="daily-selected-heading">Selected tasks</h2><time className="small muted" dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></div>
         <div className="row-wrap daily-editor-totals" aria-live="polite">
           <Badge cls="b-primary"><span className="mono">{totalHours(submission?.entries || [])} h</span> {date === today() ? 'today' : 'total'}</Badge>
-          {data.slackEnabled && <button type="button" className="btn btn-primary" onClick={sendToSlack}
-            disabled={!!busy || rows.some((row) => !row.collapsed) || (!submission?.entries.length && !submission?.slackPosted) ||
-              ['sent', 'sending', 'pending', 'uncertain'].includes(submission?.delivery)}>
-            <Send size={16} />{busy === 'slack' ? 'Sending…' : 'Send to Slack'}
-          </button>}
+          <div className="stack" style={{ gap: 2 }}>
+            <button type="button" className="btn btn-primary" onClick={sendToSlack}
+              aria-describedby={data.slackEnabled ? undefined : 'daily-slack-setup'}
+              disabled={!data.slackEnabled || !!busy || rows.some((row) => !row.collapsed) ||
+                (!submission?.entries.length && !submission?.slackPosted) ||
+                ['sent', 'sending', 'pending', 'uncertain'].includes(submission?.delivery)}>
+              <Send size={16} />{busy === 'slack' ? 'Sending…' : 'Send to Slack'}
+            </button>
+            {!data.slackEnabled && <span id="daily-slack-setup" className="small muted">Slack setup required</span>}
+          </div>
         </div>
       </div>
       <div className="daily-editor-body stack">
