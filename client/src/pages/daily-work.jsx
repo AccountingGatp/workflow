@@ -79,16 +79,15 @@ function EntryEditor({ date, data, onSaved }) {
   }
 
   function add(item) {
-    if (!selected || rows.length >= 40) return;
-    const assignment = data.assignments.find((row) => row.projectId === project);
-    const occurrence = item?.occurrence;
+    if (!selected || !item || rows.length >= 40) return;
+    const occurrence = item.occurrence;
     const key = crypto.randomUUID();
     newEntry.current = key;
     setRows((old) => [...old, {
-      key, projectId: selected._id, projectName: selected.name, title: item?.title || '', description: item?.description || '',
-      catalogId: item?.catalogId, workItemId: item && !item.catalogId ? item.id : undefined,
+      key, projectId: selected._id, projectName: selected.name, title: item.title, description: item.description || '',
+      catalogId: item.catalogId, workItemId: item.catalogId ? undefined : item.id,
       checklist: occurrence?.checklist, workflowStatus: occurrence?.status,
-      hours: item ? '' : assignment?.hours ?? '',
+      hours: '',
       priority: occurrence?.priority || 'normal', status: occurrence?.status === 'done' ? 'complete' : 'incomplete',
     }]);
   }
@@ -99,9 +98,10 @@ function EntryEditor({ date, data, onSaved }) {
     setError(null);
     try {
       const response = await api(`${root}/day/${date}`, {
-        method: 'PUT', body: { entries: rows.map(({ key, ...row }) => {
+        method: 'PUT', body: { entries: rows.map(({ key, hoursAdjusted, ...row }) => {
           // React row keys are local to this editor.
           void key;
+          void hoursAdjusted;
           return row;
         }), version: submission?.version },
       });
@@ -135,12 +135,7 @@ function EntryEditor({ date, data, onSaved }) {
       {!!data.projects.length && !filtered.length && <p className="small muted">No projects match your search.</p>}
     </section>
     {selected && <section className="card daily-card daily-project-task-panel" aria-labelledby="daily-project-tasks">
-      <div className="row-wrap daily-header">
-        <h2 id="daily-project-tasks">{selected.name} tasks</h2>
-        <button type="button" className="btn btn-tonal btn-sm" disabled={busy || rows.length >= 40} onClick={() => add()}>
-          <Plus size={15} /> Custom task
-        </button>
-      </div>
+      <h2 id="daily-project-tasks">{selected.name} tasks</h2>
       <label className="field daily-task-search"><span>Find a task</span>
         <span className="daily-search"><Search size={17} aria-hidden="true" />
           <input className="input" type="search" placeholder="Search tasks and descriptions" value={taskSearch}
@@ -188,7 +183,9 @@ function EntryEditor({ date, data, onSaved }) {
           const original = submission?.entries.find((entry) => entry._id === row._id);
           const existingHours = original && task &&
             (original.catalogId === task._id || nameKey(original.title) === nameKey(task.title)) ? original.hours : 0;
-          const maxHours = task ? Math.min(24, Math.max(remaining, existingHours)) : 24;
+          const maxHours = task ? Math.min(24, remaining) : 24;
+          const keepSavedHours = Number(row.hours) === existingHours && existingHours > maxHours;
+          const hintId = `hours-limit-${row.key}`;
           return <fieldset className="daily-entry" key={row.key} data-entry-key={row.key} disabled={busy}>
             <legend>{row.projectName}</legend>
             <div className="daily-task-heading">
@@ -212,12 +209,17 @@ function EntryEditor({ date, data, onSaved }) {
             <div className="daily-entry-grid">
               <div className="field">
                 <label htmlFor={`hours-${row.key}`}>Hours</label>
-                <input id={`hours-${row.key}`} className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
-                  aria-describedby={task ? `hours-limit-${row.key}` : undefined}
+                <input id={`hours-${row.key}`} className="input" type="number" min="0" max={keepSavedHours ? existingHours : maxHours} step="0.01" required value={row.hours}
+                  aria-describedby={task || row.hoursAdjusted ? hintId : undefined}
                   data-entry-focus={!!row.title || undefined}
-                  onChange={(event) => update(row.key, { hours: event.target.value })} />
-                {task && <span id={`hours-limit-${row.key}`} className="hint">
-                  Up to {hours(remaining)} h · {task.period}{task.review ? ' · across projects' : ''}
+                  onChange={(event) => {
+                    const { value, valueAsNumber } = event.target;
+                    const hoursAdjusted = valueAsNumber > maxHours;
+                    update(row.key, { hours: hoursAdjusted ? String(maxHours) : value, hoursAdjusted });
+                  }} />
+                {(task || row.hoursAdjusted) && <span id={hintId} className="hint" aria-live="polite">
+                  {row.hoursAdjusted ? `Adjusted to ${hours(maxHours)} h.` :
+                    `Up to ${hours(maxHours)} h · ${task.period}${task.review ? ' · across projects' : ''}`}
                 </span>}
               </div>
               <div className="field"><label htmlFor={`priority-${row.key}`}>Priority</label>
