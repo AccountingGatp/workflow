@@ -7,7 +7,7 @@ import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBa
 
 export function TaskRow({ task, onOpen, onToggle, showPeople }) {
   const { user } = useAuth();
-  const direct = user?.role !== 'employee' && task.assignees?.some(a => String(a._id) === String(user?._id));
+  const direct = (user?.role !== 'employee' || task.dailyWorkCustom) && task.assignees?.some(a => String(a._id) === String(user?._id));
   const due = dueInfo(task);
   const doneCount = task.checklist?.filter((c) => c.done).length || 0;
   return (
@@ -43,7 +43,7 @@ export function useTaskToggle(reload) {
   const { user } = useAuth();
   const toast = useToast();
   return async (task) => {
-    const direct = user?.role !== 'employee' && task.assignees?.some(a => String(a._id) === String(user?._id));
+    const direct = (user?.role !== 'employee' || task.dailyWorkCustom) && task.assignees?.some(a => String(a._id) === String(user?._id));
     const status = task.status === 'done' ? 'todo' : direct ? 'done' : task.status === 'pending_review' ? 'todo' : 'pending_review';
     try { await api(`/tasks/${task._id}`, { method: 'PATCH', body: { status } }); toast(status === 'done' ? 'Task completed' : status === 'pending_review' ? 'Submitted for TL confirmation' : 'Task reopened'); reload(); }
     catch (e) { toast(e.message); }

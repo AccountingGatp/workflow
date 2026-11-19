@@ -268,13 +268,33 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const emptyDay = await getDay(employee, emptyDate);
     const emptyProjectId = emptyDay.projects.find((row) => row.workflowProjectId === String(emptyProject._id))._id;
     await log(employee, emptyDate, [time('Prepare one-off report', 1)], 400);
-    const custom = await log(employee, emptyDate, [time('Prepare one-off report', 1, emptyProjectId)]);
+    await User.updateOne({ _id: employee._id }, { $set: { reviewLead: lead._id } });
+    const custom = await log(employee, emptyDate, [{ ...time('Prepare one-off report', 1, emptyProjectId), status: 'incomplete' }]);
+    const direct = await request(employee, `/tasks/${custom.entries[0].workflowTaskId}`);
+    assert.equal(direct.canCompleteDirectly, true);
+    assert.equal(direct.reviewer, undefined);
+    const customStatusPath = `/day/${emptyDate}/members/${employee._id}/entries/${custom.entries[0]._id}/status`;
+    const completed = await request(employee, customStatusPath, 'PATCH', { status: 'complete', version: custom.version });
+    assert.equal(completed.entry.status, 'complete');
     assert.equal(custom.entries[0].title, 'Prepare one-off report');
     assert.equal(custom.entries[0].hours, 1);
     assert.ok(custom.entries[0].workflowTaskId);
-    await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.01 }], 400, custom.version);
+    await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.01 }], 400, completed.version);
+    const oldDate = '2026-10-29';
+    const older = await log(employee, oldDate, [time('Older custom report', 1, emptyProjectId)]);
+    await Task.updateOne({ _id: older.entries[0].workflowTaskId }, {
+      $unset: { dailyWorkCustom: 1 },
+      $set: { status: 'pending_review', reviewer: lead._id, submittedBy: employee._id },
+    });
+    const olderStatusPath = `/day/${oldDate}/members/${employee._id}/entries/${older.entries[0]._id}/status`;
+    const pending = (await getDay(employee, oldDate)).submission.entries[0];
+    assert.equal(pending.dailyWorkCustom, true);
+    await request(lead, olderStatusPath, 'PATCH', { status: 'complete', version: older.version }, 403);
+    const fixed = await request(employee, olderStatusPath, 'PATCH', { status: 'complete', version: older.version });
+    assert.equal(fixed.entry.status, 'complete');
+
     await request(owner, `/projects/${emptyProjectId}/catalog`, 'POST', { title: 'New predefined task', hours: 1 }, 201);
-    const revised = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 0.75 }], 200, custom.version);
+    const revised = await log(employee, emptyDate, [{ ...completed.entry, hours: 0.75 }], 200, completed.version);
     assert.equal(revised.entries[0].hours, 0.75);
 
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;

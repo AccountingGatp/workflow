@@ -177,6 +177,7 @@ export const TaskTemplate = model('TaskTemplate', new Schema({
 const taskSchema = new Schema({
   project: ref('ClientProject'),
   masterItem: ref('ProjectWorkItem'),
+  dailyWorkCustom: Boolean,
   title: { type: String, required: true },
   client: { ...ref('Client'), required: true },
   team: ref('Team'),
