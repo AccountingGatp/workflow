@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bell, Clock, Pencil, Plus } from 'lucide-react';
+import { Bell, Clock, Pencil, Plus, RefreshCw } from 'lucide-react';
 import { api, useApi, useToast } from '../lib.jsx';
 import { Badge, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
@@ -7,6 +7,13 @@ const path = '/daily-work/settings/reminders';
 const newReminder = { name: '', time: '18:35', message: '', enabled: true, notifyChannel: false };
 const displayTime = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit' });
 const schedule = (time) => time ? `Daily at ${displayTime.format(new Date(`2000-01-01T${time}Z`))} IST` : 'Choose a reminder time';
+const deliveryTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit' });
+const deliveryLabels = { sent: 'Sent', sending: 'Sending', failed: 'Delivery failed', uncertain: 'Delivery unconfirmed' };
+
+function reminderDelivery(delivery) {
+  if (!delivery) return 'No delivery recorded today';
+  return `${deliveryLabels[delivery.state]} · ${deliveryTime.format(new Date(delivery.startedAt))} IST`;
+}
 
 function ReminderMessage({ reminder }) {
   return <div className="reminder-message">
@@ -67,7 +74,7 @@ function ReminderEditor({ reminder, onClose, onSaved }) {
 }
 
 export default function Settings() {
-  const { data, error, loading } = useApi(path);
+  const { data, error, loading, reload } = useApi(path);
   const [saved, setSaved] = useState(null);
   const [editing, setEditing] = useState(null);
   const toast = useToast();
@@ -79,7 +86,10 @@ export default function Settings() {
       <div className="row-wrap reminder-section-head">
         <div><h2 id="slack-reminders">Slack reminders</h2>
           <p className="small muted">Daily messages to the configured Daily Work channel. Times are in India Standard Time.</p></div>
-        <button type="button" className="btn btn-primary" disabled={!current} onClick={() => setEditing(newReminder)}><Plus size={16} /> Add reminder</button>
+        <div className="row-wrap">
+          <button type="button" className="btn" onClick={() => { setSaved(null); reload(); }}><RefreshCw size={16} /> Refresh status</button>
+          <button type="button" className="btn btn-primary" disabled={!current} onClick={() => setEditing(newReminder)}><Plus size={16} /> Add reminder</button>
+        </div>
       </div>
       <ErrorBox error={error} />
       {loading && <Skeleton rows={2} />}
@@ -95,6 +105,7 @@ export default function Settings() {
         </div>
         <div className="row small muted"><Clock size={14} aria-hidden="true" />{schedule(reminder.time)}</div>
         <ReminderMessage reminder={reminder} />
+        <p className="small muted">{reminderDelivery(reminder.delivery)}</p>
       </article>)}
     </section>
     {editing && <ReminderEditor reminder={editing} onClose={() => setEditing(null)} onSaved={(response) => {

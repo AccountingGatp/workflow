@@ -457,6 +457,15 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '18:40'));
     assert.equal(calls.length, callsBeforeSchedule + 7);
     assert.equal(calls.at(-1).text, '<!channel> Update your close notes.');
+    const deliveryKey = `${customReminder._id}:${clock().date}`;
+    const attempt = new Date();
+    await reportModels.Report.create({ _id: deliveryKey, state: 'sent', startedAt: attempt });
+    const deliverySettings = await request(owner, settingsPath);
+    assert.deepEqual(deliverySettings.reminders.find((row) => row._id === customReminder._id).delivery,
+      { state: 'sent', startedAt: attempt.toISOString() });
+    const moved = await request(owner, `${settingsPath}/${customReminder._id}`, 'PUT', { ...customReminder, time: '19:00' });
+    assert.deepEqual(moved.reminders.find((row) => row._id === customReminder._id).delivery,
+      { state: 'sent', startedAt: attempt.toISOString() });
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

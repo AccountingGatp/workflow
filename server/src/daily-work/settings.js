@@ -1,4 +1,5 @@
 import { HttpError } from '../middleware/auth.js';
+import { clock } from './dates.js';
 
 export const validTime = (time) => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
 
@@ -28,6 +29,15 @@ export async function statusReminders(models) {
   const reminders = await models.StatusReminder.find().select('name time enabled notifyChannel message').lean();
   if (!reminders.some(({ _id }) => _id === defaultStatusReminder._id)) reminders.push(defaultStatusReminder);
   return reminders.sort((a, b) => a.time.localeCompare(b.time) || a.name.localeCompare(b.name));
+}
+
+export async function statusRemindersWithDelivery(models) {
+  const reminders = await statusReminders(models);
+  const { date } = clock();
+  const keys = reminders.map(({ _id }) => `${_id}:${date}`);
+  const runs = await models.Report.find({ _id: { $in: keys } }).select('state startedAt').lean();
+  const byKey = new Map(runs.map(({ _id, state, startedAt }) => [_id, { state, startedAt }]));
+  return reminders.map((reminder) => ({ ...reminder, delivery: byKey.get(`${reminder._id}:${date}`) || null }));
 }
 
 export function parseDailyReport(value) {
