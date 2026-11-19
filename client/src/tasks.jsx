@@ -1,20 +1,18 @@
 import { useState } from 'react';
 import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2, ExternalLink, Link2 } from 'lucide-react';
-import { api, useApi, useAuth, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
+import { api, useApi, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
 import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, ErrorBox } from './ui.jsx';
 
 /* ---------- List ---------- */
 
 export function TaskRow({ task, onOpen, onToggle, showPeople }) {
-  const { user } = useAuth();
-  const direct = user?.role !== 'employee' && task.assignees?.some(a => String(a._id) === String(user?._id));
   const due = dueInfo(task);
   const doneCount = task.checklist?.filter((c) => c.done).length || 0;
   return (
     <div className="list-item" role="button" tabIndex={0} onClick={() => onOpen(task)} onKeyDown={(e) => e.key === 'Enter' && onOpen(task)}>
       <button
         className={`check ${task.status === 'done' ? 'done' : ''}`}
-        aria-label={task.status === 'done' ? 'Reopen task' : task.status === 'pending_review' ? (direct ? 'Complete task' : 'Withdraw submission') : direct ? 'Complete task' : 'Submit for TL confirmation'}
+        aria-label={task.status === 'done' ? 'Reopen task' : 'Complete task'}
         onClick={(e) => { e.stopPropagation(); onToggle?.(task); }}
       ><Check size={14} strokeWidth={3} /></button>
       <div className="li-main">
@@ -40,12 +38,10 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
 }
 
 export function useTaskToggle(reload) {
-  const { user } = useAuth();
   const toast = useToast();
   return async (task) => {
-    const direct = user?.role !== 'employee' && task.assignees?.some(a => String(a._id) === String(user?._id));
-    const status = task.status === 'done' ? 'todo' : direct ? 'done' : task.status === 'pending_review' ? 'todo' : 'pending_review';
-    try { await api(`/tasks/${task._id}`, { method: 'PATCH', body: { status } }); toast(status === 'done' ? 'Task completed' : status === 'pending_review' ? 'Submitted for TL confirmation' : 'Task reopened'); reload(); }
+    const status = task.status === 'done' ? 'todo' : 'done';
+    try { await api(`/tasks/${task._id}`, { method: 'PATCH', body: { status } }); toast(status === 'done' ? 'Task completed' : 'Task reopened'); reload(); }
     catch (e) { toast(e.message); }
   };
 }
@@ -79,9 +75,6 @@ function EditAssignees({ task, busy, onSave }) {
 
 export function TaskDrawer({ id, onClose, onChanged }) {
   const { data: task, loading, error, reload } = useApi(`/tasks/${id}`, [id]);
-  const [confirmedSubmission, setConfirmedSubmission] = useState(null);
-  const submissionKey = task?.status === 'pending_review' ? `${id}:${task.submittedAt}` : null;
-  const confirmation = !!submissionKey && confirmedSubmission === submissionKey;
   const projectChoices = useApi(task?.client?._id ? `/clients/${task.client._id}/projects` : null, [task?.client?._id]);
   const toast = useToast();
   const [busy, setBusy] = useState(false);
@@ -89,7 +82,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
 
   const patch = async (body) => {
     setBusy(true);
-    try { await api(`/tasks/${id}`, { method: 'PATCH', body }); setConfirmedSubmission(null); refresh(); } catch (e) { toast(e.message); } finally { setBusy(false); }
+    try { await api(`/tasks/${id}`, { method: 'PATCH', body }); refresh(); } catch (e) { toast(e.message); } finally { setBusy(false); }
   };
 
   return (
@@ -124,7 +117,6 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                   </select>
                 </>}
                 <span className="muted row"><Calendar size={16} />Due</span><span>{fmtDate(task.dueDate)}</span>
-                {task.reviewer && !task.canCompleteDirectly && <><span className="muted row">Reviewer</span><strong>{task.reviewer.name}</strong></>}
                 <span className="muted row">Assigned</span>
                 <div className="row-wrap">
                   {task.assignees.map((a) => (
@@ -141,17 +133,10 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                 <Field label="Task name"><input key={task.title} className="input" defaultValue={task.title} onBlur={e => { if (e.target.value.trim() && e.target.value !== task.title) patch({ title: e.target.value.trim() }); }} /></Field>
                 <Field label="Due date"><input type="date" className="input" value={toInputDate(task.dueDate)} disabled={busy} onChange={e => { if (e.target.value) patch({ dueDate: new Date(`${e.target.value}T17:00:00`).toISOString() }); }} /></Field>
               </div>}
-              {task.submittedBy && <p className="small" style={{ marginTop: 16 }}>Submitted by {task.submittedBy.name} · {fmtTime(task.submittedAt)}</p>}
-              {task.reviewedBy && <p className="small" style={{ color: 'var(--success)', marginTop: 12 }}>✓ Confirmed by {task.reviewedBy.name} · {fmtTime(task.reviewedAt)}</p>}
-              {task.canReview && task.status === 'pending_review' && <div className="card card-pad stack" style={{ marginTop: 16 }}>
-                <label className="row"><input type="checkbox" checked={confirmation} onChange={e => setConfirmedSubmission(e.target.checked ? submissionKey : null)} />I have confirmed with the employee and reviewed the completed work.</label>
-                <button className="btn btn-primary" disabled={busy || !confirmation} onClick={() => patch({ confirmCompletion: true })}>✓ Confirm completion</button>
-                <button className="btn btn-outline" disabled={busy} onClick={() => patch({ status: 'in_progress' })}>Return to employee</button>
-              </div>}
               <div className="section-title">Status</div>
               <div className="chips" role="radiogroup" aria-label="Status">
-                {Object.entries(STATUS).filter(([k]) => task.canCompleteDirectly ? k !== 'pending_review' : k !== 'done').map(([k, v]) => (
-                  <button key={k} className={`chip ${task.status === k ? 'on' : ''}`} role="radio" aria-checked={task.status === k} disabled={busy} onClick={() => patch({ status: k })}>{v.label}</button>
+                {Object.entries(STATUS).filter(([k]) => k !== 'pending_review').map(([k, v]) => (
+                  <button key={k} className={`chip ${task.status === k ? 'on' : ''}`} role="radio" aria-checked={(task.status === 'pending_review' ? 'in_progress' : task.status) === k} disabled={busy || !task.canChangeStatus} onClick={() => patch({ status: k })}>{v.label}</button>
                 ))}
               </div>
 
@@ -177,7 +162,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                 <div className="card">
                   {task.checklist.map((c) => (
                     <label key={c._id} className="list-item" style={{ cursor: 'pointer' }}>
-                      <button className={`check ${c.done ? 'done' : ''}`} disabled={busy} aria-label={c.text}
+                      <button className={`check ${c.done ? 'done' : ''}`} disabled={busy || !task.canChangeChecklist} aria-label={c.text}
                         onClick={(e) => { e.preventDefault(); patch({ checklistItem: { id: c._id, done: !c.done } }); }}><Check size={14} strokeWidth={3} /></button>
                       <div className="li-main">
                         <div className="title" style={c.done ? { textDecoration: 'line-through', color: 'var(--text-3)' } : undefined}>{c.text}</div>
@@ -205,9 +190,9 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                   ))}
                 </div>
               )}
-              {task.status !== 'done' && (task.status !== 'pending_review' || task.canCompleteDirectly) && (
-                <button className="btn btn-primary" style={{ width: '100%', marginTop: 24 }} disabled={busy} onClick={() => patch({ status: task.canCompleteDirectly ? 'done' : 'pending_review' })}>
-                  <Check size={18} />{task.canCompleteDirectly ? 'Mark task completed' : 'Submit completion for TL review'}
+              {task.status !== 'done' && task.canChangeStatus && (
+                <button className="btn btn-primary" style={{ width: '100%', marginTop: 24 }} disabled={busy} onClick={() => patch({ status: 'done' })}>
+                  <Check size={18} />Mark task completed
                 </button>
               )}
             </>

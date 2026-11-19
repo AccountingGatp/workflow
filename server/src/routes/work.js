@@ -3,11 +3,11 @@ import mongoose from 'mongoose';
 import { Task, TaskTemplate, AuditLog, User, ClientPermission, ClientProject, ProjectWorkItem } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
-  audit, isSuper, canMaintainTasks, canEditTask, taskScope, canManageClient, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
+  audit, isSuper, canMaintainTasks, taskScope, canManageClient, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 import { scheduleFields } from '../services/schedule.js';
-import { applyTaskTransition, mayReview } from '../services/task-review.js';
+import { applyTaskTransition } from '../services/task-review.js';
 
 const r = Router();
 const validateProject = async (clientId, projectId) => {
@@ -23,7 +23,7 @@ const validateProject = async (clientId, projectId) => {
 };
 
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name role').populate('owner', 'name').populate('completedBy', 'name').populate('submittedBy', 'name').populate('reviewedBy', 'name').populate('reviewer', 'name');
+  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name role').populate('owner', 'name').populate('completedBy', 'name').select('-reviewer -submittedBy -submittedAt -reviewedBy -reviewedAt');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
@@ -37,17 +37,7 @@ async function assertAssignable(actor, clientId, userIds = []) {
   }
 }
 
-async function reviewerFor(assignees = [], actor, client) {
-  const employees = await User.find({ _id: { $in: assignees }, role: 'employee', active: true, deletedAt: null }).select('reviewLead');
-  const leads = [...new Set(employees.map(u => u.reviewLead && String(u.reviewLead)).filter(Boolean))];
-  if (leads.length > 1) throw new HttpError(400, 'Assign employees with different reviewers to separate tasks');
-  if (leads[0]) {
-    const reviewer = await User.findOne({ _id: leads[0], role: 'admin', active: true, deletedAt: null });
-    if (!reviewer) throw new HttpError(400, 'The employee’s team leader is unavailable; update their reviewer first');
-    await assertAssignable(actor, client, [reviewer._id]);
-  }
-  return leads[0];
-}
+
 
 /* ---------- Tasks ---------- */
 
@@ -74,7 +64,7 @@ const viewFilter = (view, dates, weeklyMonthly) => {
 const taskFilters = async (req, dates, weeklyMonthly) => {
   const { scope = 'mine', status, client, project, team, assignee, from, to, view = 'all', q } = req.query;
   const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly)];
-  if (scope === 'mine') clauses.push({ $or: [{ assignees: req.user._id }, { reviewer: req.user._id }] });
+  if (scope === 'mine') clauses.push({ assignees: req.user._id });
   if (scope === 'managed') {
     if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
     const managed = await managedClientIds(req.user);
@@ -188,11 +178,20 @@ r.get('/manager-workload', ah(async (req, res) => {
     byProject: report.byProject, masterItems, recurringSchedules, activeSchedules });
 }));
 
+const taskDetailFields = ['title', 'dueDate', 'priority', 'sop', 'owner', 'team', 'assignees', 'project'];
+const taskActivity = [
+  { action: 'task.create' },
+  { action: 'task.update', summary: /(^|, )changed (title|dueDate|priority|sop|owner|team|assignees|project)(,|$)|^Edited “/ },
+];
+
 r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
-  const activity = await AuditLog.find({ entity: 'Task', entityId: task._id }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
-  res.json({ ...task, activity, canEdit: canEditTask(req.user, task.project) && await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user), canCompleteDirectly: req.user.role !== 'employee' && task.assignees.some(a => String(a._id) === String(req.user._id)), canReview: mayReview(task, { manager: await canManageClient(req.user, task.client._id), actorId: req.user._id, actorRole: req.user.role }) });
+  const activity = await AuditLog.find({ entity: 'Task', entityId: task._id, $or: taskActivity }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
+  const canEdit = await canManageClient(req.user, task.client._id);
+  const isAssignee = task.assignees.some((person) => String(person._id) === String(req.user._id));
+  res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || isAssignee,
+    canChangeChecklist: canEdit || (task.status !== 'done' && isAssignee), canDelete: isSuper(req.user) });
 }));
 
 r.post('/tasks', ah(async (req, res) => {
@@ -201,9 +200,8 @@ r.post('/tasks', ah(async (req, res) => {
   if (!(await canManageClient(req.user, client))) throw new HttpError(403, 'You can only create work for clients you manage');
   const validProject = await validateProject(client, project);
   await assertAssignable(req.user, client, assignees);
-  const reviewer = await reviewerFor(assignees, req.user, client);
   const task = await Task.create({
-    title, client, project: validProject, team: team || undefined, assignees, reviewer, owner: owner || assignees[0], dueDate, priority, sop,
+    title, client, project: validProject, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
     checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: req.user._id,
   });
   audit(req.user, 'task.create', { entity: 'Task', entityId: task._id, client, summary: `Created “${title}”` });
@@ -213,37 +211,18 @@ r.post('/tasks', ah(async (req, res) => {
 r.patch('/tasks/:id', ah(async (req, res) => {
   const task = await Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) });
   if (!task) throw new HttpError(404, 'Task not found');
-  const managesClient = await canManageClient(req.user, task.client);
-  const manager = canEditTask(req.user, task.project) && managesClient;
+  const manager = await canManageClient(req.user, task.client);
   const isAssignee = task.assignees.some((a) => String(a) === String(req.user._id));
-  const isReviewer = mayReview(task, { manager: managesClient, actorId: req.user._id, actorRole: req.user.role });
-  if (!manager && !isAssignee && !isReviewer) throw new HttpError(403, 'Only assignees, reviewers or managing admins can update this task');
+  if (!manager && !isAssignee) throw new HttpError(403, 'Only assignees or client managers can update this task');
   const body = req.body || {};
-  const notes = [];
-  if (!manager && ['title', 'dueDate', 'priority', 'sop', 'owner', 'team', 'assignees', 'project'].some((field) => body[field] !== undefined)) {
+  if (!manager && taskDetailFields.some((field) => body[field] !== undefined)) {
     throw new HttpError(403, 'You do not have permission to edit this task');
   }
-  if (!manager && !isAssignee && (body.checklistItem || (body.status && !['in_progress', 'waiting'].includes(body.status)))) throw new HttpError(403, 'Reviewers may confirm completion or return work to the employee');
-
-  if (body.confirmCompletion && Object.keys(body).some(k => k !== 'confirmCompletion')) throw new HttpError(400, 'Save other changes before confirming completion');
-  if (body.checklistItem && (body.confirmCompletion || ['done', 'pending_review'].includes(body.status))) throw new HttpError(400, 'Save checklist changes before submitting or reviewing');
-  if (['done', 'pending_review'].includes(task.status) && manager && (body.checklistItem || ['title', 'dueDate', 'sop', 'assignees', 'project'].some(k => body[k] !== undefined))) {
-    task.status = 'in_progress'; task.completedAt = undefined; task.completedBy = undefined;
-    task.submittedAt = undefined; task.submittedBy = undefined; task.reviewedAt = undefined; task.reviewedBy = undefined;
-    notes.push('reopened after approved work changed');
-  }
-  if (body.status || body.confirmCompletion) {
-    const previous = task.status;
-    applyTaskTransition(task, body, { manager: manager || isReviewer, isAssignee, actorId: req.user._id, actorRole: req.user.role });
-    if (previous !== task.status) notes.push(`status ${previous} → ${task.status}`);
+  if (body.checklistItem && ['done', 'pending_review'].includes(body.status)) {
+    throw new HttpError(400, 'Save checklist changes before completing the task');
   }
   if (!manager && task.status === 'done' && body.checklistItem) {
-    throw new HttpError(400, 'Reopen the task before changing approved work');
-  }
-  if (body.checklistItem && task.status === 'pending_review') {
-    task.status = 'in_progress';
-    task.submittedAt = undefined; task.submittedBy = undefined;
-    notes.push('review reset after checklist changed');
+    throw new HttpError(400, 'Reopen the task before changing its checklist');
   }
   if (body.checklistItem) {
     const item = task.checklist.id(body.checklistItem.id);
@@ -251,30 +230,33 @@ r.patch('/tasks/:id', ah(async (req, res) => {
     item.done = !!body.checklistItem.done;
     item.doneBy = item.done ? req.user._id : undefined;
     item.doneAt = item.done ? new Date() : undefined;
-    notes.push(`${item.done ? 'ticked' : 'unticked'} “${item.text}”`);
   }
   if (manager) {
     if (body.project !== undefined) {
       task.project = await validateProject(task.client, body.project);
-      notes.push('changed project');
     }
     for (const k of ['title', 'dueDate', 'priority', 'sop', 'owner', 'team']) {
       if (body[k] !== undefined) {
         if (k === 'dueDate' && task.template && !task.scheduledDate) task.scheduledDate = task.dueDate;
-        task[k] = body[k] || undefined; notes.push(`changed ${k}`); }
+        task[k] = body[k] || undefined;
+      }
     }
     if (body.assignees !== undefined) {
       if (!Array.isArray(body.assignees) || body.assignees.some((id) => typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id))) {
         throw new HttpError(400, 'Select valid assignees');
       }
       await assertAssignable(req.user, task.client, body.assignees);
-      task.reviewer = await reviewerFor(body.assignees, req.user, task.client);
-      task.assignees = body.assignees; notes.push('changed assignees');
+      task.assignees = body.assignees;
       if (!body.assignees.some((a) => String(a) === String(task.owner))) task.owner = body.assignees[0];
     }
   }
+  const edited = taskDetailFields.some((field) => task.isModified(field));
+  const reopen = (task.status === 'done' || task.status === 'pending_review') &&
+    (task.isModified('checklist') || ['title', 'dueDate', 'sop', 'assignees', 'project'].some((field) => task.isModified(field)));
+  const status = body.status || (reopen ? 'in_progress' : undefined);
+  if (status) applyTaskTransition(task, { status }, { manager, isAssignee, actorId: req.user._id });
   await task.save();
-  if (notes.length) audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, summary: notes.join(', ') });
+  if (edited) audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, summary: `Edited “${task.title}”` });
   res.json(task);
 }));
 
@@ -294,8 +276,8 @@ r.get('/templates', ah(async (req, res) => {
   const managed = await managedClientIds(req.user);
   const filter = managed === null ? {} : { client: { $in: managed } };
   const templates = await TaskTemplate.find(filter).sort({ createdAt: -1 })
-    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name role').populate('reviewer', 'name').lean();
-  res.json(templates.map((template) => ({ ...template, canEdit: canEditTask(req.user, template.project) })));
+    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name role').select('-reviewer').lean();
+  res.json(templates.map((template) => ({ ...template, canEdit: true })));
 }));
 
 r.post('/templates', ah(async (req, res) => {
@@ -305,8 +287,7 @@ r.post('/templates', ah(async (req, res) => {
   const validProject = await validateProject(b.client, b.project);
   await assertAssignable(req.user, b.client, b.assignees || []);
   const schedule = scheduleFields(b);
-  const reviewer = await reviewerFor(b.assignees || [], req.user, b.client);
-  const tpl = await TaskTemplate.create({ title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined, reviewer, assignees: b.assignees || [], owner: (b.assignees || []).includes(b.owner) ? b.owner : b.assignees?.[0], priority: b.priority, sop: b.sop, ...schedule, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
+  const tpl = await TaskTemplate.create({ title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined, assignees: b.assignees || [], owner: (b.assignees || []).includes(b.owner) ? b.owner : b.assignees?.[0], priority: b.priority, sop: b.sop, ...schedule, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
   const created = await generateRecurringTasks(tpl._id);
   audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });
   res.status(201).json({ template: tpl, created });
@@ -315,7 +296,7 @@ r.post('/templates', ah(async (req, res) => {
 r.patch('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
-  if (!canEditTask(req.user, tpl.project) || !(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
+  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
   if (typeof req.body.active === 'boolean') tpl.active = req.body.active;
   await tpl.save();
   if (tpl.active) await generateRecurringTasks(tpl._id);
@@ -327,7 +308,7 @@ r.patch('/templates/:id', ah(async (req, res) => {
 r.patch('/templates/:id/details', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
-  if (!canEditTask(req.user, tpl.project) || !(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
+  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
   const b = req.body || {};
   if (!String(b.title || '').trim()) throw new HttpError(400, 'Task name is required');
   const schedule = scheduleFields(b);
@@ -340,7 +321,6 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
   tpl.priority = b.priority || 'normal';
   tpl.sop = String(b.sop || '');
   tpl.checklist = (Array.isArray(b.checklist) ? b.checklist : []).map(x => String(x).trim()).filter(Boolean);
-  tpl.reviewer = await reviewerFor(assignees, req.user, tpl.client);
   tpl.assignees = assignees;
   tpl.owner = assignees.includes(b.owner) ? b.owner : assignees[0];
   await tpl.save();
@@ -379,7 +359,7 @@ r.get('/dashboard', ah(async (req, res) => {
   const sod = new Date(now); sod.setHours(0, 0, 0, 0);
   const eod = new Date(now); eod.setHours(23, 59, 59, 999);
   const scope = await taskScope(req.user);
-  const mine = { $and: [scope, { $or: [{ assignees: req.user._id }, { reviewer: req.user._id }] }], status: { $ne: 'done' } };
+  const mine = { $and: [scope, { assignees: req.user._id }], status: { $ne: 'done' } };
   const [dueToday, overdue, upcoming] = await Promise.all([
     Task.countDocuments({ ...mine, dueDate: { $gte: sod, $lte: eod } }),
     Task.countDocuments({ ...mine, dueDate: { $lt: sod } }),
@@ -423,7 +403,8 @@ r.get('/audit', ah(async (req, res) => {
   if (req.user.role === 'employee') throw new HttpError(403, 'Not available');
   const managed = await managedClientIds(req.user);
   const filter = managed === null ? {} : { $or: [{ client: { $in: managed } }, { actor: req.user._id }] };
-  res.json(await AuditLog.find(filter).sort({ createdAt: -1 }).limit(200).populate('actor', 'name role').populate('client', 'name').lean());
+  const taskChanges = { $or: [...taskActivity, { action: { $in: ['project.work.create', 'project.work.update', 'template.create', 'template.edit'] } }] };
+  res.json(await AuditLog.find({ $and: [filter, taskChanges] }).sort({ createdAt: -1 }).limit(200).populate('actor', 'name role').populate('client', 'name').lean());
 }));
 
 export default r;

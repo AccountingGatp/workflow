@@ -13,7 +13,6 @@ import { HttpError } from '../middleware/auth.js';
 
 export const isSuper = (u) => u.role === 'super_admin';
 export const canMaintainTasks = (user) => isSuper(user) || user.role === 'manager';
-export const canEditTask = (user, project) => canMaintainTasks(user) || (user.role === 'admin' && Boolean(project));
 
 export const activePermissionFilter = () => ({
   revokedAt: null,
@@ -128,7 +127,6 @@ export async function taskScope(user) {
     $or: [
       { client: { $in: managed } },
       { assignees: user._id, client: { $in: visible } },
-      { reviewer: user._id, client: { $in: visible } },
     ],
   };
 }

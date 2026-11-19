@@ -18,34 +18,23 @@ test('schedule validation rejects missing, duplicate and invalid dates', () => {
   assert.deepEqual(scheduleFields({ frequency: 'semimonthly', monthDays: [20,5] }).monthDays,[5,20]);
   assert.equal(scheduleFields({ frequency: 'monthly', monthDay: 31 }).monthDay,31);
 });
-test('completion requires employee submission followed by independent manager confirmation', () => {
+test('assignees complete tasks directly after the checklist is finished', () => {
   const task = { status: 'in_progress', checklist: [{ done: false }] };
   const employee = { manager: false, isAssignee: true, actorId: 'employee' };
-  const manager = { manager: true, isAssignee: false, actorId: 'lead', actorRole: 'admin' };
-  assert.throws(() => applyTaskTransition(task, { status: 'done' }, employee));
+  assert.throws(() => applyTaskTransition(task, { status: 'done' }, employee), /checklist/);
   task.checklist[0].done = true;
   applyTaskTransition(task, { status: 'done' }, employee);
-  assert.equal(task.status,'pending_review');
+  assert.equal(task.status, 'done');
+  assert.equal(task.completedBy, 'employee');
+  assert.ok(task.completedAt);
+  applyTaskTransition(task, { status: 'in_progress' }, employee);
   assert.equal(task.completedAt, undefined);
-  assert.throws(() => applyTaskTransition(task, { confirmCompletion: true }, employee));
-  assert.throws(() => applyTaskTransition(task, { confirmCompletion: true }, { ...manager, actorId: 'employee' }));
-  applyTaskTransition(task, { confirmCompletion: true }, manager);
-  assert.equal(task.status,'done');
-  assert.equal(task.reviewedBy,'lead');
-  assert.equal(task.completedBy,'employee');
-  assert.throws(() => applyTaskTransition(task, { status: 'todo' }, employee));
-  applyTaskTransition(task, { status: 'in_progress' }, manager);
-  assert.equal(task.reviewedBy,undefined);
-  assert.equal(task.submittedBy,undefined);
-});
-test('manager cannot submit unassigned employee work as completed', () => {
-  assert.throws(() => applyTaskTransition({ status: 'todo', checklist: [] }, { status: 'done' }, { manager: true, isAssignee: false, actorId: 'lead' }));
 });
 
-test('TL own work completes directly and Super Admin does not review employee work', () => {
-  const own = { status: 'todo', checklist: [{ done: true }] };
-  applyTaskTransition(own, { status: 'done' }, { manager: true, isAssignee: true, actorId: 'krupali', actorRole: 'admin' });
-  assert.equal(own.status, 'done'); assert.equal(own.reviewedBy, undefined); assert.equal(own.submittedAt, undefined);
-  const employee = { status: 'pending_review', reviewer: 'krupali', submittedBy: 'sathya', checklist: [] };
-  assert.throws(() => applyTaskTransition(employee, { confirmCompletion: true }, { manager: true, isAssignee: false, actorId: 'owner', actorRole: 'super_admin' }));
+test('legacy submissions can be completed without a reviewer', () => {
+  const task = { status: 'pending_review', submittedBy: 'employee', checklist: [] };
+  assert.throws(() => applyTaskTransition(task, { status: 'done' }, { actorId: 'outside' }), /assignee or client manager/);
+  applyTaskTransition(task, { status: 'done' }, { isAssignee: true, actorId: 'employee' });
+  assert.equal(task.status, 'done');
+  assert.equal(task.submittedBy, undefined);
 });

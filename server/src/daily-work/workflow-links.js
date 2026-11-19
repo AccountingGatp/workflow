@@ -1,7 +1,6 @@
 import { Types } from 'mongoose';
-import { Client, ClientProject, ProjectWorkItem, Task, TaskTemplate, User } from '../models/index.js';
+import { Client, ClientProject, ProjectWorkItem, Task, TaskTemplate, AuditLog } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
-import { canSeeClient } from '../services/access.js';
 import { matches, materializeOccurrence } from '../services/recurrence.js';
 import { clock, shiftDate } from './dates.js';
 import { applyTaskTransition } from '../services/task-review.js';
@@ -170,10 +169,10 @@ function readableSource(task, row) {
   return task && String(task.client) === String(row.clientId);
 }
 
-export async function projectWorkflowStatuses(submissions, canReview) {
+export async function projectWorkflowStatuses(submissions) {
   const ids = [...new Set(submissions.flatMap((doc) => doc.entries.map((row) => row.workflowTaskId).filter(Boolean)))];
   if (!ids.length) return submissions;
-  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist reviewer submittedBy').lean();
+  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist').lean();
   const states = new Map(tasks.map((task) => [String(task._id), task]));
   return submissions.map((doc) => ({ ...doc, entries: doc.entries.map((row) => {
     if (!row.workflowTaskId) return row;
@@ -182,7 +181,6 @@ export async function projectWorkflowStatuses(submissions, canReview) {
     return { ...row, title: task.title, checklist: task.checklist, workflowStatus: task.status,
       status: task.status === 'done' ? 'complete' : 'incomplete',
       incompleteReason: task.status === 'done' ? undefined : row.incompleteReason,
-      ...(canReview && { canReview: canReview(task, row) }),
     };
   }) }));
 }
@@ -240,13 +238,10 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
     if (master?.responsibleUser && String(master.responsibleUser) !== memberId) {
       throw new HttpError(403, 'This client task is assigned to another employee');
     }
-    const lead = user.role === 'employee' && user.reviewLead
-      ? await User.findOne({ _id: user.reviewLead, active: true, role: 'admin', deletedAt: null }).session(session).lean()
-      : null;
     task = new Task({
       client: row.clientId, project: projectId, masterItem: master?._id,
       title: master?.title || row.title, dueDate: new Date(`${date}T12:00:00+05:30`),
-      assignees: [user._id], owner: user._id, createdBy: user._id, reviewer: lead && await canSeeClient(lead, row.clientId) ? lead._id : undefined,
+      assignees: [user._id], owner: user._id, createdBy: user._id,
       priority: row.priority, sop: row.description || undefined, status: 'in_progress',
     });
   }
@@ -259,16 +254,21 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
       const step = task.checklist.id(change?.id);
       if (!step || typeof change.done !== 'boolean') throw new HttpError(400, 'This checklist step is no longer available');
       if (step.done === change.done) continue;
-      if (['done', 'pending_review'].includes(task.status)) throw new HttpError(409, 'This task is already complete or in review. Refresh before editing.');
+      if (task.status === 'done') throw new HttpError(409, 'This task is already complete. Refresh before editing.');
       step.done = change.done;
       step.doneAt = change.done ? new Date() : undefined;
       step.doneBy = change.done ? user._id : undefined;
     }
   }
-  if (row.status === 'complete' && !['done', 'pending_review'].includes(task.status)) {
-    applyTaskTransition(task, { status: 'done' }, { manager: managed, isAssignee: true, actorId: user._id, actorRole: user.role });
+  if (row.status === 'complete' && task.status !== 'done') {
+    applyTaskTransition(task, { status: 'done' }, { manager: managed, isAssignee: true, actorId: user._id });
   }
-  if (task.isNew || task.isModified()) await task.save({ session });
+  const created = task.isNew;
+  if (created || task.isModified()) await task.save({ session });
+  if (created) await AuditLog.create([{
+    actor: user._id, action: 'task.create', entity: 'Task', entityId: task._id, client: task.client,
+    summary: `Created “${task.title}”`,
+  }], { session });
   row.title = task.title;
   row.workflowTaskId = String(task._id);
   row.workflowStatus = task.status;

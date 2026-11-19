@@ -7,7 +7,7 @@ const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<',
 export function submissionText({ memberName, date, entries }, heading = 'Daily project update') {
   return [
     `*${heading}* · ${escape(memberName)} · ${date}`,
-    ...entries.map((entry) => `• ${escape(entry.projectName)} — ${escape(entry.title)} · ${entry.hours} h · ${entry.priority} priority · ${entry.workflowStatus === 'pending_review' ? 'awaiting TL review' : entry.status}`),
+    ...entries.map((entry) => `• ${escape(entry.projectName)} — ${escape(entry.title)} · ${entry.hours} h · ${entry.priority} priority · ${entry.status}`),
     entries.length ? `Total: ${entries.reduce((sum, row) => sum + row.hours, 0).toFixed(2)} h` : 'All tasks removed for this day.',
   ].join('\n');
 }

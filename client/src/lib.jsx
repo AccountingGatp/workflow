@@ -115,7 +115,7 @@ export const STATUS = {
   todo: { label: 'To do', cls: '' },
   in_progress: { label: 'In progress', cls: 'b-info' },
   waiting: { label: 'Waiting', cls: 'b-warning' },
-  pending_review: { label: 'Awaiting TL confirmation', cls: 'b-warning' },
+  pending_review: { label: 'In progress', cls: 'b-info' },
   done: { label: 'Completed', cls: 'b-success' },
 };
 
