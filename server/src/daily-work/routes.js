@@ -8,7 +8,7 @@ import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, roster, validateProjectLink, workflowProjects } from './access.js';
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets, withClientBudgets } from './budgets.js';
-import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
+import { isCustomDailyWork, listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
 import { clock, dateValue, shiftDate } from './dates.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
@@ -255,10 +255,15 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
       if (!task || !task.assignees.some((id) => String(id) === memberId)) {
         throw new HttpError(409, 'The linked Workflow task is no longer available');
       }
-      const reviewer = !own && reviewerCanUpdate(task, entry, req.user, scope);
+      const custom = isCustomDailyWork(task, entry, memberId, date);
+      const reviewer = !own && !custom && reviewerCanUpdate(task, entry, req.user, scope);
       enforce(own || reviewer);
       if (task.status === 'done') throw new HttpError(409, 'This task is already completed');
-      if (!(task.status === 'pending_review' && own && status === 'complete')) {
+      if (custom) {
+        task.dailyWorkCustom = true;
+        task.reviewer = undefined;
+      }
+      if (!(task.status === 'pending_review' && own && status === 'complete' && !custom)) {
         applyTaskTransition(task, reviewer && status === 'complete' ? { confirmCompletion: true } :
           { status: status === 'complete' ? 'done' : 'in_progress' }, {
           manager: reviewer, isAssignee: own, actorId: req.user._id, actorRole: req.user.role,

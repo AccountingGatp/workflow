@@ -170,19 +170,29 @@ function readableSource(task, row) {
   return task && String(task.client) === String(row.clientId);
 }
 
+export function isCustomDailyWork(task, entry, memberId, date) {
+  if (task.dailyWorkCustom !== undefined) return task.dailyWorkCustom;
+  // Older custom entries are linked to a self-assigned task created at the standard Daily Work due time.
+  return !entry.catalogId && !entry.workItemId && !task.masterItem && !task.template && !task.mailThread &&
+    String(task.createdBy) === memberId && String(task.owner) === memberId &&
+    task.assignees?.length === 1 && String(task.assignees[0]) === memberId &&
+    task.dueDate?.getTime() === new Date(`${date}T12:00:00+05:30`).getTime();
+}
+
 export async function projectWorkflowStatuses(submissions, canReview) {
   const ids = [...new Set(submissions.flatMap((doc) => doc.entries.map((row) => row.workflowTaskId).filter(Boolean)))];
   if (!ids.length) return submissions;
-  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist reviewer submittedBy').lean();
+  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist reviewer submittedBy dailyWorkCustom masterItem template mailThread createdBy owner assignees dueDate').lean();
   const states = new Map(tasks.map((task) => [String(task._id), task]));
   return submissions.map((doc) => ({ ...doc, entries: doc.entries.map((row) => {
     if (!row.workflowTaskId) return row;
     const task = states.get(row.workflowTaskId);
     if (!readableSource(task, row)) return { ...row, workflowStatus: 'unavailable' };
-    return { ...row, title: task.title, checklist: task.checklist, workflowStatus: task.status,
+    const dailyWorkCustom = isCustomDailyWork(task, row, doc.memberId, doc.date);
+    return { ...row, title: task.title, checklist: task.checklist, workflowStatus: task.status, dailyWorkCustom,
       status: task.status === 'done' ? 'complete' : 'incomplete',
       incompleteReason: task.status === 'done' ? undefined : row.incompleteReason,
-      ...(canReview && { canReview: canReview(task, row) }),
+      ...(canReview && { canReview: !dailyWorkCustom && canReview(task, row) }),
     };
   }) }));
 }
@@ -240,15 +250,21 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
     if (master?.responsibleUser && String(master.responsibleUser) !== memberId) {
       throw new HttpError(403, 'This client task is assigned to another employee');
     }
-    const lead = user.role === 'employee' && user.reviewLead
+    const dailyWorkCustom = !row.catalogId && !master;
+    const lead = !dailyWorkCustom && user.role === 'employee' && user.reviewLead
       ? await User.findOne({ _id: user.reviewLead, active: true, role: 'admin', deletedAt: null }).session(session).lean()
       : null;
     task = new Task({
-      client: row.clientId, project: projectId, masterItem: master?._id,
+      client: row.clientId, project: projectId, masterItem: master?._id, dailyWorkCustom,
       title: master?.title || row.title, dueDate: new Date(`${date}T12:00:00+05:30`),
       assignees: [user._id], owner: user._id, createdBy: user._id, reviewer: lead && await canSeeClient(lead, row.clientId) ? lead._id : undefined,
       priority: row.priority, sop: row.description || undefined, status: 'in_progress',
     });
+  }
+
+  if (existing && isCustomDailyWork(task, existing, memberId, date)) {
+    task.dailyWorkCustom = true;
+    task.reviewer = undefined;
   }
 
   if (input.checklistChanges !== undefined) {
@@ -265,7 +281,7 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
       step.doneBy = change.done ? user._id : undefined;
     }
   }
-  if (row.status === 'complete' && !['done', 'pending_review'].includes(task.status)) {
+  if (row.status === 'complete' && task.status !== 'done' && (task.status !== 'pending_review' || task.dailyWorkCustom)) {
     applyTaskTransition(task, { status: 'done' }, { manager: managed, isAssignee: true, actorId: user._id, actorRole: user.role });
   }
   if (task.isNew || task.isModified()) await task.save({ session });

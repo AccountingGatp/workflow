@@ -198,7 +198,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
-  res.json({ ...task, activity, canEdit: canMaintainTasks(req.user) && await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user), canCompleteDirectly: req.user.role !== 'employee' && task.assignees.some(a => String(a._id) === String(req.user._id)), canReview: mayReview(task, { manager: await canManageClient(req.user, task.client._id), actorId: req.user._id, actorRole: req.user.role }) });
+  res.json({ ...task, activity, canEdit: canMaintainTasks(req.user) && await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user), canCompleteDirectly: (req.user.role !== 'employee' || task.dailyWorkCustom) && task.assignees.some(a => String(a._id) === String(req.user._id)), canReview: mayReview(task, { manager: await canManageClient(req.user, task.client._id), actorId: req.user._id, actorRole: req.user.role }) });
 }));
 
 r.post('/tasks', ah(async (req, res) => {

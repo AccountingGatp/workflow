@@ -2,7 +2,7 @@ import { HttpError } from '../middleware/auth.js';
 
 export function mayReview(task, { manager, actorId, actorRole = 'admin' }) {
   const reviewer = task.reviewer?._id || task.reviewer;
-  return actorRole === 'admin' && (reviewer ? String(reviewer) === String(actorId) : manager);
+  return !task.dailyWorkCustom && actorRole === 'admin' && (reviewer ? String(reviewer) === String(actorId) : manager);
 }
 
 export function applyTaskTransition(task, body, { manager, isAssignee, actorId, actorRole = 'employee' }) {
@@ -18,8 +18,8 @@ export function applyTaskTransition(task, body, { manager, isAssignee, actorId, 
   }
   let status = body.status;
   if (!['todo', 'in_progress', 'waiting', 'pending_review', 'done'].includes(status)) throw new HttpError(400, 'Invalid status');
-  // Team leaders and admins finish their own assigned work without another reviewer.
-  if (['done', 'pending_review'].includes(status) && actorRole !== 'employee' && isAssignee) {
+  // Team leads, admins, and employees logging custom Daily Work complete these assignments directly.
+  if (['done', 'pending_review'].includes(status) && (actorRole !== 'employee' || task.dailyWorkCustom) && isAssignee) {
     if (task.checklist.some(c => !c.done)) throw new HttpError(400, 'Complete all checklist steps before finishing');
     task.status = 'done'; task.completedAt = now; task.completedBy = actorId;
     task.submittedAt = undefined; task.submittedBy = undefined;

@@ -388,8 +388,8 @@ function EntryEditor({ date, data }) {
                         <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
                       </select></div>
                       <div className="field"><label htmlFor={`status-${row.key}`}>Status</label>
-                        <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
-                        <option value="incomplete">{row.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
+                        <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'unavailable'].includes(row.workflowStatus) || (row.workflowStatus === 'pending_review' && !row.dailyWorkCustom)} onChange={(event) => update(row.key, { status: event.target.value })}>
+                        <option value="incomplete">{row.workflowStatus === 'pending_review' && !row.dailyWorkCustom ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
                       </select></div>
                     </div>
                     {!!row.checklist?.length && <div className="stack daily-entry-checklist">
@@ -436,7 +436,7 @@ function EntryEditor({ date, data }) {
 }
 
 function StatusBadge({ entry }) {
-  const label = entry.status === 'complete' ? 'Completed' : entry.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete';
+  const label = entry.status === 'complete' ? 'Completed' : entry.workflowStatus === 'pending_review' && !entry.dailyWorkCustom ? 'Awaiting TL review' : 'Incomplete';
   return <Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{label}</Badge>;
 }
 
@@ -474,7 +474,7 @@ function TaskStatusRow({ entry, me, onSaved }) {
     </div>
     {mayUpdate && <div className="daily-status-actions">
       {!showReason ? <div className="row-wrap">
-        {entry.status !== 'complete' && (!own || entry.workflowStatus !== 'pending_review') &&
+        {entry.status !== 'complete' && (!own || entry.workflowStatus !== 'pending_review' || entry.dailyWorkCustom) &&
           <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
         <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
           setReason(entry.incompleteReason || '');
