@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Types.ObjectId, ref: name });
 const opts = { timestamps: true };
+export const userRoles = ['super_admin', 'manager', 'admin', 'employee'];
 
 /** One record per person. `role` is the global role; team-level roles live on TeamMembership. */
 export const User = model('User', new Schema({
@@ -10,7 +11,7 @@ export const User = model('User', new Schema({
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   googleSubject: { type: String, unique: true, sparse: true, select: false },
   passwordHash: { type: String, required: true, select: false },
-  role: { type: String, enum: ['super_admin', 'admin', 'employee'], default: 'employee' },
+  role: { type: String, enum: userRoles, default: 'employee' },
   title: String,
   reviewLead: ref('User'), // employee's completion reviewer; TL/admin work completes directly
   active: { type: Boolean, default: true },

@@ -49,7 +49,7 @@ async function projectInScope(models, scope, id, managing = false, session) {
 function publicSubmission(doc, entries = doc.entries) {
   return {
     id: doc._id, date: doc.date, memberId: doc.memberId, memberName: doc.memberName, entries,
-    version: doc.__v, delivery: doc.delivery,
+    version: doc.__v, delivery: doc.delivery, slackPosted: Boolean(doc.slackTs),
   };
 }
 
@@ -89,15 +89,34 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
 
   const key = `${scope.own}:${date}`;
   const reviewAllowed = await canLogReview(req.user);
-  await models.BudgetRevision.updateOne({ _id: scope.own }, { $setOnInsert: { revision: 0 } }, { upsert: true })
+  const sharedBudget = 'shared-project-budgets';
+  await models.BudgetRevision.updateOne({ _id: sharedBudget }, { $setOnInsert: { revision: 0 } }, { upsert: true })
     .catch((error) => { if (error.code !== 11000) throw error; });
 
-  const { submission, changed } = await models.Submission.db.transaction(async (session) => {
-    // Serialize this member's saves across dates, so two concurrent days cannot spend the same hours.
-    await models.BudgetRevision.updateOne({ _id: scope.own }, { $inc: { revision: 1 } }, { session });
+  const submission = await models.Submission.db.transaction(async (session) => {
+    // Serialize budget writes so simultaneous saves cannot spend the same project hours.
+    await models.BudgetRevision.updateOne({ _id: sharedBudget }, { $inc: { revision: 1 } }, { session });
     return saveDay(req.user, models, scope, { date, key, entries, version, reviewAllowed, session });
   });
-  const result = changed ? await deliverSubmission(models, key) : submission;
+  const [live] = await projectWorkflowStatuses([submission.toObject()]);
+  res.json(publicSubmission(live, live.entries.filter((entry) => includes(scope.visible, entry.clientId))));
+}));
+
+r.post('/day/:date/slack', route(async (req, res, models, scope) => {
+  const date = dateValue(req.params.date);
+  const key = `${scope.own}:${date}`;
+  if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
+  const submission = await models.Submission.findById(key);
+  if (!submission || (!submission.entries.length && !submission.slackTs)) fail('Save a task before sending to Slack');
+  enforce(submission.entries.every((entry) => includes(scope.visible, entry.clientId)));
+  if (submission.delivery === 'uncertain') throw new HttpError(409, 'The last Slack delivery could not be confirmed.');
+  if (submission.__v !== req.body.version) throw new HttpError(409, 'This submission changed. Reload it before sending.');
+  if (submission.delivery === 'skipped') {
+    const queued = await models.Submission.updateOne({ _id: key, __v: submission.__v, delivery: 'skipped' },
+      { $set: { delivery: 'pending', deliveryAfter: new Date() }, $inc: { __v: 1 } });
+    if (!queued.modifiedCount) throw new HttpError(409, 'This submission changed. Reload it before sending.');
+  }
+  const result = await deliverSubmission(models, key);
   const [live] = await projectWorkflowStatuses([result.toObject()]);
   res.json(publicSubmission(live, live.entries.filter((entry) => includes(scope.visible, entry.clientId))));
 }));
@@ -107,7 +126,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   if ((previous && previous.__v !== version) || (!previous && version != null)) {
     throw new HttpError(409, 'This submission changed. Refresh before saving again.');
   }
-  if (previous?.delivery === 'sending' && Date.now() - previous.deliveryAt < 30000) {
+  if (previous?.delivery === 'sending') {
     throw new HttpError(409, 'Slack delivery is in progress. Try again in a moment.');
   }
   if (!previous && !entries.length) fail('Add at least one task');
@@ -153,13 +172,14 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
         throw new HttpError(403, 'Only Simran, Krupali, Jaini and Riddhi can log Review hours');
       }
     }
-    const master = workItems.find((item) => item.projectId === projectId &&
-      (item.id === (input.workItemId || existing?.workItemId) || taskName(item.title) === taskName(title)));
+    const projectWork = workItems.filter((item) => item.projectId === projectId);
+    const master = projectWork.find((item) => item.id === (input.workItemId || existing?.workItemId)) ||
+      projectWork.find((item) => taskName(item.title) === taskName(title));
     const description = master?.description || textValue(input.description ?? existing?.description, 3000, false);
     const row = {
       ...(existing && { _id: existing._id }),
       projectId, clientId, projectName: project?.name || existing.projectName,
-      title, description, hours, priority, status, catalogId: catalogTask && String(catalogTask._id),
+      title, description, note: textValue(input.note ?? existing?.note, 500, false), hours, priority, status, catalogId: catalogTask && String(catalogTask._id),
     };
     const linkedProject = project || await projectInScope(models, scope, projectId, false, session);
     if (existing?.workflowTaskId && input.workflowTaskId && input.workflowTaskId !== existing.workflowTaskId) {
@@ -178,20 +198,20 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   const submission = previous || new models.Submission({ _id: key, memberId: scope.own, date });
   const initial = !previous;
   if (!initial && JSON.stringify(saved.map(comparableEntry)) === JSON.stringify(previous.entries.map(comparableEntry))) {
-    return { submission, changed: false };
+    return submission;
   }
   await validateBudgets(models, scope.own, date, budgetCatalog, saved, previous?.entries || [], session);
   submission.memberName = user.name;
   submission.entries = saved;
-  submission.delivery = slackConfigured() && (initial || submission.slackTs) ? 'pending' : 'skipped';
+  if (submission.delivery !== 'uncertain') submission.delivery = 'skipped';
   submission.deliveryAfter = new Date();
   submission.deliveryAt = undefined;
   await submission.save({ session });
-  return { submission, changed: true };
+  return submission;
 }
 
 function comparableEntry(entry) {
-  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'description', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
+  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'description', 'note', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
 }
 
 async function reportRows(req, models, scope) {

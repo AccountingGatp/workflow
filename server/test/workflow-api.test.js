@@ -22,6 +22,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const base = `http://127.0.0.1:${server.address().port}/api`;
     const person = (name,role,email) => User.create({ name,role,email,passwordHash:'fixture-only',active:true });
     const admin = await person('Owner','super_admin','owner@test.example');
+    const manager = await person('Manager','manager','manager@test.example');
     const tl = await person('TL','admin','tl@test.example');
     const outsider = await person('Other TL','admin','other@test.example');
     const krupali = await person('Krupali','admin','krupali.s@gatpsolutions.com');
@@ -30,7 +31,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const project = await ClientProject.create({ client:client._id,name:'Bluntd' });
     const team = await Team.create({ name:'Bluntd team' });
     await TeamMembership.create([{ user:tl._id,team:team._id,teamRole:'lead' },{ user:sathya._id,team:team._id }]);
-    await ClientAssignment.create({ client:client._id,team:team._id });
+    await ClientAssignment.create([{ client:client._id,team:team._id }, { client:client._id,admin:manager._id }]);
     async function request(user,path,method='GET',body,status=200) {
       const response = await fetch(base+path,{ method,headers:{ 'content-type':'application/json',authorization:'Bearer '+jwt.sign({sub:String(user._id)},JWT_SECRET) },body:body && JSON.stringify(body) });
       const data=await response.json();
@@ -49,7 +50,8 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const approved=await request(tl,`/tasks/${task._id}`,'PATCH',{confirmCompletion:true});
     assert.equal(approved.status,'done');assert.equal(approved.reviewedBy,String(tl._id));
     await request(sathya,`/tasks/${task._id}`,'PATCH',{checklistItem:{id:task.checklist[0]._id,done:false}},400);
-    const reopened=await request(tl,`/tasks/${task._id}`,'PATCH',{title:'Updated by TL'});
+    await request(tl,`/tasks/${task._id}`,'PATCH',{title:'Blocked TL edit'},403);
+    const reopened=await request(manager,`/tasks/${task._id}`,'PATCH',{title:'Updated by manager'});
     assert.equal(reopened.status,'in_progress');assert.equal(reopened.reviewedBy,undefined);
     await request(tl,`/tasks/${task._id}`,'DELETE',undefined,403);
     await request(admin,`/tasks/${task._id}`,'DELETE');
@@ -61,7 +63,8 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const daily=await request(tl,'/templates','POST',{...draft,frequency:'daily'},201);
     const moved=await Task.findOne({template:daily.template._id});
     const originalDate=moved.dueDate;
-    await request(tl,`/tasks/${moved._id}`,'PATCH',{dueDate:new Date(new Date(originalDate).getTime()+60*60000).toISOString()});
+    await request(tl,`/templates/${daily.template._id}`,'PATCH',{active:false},403);
+    await request(manager,`/tasks/${moved._id}`,'PATCH',{dueDate:new Date(new Date(originalDate).getTime()+60*60000).toISOString()});
     await generateRecurringTasks(daily.template._id);
     assert.equal(await Task.countDocuments({template:daily.template._id,scheduledDate:originalDate}),1);
     const occurrence=await Task.findOne({template:daily.template._id,_id:{$ne:moved._id}});

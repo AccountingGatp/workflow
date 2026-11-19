@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Task, TaskTemplate, AuditLog, User, ClientPermission, Client, ClientProject, ProjectWorkItem } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
-  audit, isSuper, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter, canGrantDirectly,
+  audit, isSuper, canMaintainTasks, taskScope, canManageClient, canSeeClient, managedClientIds, activePermissionFilter, canGrantDirectly,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 import { scheduleFields } from '../services/schedule.js';
@@ -198,7 +198,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
-  res.json({ ...task, activity, canEdit: await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user), canCompleteDirectly: req.user.role !== 'employee' && task.assignees.some(a => String(a._id) === String(req.user._id)), canReview: mayReview(task, { manager: await canManageClient(req.user, task.client._id), actorId: req.user._id, actorRole: req.user.role }) });
+  res.json({ ...task, activity, canEdit: canMaintainTasks(req.user) && await canManageClient(req.user, task.client._id), canDelete: isSuper(req.user), canCompleteDirectly: req.user.role !== 'employee' && task.assignees.some(a => String(a._id) === String(req.user._id)), canReview: mayReview(task, { manager: await canManageClient(req.user, task.client._id), actorId: req.user._id, actorRole: req.user.role }) });
 }));
 
 r.post('/tasks', ah(async (req, res) => {
@@ -219,12 +219,16 @@ r.post('/tasks', ah(async (req, res) => {
 r.patch('/tasks/:id', ah(async (req, res) => {
   const task = await Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) });
   if (!task) throw new HttpError(404, 'Task not found');
-  const manager = await canManageClient(req.user, task.client);
+  const managesClient = await canManageClient(req.user, task.client);
+  const manager = canMaintainTasks(req.user) && managesClient;
   const isAssignee = task.assignees.some((a) => String(a) === String(req.user._id));
-  const isReviewer = String(task.reviewer) === String(req.user._id);
+  const isReviewer = mayReview(task, { manager: managesClient, actorId: req.user._id, actorRole: req.user.role });
   if (!manager && !isAssignee && !isReviewer) throw new HttpError(403, 'Only assignees, reviewers or managing admins can update this task');
   const body = req.body || {};
   const notes = [];
+  if (!manager && ['title', 'dueDate', 'priority', 'sop', 'owner', 'team', 'assignees', 'project'].some((field) => body[field] !== undefined)) {
+    throw new HttpError(403, 'Only client managers and Super Admins can edit task details');
+  }
   if (!manager && !isAssignee && (body.checklistItem || (body.status && !['in_progress', 'waiting'].includes(body.status)))) throw new HttpError(403, 'Reviewers may confirm completion or return work to the employee');
 
   if (body.confirmCompletion && Object.keys(body).some(k => k !== 'confirmCompletion')) throw new HttpError(400, 'Save other changes before confirming completion');
@@ -312,7 +316,8 @@ r.post('/templates', ah(async (req, res) => {
 
 r.patch('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
-  if (!tpl || !(await canManageClient(req.user, tpl.client))) throw new HttpError(404, 'Template not found');
+  if (!tpl) throw new HttpError(404, 'Template not found');
+  if (!canMaintainTasks(req.user) || !(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can edit recurring tasks');
   if (typeof req.body.active === 'boolean') tpl.active = req.body.active;
   await tpl.save();
   if (tpl.active) await generateRecurringTasks(tpl._id);
@@ -324,7 +329,7 @@ r.patch('/templates/:id', ah(async (req, res) => {
 r.patch('/templates/:id/details', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
-  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can edit recurring tasks');
+  if (!canMaintainTasks(req.user) || !(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can edit recurring tasks');
   const b = req.body || {};
   if (!String(b.title || '').trim()) throw new HttpError(400, 'Task name is required');
   const schedule = scheduleFields(b);
@@ -356,7 +361,7 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
 r.delete('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
-  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can delete recurring tasks');
+  if (!canMaintainTasks(req.user) || !(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'Only client managers and Super Admins can delete recurring tasks');
   // Cancel only future untouched occurrences. Never erase finished work or
   // tasks that someone has already started or partially checked off.
   const cancelled = await Task.deleteMany({

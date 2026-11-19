@@ -214,6 +214,7 @@ const FREQ = (t) => t.frequency === 'daily' ? 'Every working day'
   : t.frequency === 'semimonthly' ? `Twice monthly on ${(t.monthDays || []).join(' and ')}` : `Monthly on day ${t.monthDay}`;
 
 export function Recurring() {
+  const { can } = useAuth();
   const { data, loading, reload } = useApi('/templates');
   const clients = useApi('/clients');
   const toast = useToast();
@@ -277,11 +278,11 @@ export function Recurring() {
                     <td><Avatars people={t.assignees} /></td>
                     <td>{t.assignees.length > 0 && t.assignees.every(a => a.role !== 'employee') ? 'Not required' : t.reviewer?.name || 'Client TL'}</td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
-                    <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>
+                    <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>{can.editTasks && <>
                       <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>
                       <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Cancel future occurrences</button>
                       <button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button>
-                    </div></td>
+                    </>}</div></td>
                   </tr>
                 ))}</tbody>
               </table></div>

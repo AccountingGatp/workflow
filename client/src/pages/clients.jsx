@@ -67,7 +67,7 @@ function ClientForm({ onClose, onSaved }) {
           <Field label="Contact name"><input className="input" value={f.contactName} onChange={set('contactName')} /></Field>
           <Field label="Contact email"><input className="input" type="email" value={f.contactEmail} onChange={set('contactEmail')} /></Field>
         </div>
-        <Field label="Client managers (optional)" hint="Select who manages this client."><div className="chips">{(users.data || []).filter((u) => u.role === 'admin').map((u) => (
+        <Field label="Client managers (optional)" hint="Select who manages this client."><div className="chips">{(users.data || []).filter((u) => ['manager', 'admin'].includes(u.role)).map((u) => (
           <button type="button" key={u._id} className={`chip ${f.adminIds.includes(u._id) ? 'on' : ''}`} onClick={() => toggle('adminIds', u._id)} style={{ paddingLeft: 4 }}><Avatar name={u.name} size="sm" />{u.name}</button>
         ))}</div></Field>
       </form>

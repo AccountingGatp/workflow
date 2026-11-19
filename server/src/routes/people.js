@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { User, Team, TeamMembership, ClientPermission, ClientAssignment } from '../models/index.js';
+import { User, Team, TeamMembership, ClientPermission, ClientAssignment, userRoles } from '../models/index.js';
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { audit, isSuper, ledTeamIds } from '../services/access.js';
 
@@ -21,6 +21,7 @@ r.get('/users', ah(async (req, res) => {
 r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
   const { name, email, password, role = 'employee', title } = req.body || {};
   if (!name || !email || !password) throw new HttpError(400, 'Name, email and password are required');
+  if (!userRoles.includes(role)) throw new HttpError(400, 'Invalid role');
   if (await User.exists({ email: email.toLowerCase() })) throw new HttpError(409, 'That email is already in use');
   const user = await User.create({ name, email, role, title, passwordHash: await bcrypt.hash(password, 10) });
   audit(req.user, 'user.create', { entity: 'User', entityId: user._id, summary: `Created ${role.replace('_', ' ')} ${name}` });
@@ -47,7 +48,7 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
       throw new HttpError(409, 'That email address is already used by another person');
     }
   }
-  if (update.role !== undefined && !['super_admin', 'admin', 'employee'].includes(update.role)) throw new HttpError(400, 'Invalid role');
+  if (update.role !== undefined && !userRoles.includes(update.role)) throw new HttpError(400, 'Invalid role');
   const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '' };
   Object.assign(user, update);
   try { await user.save(); } catch (err) {
