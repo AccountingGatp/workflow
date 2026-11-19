@@ -9,6 +9,29 @@ import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission,
 import { dailyModels } from '../src/daily-work/models.js';
 import { clock, shiftDate } from '../src/daily-work/dates.js';
 import { runDailyWorkJobs } from '../src/daily-work/jobs.js';
+import { dailySubmissionText } from '../src/daily-work/slack.js';
+
+test('daily Slack text groups numbered tasks and matches the requested layout', () => {
+  const report = { memberName: 'Pooja Kasera', date: '2026-11-19', entries: [
+    { projectId: 'lxp', projectName: 'lxp-enterprises-llc', title: 'FCB Deposits Creation', hours: 1, priority: 'normal' },
+    { projectId: 'lxp', projectName: 'lxp-enterprises-llc', title: 'Other task', hours: 2.5, priority: 'normal' },
+  ] };
+  assert.equal(dailySubmissionText(report, 'U08S464N7E2'), [
+    '<@U08S464N7E2> Employee: Pooja Kasera',
+    'Date: Thursday, November 19th, 2026',
+    ':bar_chart: Summary: 1 project, 3.5 hours total',
+    'Projects:',
+    '1. lxp-enterprises-llc - 3.5 hours',
+    '   Task 1: FCB Deposits Creation (1h) - Priority: Medium',
+    '   Task 2: Other task (2.5h) - Priority: Medium',
+  ].join('\n'));
+  const twoProjects = dailySubmissionText({ ...report, date: '2026-11-21', entries: [
+    ...report.entries,
+    { projectId: 'other', projectName: 'Other project', title: 'Reconcile', hours: 0.5, priority: 'high' },
+  ] });
+  assert.match(twoProjects, /^Employee: Pooja Kasera\nDate: Saturday, November 21st, 2026\n:bar_chart: Summary: 2 projects, 4 hours total/m);
+  assert.match(twoProjects, /2\. Other project - 0\.5 hours\n   Task 1: Reconcile \(0\.5h\) - Priority: High/);
+});
 
 test('isolated daily work, scoped catalog and reports, Slack threads and scheduled attendance', async () => {
   const db = await MongoMemoryReplSet.create({
@@ -16,6 +39,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
   });
   const realFetch = globalThis.fetch;
   const calls = [];
+  const lookups = [];
   let server;
   try {
     await mongoose.connect(db.getUri('workflow_test'));
@@ -23,6 +47,10 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
     process.env.DAILY_WORK_SLACK_CHANNEL = 'mock-channel';
     globalThis.fetch = (url, options) => {
+      if (String(url).startsWith('https://slack.com/api/users.lookupByEmail?')) {
+        lookups.push(new URL(url).searchParams.get('email'));
+        return Promise.resolve(Response.json({ ok: true, user: { id: 'U123TEST' } }));
+      }
       if (String(url) !== 'https://slack.com/api/chat.postMessage') return realFetch(url, options);
       const payload = JSON.parse(options.body);
       calls.push(payload);
@@ -117,7 +145,9 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(posted.delivery, 'sent');
     assert.equal(posted.slackPosted, true);
     assert.equal(calls[0].thread_ts, undefined);
+    assert.match(calls[0].text, /^<@U123TEST> Employee: employee/);
     assert.match(calls[0].text, /Note: Check &lt;this&gt; first/);
+    assert.deepEqual(lookups, [employee.email]);
     await send(employee, date, posted.version);
     assert.equal(calls.length, 1);
     await request(employee, `/day/${date}`, 'PUT', { entries: [{ ...original.entries[0], hours: 2.25 }], version: posted.version }, 400);
@@ -129,9 +159,10 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const updated = await send(employee, date, changed.version);
     assert.equal(calls[1].thread_ts, '1.000001');
     assert.equal(calls[1].reply_broadcast, false);
-    assert.match(calls[1].text, /1\.75 h/);
+    assert.match(calls[1].text, /Task 1: Review ledger \(1\.75h\) - Priority: High/);
     await request(employee, `/day/${date}`, 'PUT', { entries: [{ ...updated.entries[0], hours: 1.8 }], version: updated.version }, 400);
-    assert.match(calls[1].text, /awaiting TL review/);
+    assert.match(calls[1].text, /^Employee: employee/);
+    assert.deepEqual(lookups, [employee.email]);
     assert.equal((await request(employee, `/tasks/${source._id}`)).checklist[0].done, true);
     const unchanged = await request(employee, `/day/${date}`, 'PUT', { entries: updated.entries, version: updated.version });
     assert.equal(unchanged.version, updated.version);
