@@ -409,6 +409,8 @@ export function Login() {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const config = useApi('/config');
+  const googleClientId = config.data?.googleSignInClientId;
+  const emailEnabled = config.data?.emailLoginConfigured;
   useEffect(() => {
     if (!resendAt) return;
     const timer = setTimeout(() => setResendAt(null), Math.max(0, resendAt - Date.now()));
@@ -447,29 +449,31 @@ export function Login() {
         <div className="login-card">
           <div className="login-mobile-brand"><BrandName /></div>
           <div><h1>{challenge ? 'Check your email' : 'Sign in'}</h1><p className="muted" style={{ marginTop: 4 }}>
-            {challenge ? `If ${email} is registered, a six-digit code will arrive shortly.` : 'Use the email address registered in Workflow.'}
+            {challenge ? `If ${email} is registered, a six-digit code will arrive shortly.` :
+              googleClientId ? 'Use the Google account registered in Workflow.' : 'Use the email address registered in Workflow.'}
           </p></div>
-          <form className="stack" style={{ gap: 16 }} onSubmit={(event) => {
+          <ErrorBox error={error || config.error || (offline ? new Error('Couldn’t reconnect to Workflow. Reload to try again.') : null)} />
+          {googleClientId && !challenge && <GoogleSignIn clientId={googleClientId} />}
+          {config.data && !googleClientId && !emailEnabled && !config.data.demo &&
+            <p className="small muted">Sign-in setup is required. Contact your Workflow administrator.</p>}
+          {emailEnabled && <form className="stack" style={{ gap: 16 }} onSubmit={(event) => {
             event.preventDefault();
             if (challenge) run(() => signIn('/auth/email/verify', { email, challenge, code }));
             else sendCode();
           }}>
-            <ErrorBox error={error || config.error || (offline ? new Error('Couldn’t reconnect to Workflow. Reload to try again.') : null)} />
-            {config.data?.emailLoginConfigured === false && <p className="small muted">Email sign-in is unavailable. Contact your Workflow administrator.</p>}
             {challenge ? <label className="field">Verification code<input className="input" key="code" autoFocus
               inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code}
               onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))} required /></label>
               : <label className="field">Email address<input className="input" key="email" autoFocus type="email" autoComplete="email" value={email}
                 onChange={(event) => setEmail(event.target.value)} required /></label>}
-            <button className="btn btn-primary" disabled={busy || !config.data?.emailLoginConfigured} style={{ minHeight: 48 }}>
+            <button className="btn btn-primary" disabled={busy} style={{ minHeight: 48 }}>
               {challenge ? busy ? 'Verifying…' : 'Verify and sign in' : busy ? 'Sending…' : 'Send code'}
             </button>
             {challenge && <div className="row-wrap">
               <button type="button" className="btn btn-ghost" disabled={busy || !!resendAt} onClick={sendCode}>Resend code</button>
               <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setChallenge(''); setCode(''); setError(null); }}>Change email</button>
             </div>}
-          </form>
-          {config.data?.googleSignInClientId && <GoogleSignIn clientId={config.data.googleSignInClientId} />}
+          </form>}
           {config.data?.demo && <div>
             <div className="row" style={{ margin: '4px 0 10px' }}><Building2 size={14} className="muted" /><span className="small muted">Demo accounts — try each role</span></div>
             <div className="demo-grid">

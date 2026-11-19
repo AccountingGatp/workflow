@@ -19,7 +19,7 @@ npm run dev:client                   # UI on :5173
 1. In `server/.env` set `MONGODB_URI` (e.g. MongoDB Atlas), a long random `JWT_SECRET`, and
    `ADMIN_NAME` and `ADMIN_EMAIL`. Keep `SEED_DEMO=false`.
 2. Start the server. On an empty database it creates that person as the first **Super Admin**.
-3. Add `RESEND_API_KEY` and `LOGIN_EMAIL_FROM` for a sender on a domain verified in Resend. Enter the registered email and verify the six-digit code. Codes expire in 10 minutes. Sessions survive browser restarts, renew with use, and expire after one year of inactivity.
+3. Configure Google sign-in below, or set `RESEND_API_KEY` and `LOGIN_EMAIL_FROM` to enable email codes. Sessions survive browser restarts, renew with use, and expire after one year of inactivity.
 4. From the app: **Teams** → create teams → **People** → add Admins and Employees with their sign-in email →
    add them to teams (choose a Lead) → **Clients** → create clients and assign teams/admins →
    on each client, **Grant** access to employees.
@@ -41,11 +41,17 @@ syncs Gmail every 5 minutes and creates recurring tasks every hour. Cron needs a
 1. MongoDB Atlas → Network Access → allow `0.0.0.0/0`.
 2. Vercel → Add New → Project → import this repo. Leave **Root Directory** as the repo root;
    the settings come from `vercel.json`.
-3. Environment variables: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_NAME`, `ADMIN_EMAIL`, `RESEND_API_KEY`, `LOGIN_EMAIL_FROM`,
-   `SEED_DEMO=false`, and `CRON_SECRET` (any long random string).
+3. Environment variables: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_NAME`, `ADMIN_EMAIL`, `SEED_DEMO=false`, and `CRON_SECRET` (any long random string).
+   For Google sign-in add `GOOGLE_SIGN_IN_CLIENT_ID`. For optional email codes add `RESEND_API_KEY` and `LOGIN_EMAIL_FROM`.
    For Mail also add the Google ones and set `GOOGLE_REDIRECT_URI=https://<your-domain>/api/mail/oauth/callback`
    and `CLIENT_URL=https://<your-domain>`.
 4. Deploy. Every push to `main` redeploys automatically.
+
+## Google Workspace sign-in
+
+1. Open Google Auth Platform in a Google Cloud project belonging to your Workspace organization. Configure Branding and select **Internal** under Audience if only people in that organization should sign in.
+2. Under **Clients**, create an OAuth client of type **Web application**. Add the exact Workflow site origin under **Authorized JavaScript origins**.
+3. Set the client ID as `GOOGLE_SIGN_IN_CLIENT_ID` in Vercel. Add each person’s Workspace email under **People** before they sign in. The Google sign-in button can run by itself.
 
 ## Demo data
 

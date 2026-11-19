@@ -72,6 +72,10 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   if (update.dailyReport !== undefined) update.dailyReport = parseDailyReport(update.dailyReport);
   const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '',
     active: user.active, slackUserId: user.slackUserId || null, dailyReport: user.dailyReport?.toObject() };
+  if (update.email !== undefined && update.email !== user.email) {
+    user.googleSubject = undefined;
+    user.markModified('googleSubject');
+  }
   Object.assign(user, update);
   try { await user.save(); } catch (err) {
     if (err.code === 11000) throw new HttpError(409, 'That email address is already used by another person');
