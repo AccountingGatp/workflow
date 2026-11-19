@@ -2,7 +2,7 @@
 
 Work management for an accounting practice: **Users ↔ Teams ↔ Clients ↔ Tasks**, with role-based access and explicit per-client permissions.
 
-**Stack:** React (Vite) · Node/Express · MongoDB (Mongoose) · JWT auth.
+**Stack:** React (Vite) · Node/Express · MongoDB (Mongoose) · email verification and revocable sessions.
 Document storage (Backblaze B2) and the client portal are the next phase and are not built yet.
 
 ## Run locally
@@ -17,20 +17,20 @@ npm run dev:client                   # UI on :5173
 ## First login on a real database
 
 1. In `server/.env` set `MONGODB_URI` (e.g. MongoDB Atlas), a long random `JWT_SECRET`, and
-   `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (8+ characters). Keep `SEED_DEMO=false`.
+   `ADMIN_NAME` and `ADMIN_EMAIL`. Keep `SEED_DEMO=false`.
 2. Start the server. On an empty database it creates that person as the first **Super Admin**.
-   Then remove `ADMIN_PASSWORD` from `.env`.
-3. Sign in, then from the app: **Teams** → create teams → **People** → add Admins and Employees →
+3. Add `RESEND_API_KEY` and `LOGIN_EMAIL_FROM` for a sender on a domain verified in Resend. Enter the registered email and verify the six-digit code. Codes expire in 10 minutes. Sessions survive browser restarts, renew with use, and expire after one year of inactivity.
+4. From the app: **Teams** → create teams → **People** → add Admins and Employees with their sign-in email →
    add them to teams (choose a Lead) → **Clients** → create clients and assign teams/admins →
    on each client, **Grant** access to employees.
 
 Locked out, or need another Super Admin? Run from `server/`:
 
 ```bash
-npm run create-admin -- --email you@firm.com --name "Your Name" --password "a-strong-password"
+npm run create-admin -- --email you@firm.com --name "Your Name"
 ```
 
-It creates the user, or promotes an existing one and resets their password.
+It creates or promotes a user to Super Admin.
 
 ## Deploy on Vercel
 
@@ -41,7 +41,7 @@ syncs Gmail every 5 minutes and creates recurring tasks every hour. Cron needs a
 1. MongoDB Atlas → Network Access → allow `0.0.0.0/0`.
 2. Vercel → Add New → Project → import this repo. Leave **Root Directory** as the repo root;
    the settings come from `vercel.json`.
-3. Environment variables: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`,
+3. Environment variables: `MONGODB_URI`, `JWT_SECRET`, `ADMIN_NAME`, `ADMIN_EMAIL`, `RESEND_API_KEY`, `LOGIN_EMAIL_FROM`,
    `SEED_DEMO=false`, and `CRON_SECRET` (any long random string).
    For Mail also add the Google ones and set `GOOGLE_REDIRECT_URI=https://<your-domain>/api/mail/oauth/callback`
    and `CLIENT_URL=https://<your-domain>`.
@@ -49,8 +49,7 @@ syncs Gmail every 5 minutes and creates recurring tasks every hour. Cron needs a
 
 ## Demo data
 
-Set `SEED_DEMO=true` to fill an empty database with demo data. Demo accounts (password `demo1234`): `owner@` (Super Admin), `anita@` / `rahul@` / `sneha@` (Admin/TL),
-`amit@`, `neha@`, `karan@`, `pooja@` (Employees) — all `@demo.test`. Buttons on the login screen sign in directly.
+Set `SEED_DEMO=true` to fill an empty database with demo data. Local development offers demo sign-in buttons for the `@demo.test` accounts. Demo sign-in is disabled on Vercel and in production mode.
 
 ## Access model
 
@@ -95,7 +94,7 @@ Emails are stored as plain text, and attachments are listed by name only for now
 6. On each client's page, add its email addresses or domains so mail is tagged automatically.
 
 **Try it without Google:** run `node scripts/fake-gmail.js` from `server/` (settings are at the top of that file).
-With a fresh database, `bash scripts/test-mail.sh` runs the full access and review test against it.
+With a fresh local database and `SEED_DEMO=true`, `bash scripts/test-mail.sh` runs the access and review test.
 
 ## Scheduling and task completion
 

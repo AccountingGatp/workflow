@@ -13,13 +13,26 @@ export const User = model('User', new Schema({
   dailyReport: { type: new Schema({ enabled: Boolean, shiftStart: String, reminderAt: String }, { _id: false }), select: false },
   slackUserId: { type: String, select: false, match: slackUserIdPattern },
   googleSubject: { type: String, unique: true, sparse: true, select: false },
-  passwordHash: { type: String, required: true, select: false },
+  passwordHash: { type: String, select: false },
   role: { type: String, enum: userRoles, default: 'employee' },
   title: String,
   reviewLead: ref('User'), // employee's completion reviewer; TL/admin work completes directly
   active: { type: Boolean, default: true },
   deletedAt: Date, // removed people keep their name on past tasks and logs
 }, opts));
+
+const sessionSchema = new Schema({ _id: String, user: ref('User'), email: String, expiresAt: Date });
+sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+sessionSchema.index({ user: 1 });
+export const AuthSession = model('AuthSession', sessionSchema);
+
+const emailCodeSchema = new Schema({ _id: String, digest: String, nonce: String, expiresAt: Date, sentAt: Date, attempts: Number });
+emailCodeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+export const EmailCode = model('EmailCode', emailCodeSchema);
+
+const loginLimitSchema = new Schema({ _id: String, count: Number, expiresAt: Date });
+loginLimitSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+export const LoginLimit = model('LoginLimit', loginLimitSchema);
 
 export const Team = model('Team', new Schema({
   name: { type: String, required: true, unique: true },

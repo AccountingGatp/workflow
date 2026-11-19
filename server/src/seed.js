@@ -1,17 +1,13 @@
-import bcrypt from 'bcryptjs';
 import {
   User, Team, TeamMembership, Client, ClientAssignment, ClientPermission, TaskTemplate, Task,
 } from './models/index.js';
 import { generateRecurringTasks } from './services/recurrence.js';
 
-export const DEMO_PASSWORD = 'demo1234';
-
 /** Demo data that mirrors the Hamilton example. Runs only when the users collection is empty. */
 export async function seedIfEmpty() {
   if (await User.estimatedDocumentCount()) return;
   if (process.env.SEED_DEMO !== 'true') return bootstrapSuperAdmin();
-  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
-  const mk = (name, email, role, title) => User.create({ name, email, role, title, passwordHash });
+  const mk = (name, email, role, title) => User.create({ name, email, role, title });
 
   const owner = await mk('Priya Sharma', 'owner@demo.test', 'super_admin', 'Managing Partner');
   const adminA = await mk('Anita Rao', 'anita@demo.test', 'admin', 'Team Lead · A');
@@ -103,7 +99,7 @@ export async function seedIfEmpty() {
     { title: 'Opening Balances Setup', client: cD._id, team: tB._id, assignees: [e2._id], dueDate: day(0), status: 'waiting', priority: 'high', createdBy: adminB._id,
       sop: 'Waiting on prior-year trial balance from the client.', checklist: [{ text: 'Trial balance received' }, { text: 'Balances entered' }] },
   ]);
-  console.log(`✓ Seeded demo data. All demo passwords: ${DEMO_PASSWORD}`);
+  console.log('✓ Seeded demo data.');
 }
 
 /**
@@ -111,15 +107,13 @@ export async function seedIfEmpty() {
  * They then add teams, clients and people from the app.
  */
 export async function bootstrapSuperAdmin() {
-  const { ADMIN_NAME = 'Super Admin', ADMIN_EMAIL, ADMIN_PASSWORD } = process.env;
-  if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
-    console.warn('⚠  Database has no users. Set ADMIN_EMAIL and ADMIN_PASSWORD in .env and restart, or run: npm run create-admin');
+  const { ADMIN_NAME = 'Super Admin', ADMIN_EMAIL } = process.env;
+  if (!ADMIN_EMAIL) {
+    console.warn('⚠  Database has no users. Set ADMIN_EMAIL in .env and restart, or run: npm run create-admin');
     return;
   }
-  if (ADMIN_PASSWORD.length < 8) throw new Error('ADMIN_PASSWORD must be at least 8 characters');
   await User.create({
     name: ADMIN_NAME, email: ADMIN_EMAIL, role: 'super_admin', title: 'Owner',
-    passwordHash: await bcrypt.hash(ADMIN_PASSWORD, 10),
   });
-  console.log(`✓ Created first Super Admin: ${ADMIN_EMAIL}. You can remove ADMIN_PASSWORD from .env now.`);
+  console.log(`✓ Created first Super Admin: ${ADMIN_EMAIL}.`);
 }

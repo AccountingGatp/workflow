@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, CalendarCheck, CheckSquare, Building2, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Settings, Mail as MailIcon,
 } from 'lucide-react';
-import { useAuth, useApi, ROLE_LABEL } from './lib.jsx';
+import { useAuth, useApi, useToast, ROLE_LABEL } from './lib.jsx';
 import { Avatar, BrandName } from './ui.jsx';
 
 function ThemeToggle() {
@@ -22,6 +22,13 @@ function ThemeToggle() {
 
 export default function Layout() {
   const { user, logout, can } = useAuth();
+  const toast = useToast();
+  const [signingOut, setSigningOut] = useState(false);
+  async function signOut() {
+    setSigningOut(true);
+    try { await logout(); }
+    catch (error) { toast(error.message); setSigningOut(false); }
+  }
   const [open, setOpen] = useState(false);
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
@@ -54,7 +61,7 @@ export default function Layout() {
           <div className="me">
             <Avatar name={user.name} />
             <div className="me-info"><div className="me-name">{user.name}</div><div className="small muted">{ROLE_LABEL[user.role]}</div></div>
-            <button className="btn btn-ghost icon-btn" onClick={logout} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
+            <button className="btn btn-ghost icon-btn" onClick={signOut} disabled={signingOut} aria-label="Sign out" title="Sign out"><LogOut size={18} /></button>
           </div>
         </div>
       </nav>
