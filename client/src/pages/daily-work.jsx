@@ -470,9 +470,9 @@ function TaskStatusActions({ entry }) {
   return <div className="stack daily-status-actions" aria-busy={busy}>
     {showReason
       ? <form className="stack daily-status-reason" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
-        <label className="field"><span>Why is this incomplete?</span>
+        <label className="field"><span>Incomplete note</span>
           <textarea className="input" autoFocus required rows={2} maxLength={500} disabled={busy}
-            value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+            placeholder="Why is this task incomplete?" value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         <div className="row-wrap">
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !reason.trim()}>{busy ? 'Saving…' : 'Save status'}</button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setShowReason(false); setError(null); }}>Cancel</button>
@@ -484,7 +484,7 @@ function TaskStatusActions({ entry }) {
         <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
           setReason(entry.incompleteReason || '');
           setShowReason(true);
-        }}>Incomplete</button>
+        }}>{entry.status === 'complete' ? 'Mark incomplete' : entry.incompleteReason ? 'Edit incomplete note' : 'Add incomplete note'}</button>
       </div>}
     <ErrorBox error={error} />
   </div>;
@@ -501,7 +501,8 @@ function TaskStatusTable({ entries }) {
           <td><strong>{entry.title}</strong>
             {entry.description && <p className="small muted daily-task-description">{entry.description}</p>}
             {entry.note && <p className="small daily-task-description"><strong>Note</strong> {entry.note}</p>}
-            {entry.incompleteReason && <p className="small daily-task-description"><strong>Reason</strong> {entry.incompleteReason}</p>}
+            {entry.status === 'incomplete' && entry.incompleteReason &&
+              <p className="small daily-task-description"><strong>Incomplete note</strong> {entry.incompleteReason}</p>}
           </td>
           <td>{entry.projectName}</td><td>{memberName}</td>
           <td><time dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></td>

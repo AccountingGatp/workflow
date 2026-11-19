@@ -7,6 +7,11 @@ import { validTime } from './settings.js';
 
 const activeDate = (member, date) => member.enrolled && (!member.reportFrom || member.reportFrom <= date);
 const minutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+const withinWindow = (time, at) => {
+  if (!validTime(at)) return false;
+  const difference = minutes(time) - minutes(at);
+  return difference >= 0 && difference < 25;
+};
 const dayOf = (date) => new Date(date).getUTCDay();
 const names = (members) => members.map((member) => member.name.replace(/[&<>]/g, '')).join(', ');
 
@@ -102,9 +107,13 @@ export async function runDailyWorkJobs(now = new Date()) {
   if (!slackConfigured()) return;
   const models = await dailyModels();
   await retrySlack(models);
+  const { date, time, weekday } = clock(now);
+  if (withinWindow(time, '18:35')) {
+    await sendScheduled(models, `status-reminder:${date}`, now,
+      () => '<!channel> Team, please update the work status of your tasks on Workflow.');
+  }
   const allReports = process.env.DAILY_WORK_SLACK_REPORTS === 'true';
   if (!allReports && process.env.DAILY_WORK_SHIFT_REPORTS !== 'true') return;
-  const { date, time, weekday } = clock(now);
   const yesterday = shiftDate(date, -1);
   const reportDays = (process.env.DAILY_WORK_REPORT_DAYS || '1,2,3,4,5').split(',').map(Number);
   const weeklyDay = Number(process.env.DAILY_WORK_WEEKLY_DAY ?? 5);
@@ -122,9 +131,6 @@ export async function runDailyWorkJobs(now = new Date()) {
     ['weekly', process.env.DAILY_WORK_WEEKLY_TIME || '18:00', allReports && weekday === weeklyDay, () => weeklyText(models, date)],
     ['incomplete', process.env.DAILY_WORK_INCOMPLETE_TIME || '00:00', priorWorkday, () => incompleteText(models, yesterday)],
   ];
-  await Promise.all(jobs.filter(([, at, enabled]) => {
-    if (!enabled || !validTime(at)) return false;
-    const difference = minutes(time) - minutes(at);
-    return difference >= 0 && difference < 25;
-  }).map(([key, , , compose]) => sendScheduled(models, `${key}:${date}`, now, compose)));
+  await Promise.all(jobs.filter(([, at, enabled]) => enabled && withinWindow(time, at))
+    .map(([key, , , compose]) => sendScheduled(models, `${key}:${date}`, now, compose)));
 }

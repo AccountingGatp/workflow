@@ -177,7 +177,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const statusPath = `/day/${date}/members/${employee._id}/entries/${updated.entries[0]._id}/status`;
     const setStatus = (actor, status, version, reason, code = 200) => request(actor, statusPath, 'PATCH', { status, version, reason }, code);
     const leadReport = await request(lead, `/reports?from=${date}`);
-    assert.equal(leadReport.submissions[0].entries[0].canUpdateStatus, false);
+    assert.equal(leadReport.submissions[0].entries[0].canUpdateStatus, true);
+    assert.equal((await request(employee, `/reports?from=${date}`)).submissions[0].entries[0].canUpdateStatus, true);
     await setStatus(other, 'complete', updated.version, undefined, 403);
     await setStatus(lead, 'incomplete', updated.version, ' ', 400);
     const returned = await setStatus(lead, 'incomplete', updated.version, 'Awaiting client approval');
@@ -185,7 +186,16 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(returned.entry.workflowStatus, 'in_progress');
     assert.equal(returned.entry.hours, 1.75);
     await setStatus(employee, 'complete', updated.version, undefined, 409);
-    const completed = await setStatus(employee, 'complete', returned.version);
+    const leadCompleted = await setStatus(lead, 'complete', returned.version);
+    assert.equal((await request(employee, `/reports?from=${date}`)).submissions[0].entries[0].canUpdateStatus, false);
+    await setStatus(employee, 'incomplete', leadCompleted.version, 'Missing statement', 403);
+    const leadReopened = await setStatus(lead, 'incomplete', leadCompleted.version, 'Missing statement');
+    const employeeCompleted = await setStatus(employee, 'complete', leadReopened.version);
+    assert.equal(employeeCompleted.entry.canUpdateStatus, true);
+    const reopened = await setStatus(employee, 'incomplete', employeeCompleted.version, 'Marked complete by mistake');
+    assert.equal(reopened.entry.incompleteReason, 'Marked complete by mistake');
+    assert.equal(reopened.entry.workflowStatus, 'in_progress');
+    const completed = await setStatus(employee, 'complete', reopened.version);
     assert.equal(completed.entry.workflowStatus, 'done');
     assert.equal(completed.entry.incompleteReason, undefined);
     assert.equal(completed.entry.status, 'complete');
@@ -408,6 +418,17 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.doesNotMatch(calls.at(-1).text, /Next day task|Task pending TL review|Completed closing task/);
     await runDailyWorkJobs(at(nextDate, '01:00'));
     assert.equal(calls.length, callsBeforeSchedule + 3);
+    delete process.env.DAILY_WORK_SHIFT_REPORTS;
+    await runDailyWorkJobs(at(nextDate, '18:34'));
+    assert.equal(calls.length, callsBeforeSchedule + 3);
+    await Promise.all([runDailyWorkJobs(at(nextDate, '18:35')), runDailyWorkJobs(at(nextDate, '18:35'))]);
+    await runDailyWorkJobs(at(nextDate, '18:40'));
+    assert.equal(calls.length, callsBeforeSchedule + 4);
+    assert.equal(calls.at(-1).channel, 'mock-channel');
+    assert.equal(calls.at(-1).thread_ts, undefined);
+    assert.equal(calls.at(-1).text, '<!channel> Team, please update the work status of your tasks on Workflow.');
+    await runDailyWorkJobs(at(shiftDate(nextDate, 1), '18:35'));
+    assert.equal(calls.length, callsBeforeSchedule + 5);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));
