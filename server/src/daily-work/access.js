@@ -1,4 +1,4 @@
-import { User, TeamMembership, Client, ClientProject, Task } from '../models/index.js';
+import { User, TeamMembership, Client, ClientProject } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 import { isSuper, ledTeamIds, managedClientIds, visibleClientIds } from '../services/access.js';
 
@@ -23,26 +23,6 @@ export async function roster(scope, models, inactive = false) {
   return users.map(({ _id, ...user }) => {
     const settings = byId.get(String(_id));
     return { ...user, id: String(_id), enrolled: false, shift: 'morning', ...settings };
-  });
-}
-
-export async function workflowSuggestions(scope, memberId, date, projects) {
-  const clientIds = [...new Set(projects.map((project) => project.clientId))];
-  const dayEnd = new Date(`${date}T18:30:00.000Z`);
-  const tasks = await Task.find({
-    client: { $in: clientIds }, assignees: memberId,
-    status: { $in: ['todo', 'in_progress', 'waiting', 'pending_review'] },
-    deletedAt: null, dueDate: { $lt: dayEnd },
-  }).sort({ dueDate: -1 }).select('client project title dueDate priority masterItem checklist status').limit(150).lean();
-  return tasks.flatMap((task) => {
-    const clientId = String(task.client);
-    if (!includes(scope.visible, clientId)) return [];
-    const project = projects.find((item) => item.clientId === clientId && task.project && item.workflowProjectId === String(task.project))
-      || projects.find((item) => item.clientId === clientId && !item.workflowProjectId);
-    return project ? [{
-      id: task._id, projectId: project._id, title: task.title, dueDate: task.dueDate, priority: task.priority, workItemId: task.masterItem,
-      checklist: task.checklist, workflowStatus: task.status,
-    }] : [];
   });
 }
 

@@ -13,6 +13,18 @@ export function matches(tpl, day) {
   return false;
 }
 
+export function materializeOccurrence(tpl, due, session) {
+  return Task.updateOne(
+    { template: tpl._id, $or: [{ dueDate: due }, { scheduledDate: due }] },
+    { $setOnInsert: {
+      scheduledDate: due, dueDate: due, template: tpl._id, title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees: tpl.assignees,
+      reviewer: tpl.reviewer, owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
+      checklist: tpl.checklist.map((text) => ({ text })), createdBy: tpl.createdBy,
+    } },
+    { upsert: true, session },
+  );
+}
+
 /**
  * Materialise tasks from active templates for today .. today+LOOKAHEAD.
  * Each occurrence is created independently of whether the previous one was finished,
@@ -30,15 +42,7 @@ export async function generateRecurringTasks(templateId) {
       const day = new Date(from); day.setDate(from.getDate() + i);
       if (!matches(tpl, day)) continue;
       const due = new Date(day); due.setHours(17, 0, 0, 0);
-      const res = await Task.updateOne(
-        { template: tpl._id, $or: [{ dueDate: due }, { scheduledDate: due }] },
-        { $setOnInsert: {
-          scheduledDate: due, dueDate: due, template: tpl._id, title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees: tpl.assignees,
-          reviewer: tpl.reviewer, owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
-          checklist: tpl.checklist.map((text) => ({ text })), createdBy: tpl.createdBy,
-        } },
-        { upsert: true },
-      );
+      const res = await materializeOccurrence(tpl, due);
       created += res.upsertedCount || 0;
     }
   }

@@ -114,10 +114,10 @@ function ClientTaskList({ project, items, limits, save }) {
   const task = items.find((item) => item.id === selected);
   function choose(id) {
     setSelected(id);
-    const title = items.find((item) => item.id === id)?.title;
-    const limit = limits.find((item) => item.title.toLowerCase() === title?.toLowerCase() && !item.archived);
-    setPeriod(limit?.period || 'daily');
-    setHours(limit?.hours ?? '');
+    const source = items.find((item) => item.id === id);
+    const limit = limits.find((item) => item.title.toLowerCase() === source?.title.toLowerCase() && !item.archived);
+    setPeriod(limit?.period || source?.period || 'daily');
+    setHours(limit?.hours ?? source?.hours ?? '');
   }
   return <section className="card daily-card stack">
     <h2>Client task list</h2>
