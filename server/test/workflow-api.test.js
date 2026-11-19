@@ -60,7 +60,6 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const approved=await request(tl,`/tasks/${task._id}`,'PATCH',{confirmCompletion:true});
     assert.equal(approved.status,'done');assert.equal(approved.reviewedBy,String(tl._id));
     await request(sathya,`/tasks/${task._id}`,'PATCH',{checklistItem:{id:task.checklist[0]._id,done:false}},400);
-    const clientPath = `/clients/${client._id}`;
     const projectPath = `${clientPath}/projects/${project._id}`;
     const people = await request(tl, `${clientPath}/assignees`);
     assert.ok(people.some((person) => person._id === String(teammate._id)));

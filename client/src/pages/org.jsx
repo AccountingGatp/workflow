@@ -1,5 +1,5 @@
 import GoogleSignIn from '../GoogleSignIn.jsx';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, BrandName, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
@@ -152,8 +152,17 @@ export function People() {
   );
 }
 
+function SlackUserIdField({ value, onChange }) {
+  const id = useId();
+  return <div className="field">
+    <label htmlFor={id}>Slack user ID (optional)</label>
+    <input id={id} className="input" value={value} onChange={onChange} maxLength={64} placeholder="U012ABC3456" aria-describedby={`${id}-hint`} />
+    <span className="hint" id={`${id}-hint`}>In Slack, open the person’s profile and choose Copy member ID.</span>
+  </div>;
+}
+
 function EditPerson({ person, isSelf, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role });
+  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role, slackUserId: person.slackUserId || '' });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -174,6 +183,7 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
       <Field label="Full name"><input className="input" value={form.name} onChange={set('name')} required maxLength={150} autoFocus /></Field>
       <Field label="Job title"><input className="input" value={form.title} onChange={set('title')} maxLength={150} /></Field>
       <Field label="Work email"><input className="input" type="email" value={form.email} onChange={set('email')} required maxLength={254} /></Field>
+      <SlackUserIdField value={form.slackUserId} onChange={set('slackUserId')} />
       <Field label="Role" hint={isSelf ? 'You cannot change your own Super Admin role.' : 'Changing roles updates this person’s permissions.'}>
         <select className="select" value={form.role} onChange={set('role')} disabled={isSelf}>
           {Object.entries(ROLE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -185,7 +195,7 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
 }
 
 function NewPerson({ onClose, onSaved }) {
-  const [f, setF] = useState({ name: '', email: '', password: '', role: 'employee', title: '' });
+  const [f, setF] = useState({ name: '', email: '', password: '', role: 'employee', title: '', slackUserId: '' });
   const [error, setError] = useState(null);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const submit = async (e) => { e.preventDefault(); try { await api('/users', { method: 'POST', body: f }); onSaved(); onClose(); } catch (err) { setError(err); } };
@@ -198,6 +208,7 @@ function NewPerson({ onClose, onSaved }) {
           <Field label="Job title"><input className="input" value={f.title} onChange={set('title')} /></Field>
         </div>
         <Field label="Work email"><input className="input" type="email" value={f.email} onChange={set('email')} required /></Field>
+        <SlackUserIdField value={f.slackUserId} onChange={set('slackUserId')} />
         <div className="grid grid-2">
           <Field label="Temporary password" hint="At least 8 characters"><input className="input" type="password" minLength={8} value={f.password} onChange={set('password')} required autoComplete="new-password" /></Field>
           <Field label="Role"><select className="select" value={f.role} onChange={set('role')}>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>

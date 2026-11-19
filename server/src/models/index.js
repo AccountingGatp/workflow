@@ -3,12 +3,14 @@ import mongoose from 'mongoose';
 const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Types.ObjectId, ref: name });
 const opts = { timestamps: true };
+export const slackUserIdPattern = /^[UW][A-Z0-9]{1,63}$/;
 export const userRoles = ['super_admin', 'manager', 'admin', 'employee'];
 
 /** One record per person. `role` is the global role; team-level roles live on TeamMembership. */
 export const User = model('User', new Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  slackUserId: { type: String, select: false, match: slackUserIdPattern },
   googleSubject: { type: String, unique: true, sparse: true, select: false },
   passwordHash: { type: String, required: true, select: false },
   role: { type: String, enum: userRoles, default: 'employee' },
