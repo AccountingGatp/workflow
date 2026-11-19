@@ -263,6 +263,20 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(await Task.countDocuments({ template: payrollSchedule._id }), 1);
     assert.equal((await getDay(employee, '2026-10-26')).catalog.find((row) => row.workItemId === String(payroll._id)).remainingHours, 4);
 
+    const emptyProject = await ClientProject.create({ client: client._id, name: 'Ad hoc work' });
+    const emptyDate = '2026-10-28';
+    const emptyDay = await getDay(employee, emptyDate);
+    const emptyProjectId = emptyDay.projects.find((row) => row.workflowProjectId === String(emptyProject._id))._id;
+    await log(employee, emptyDate, [time('Prepare one-off report', 1)], 400);
+    const custom = await log(employee, emptyDate, [time('Prepare one-off report', 1, emptyProjectId)]);
+    assert.equal(custom.entries[0].title, 'Prepare one-off report');
+    assert.equal(custom.entries[0].hours, 1);
+    assert.ok(custom.entries[0].workflowTaskId);
+    await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.01 }], 400, custom.version);
+    await request(owner, `/projects/${emptyProjectId}/catalog`, 'POST', { title: 'New predefined task', hours: 1 }, 201);
+    const revised = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 0.75 }], 200, custom.version);
+    assert.equal(revised.entries[0].hours, 0.75);
+
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
     assert.equal(leadCatalog.filter((task) => task.review).length, 2);
     await log(owner, '2026-10-05', [time('Review', 1)], 403);
