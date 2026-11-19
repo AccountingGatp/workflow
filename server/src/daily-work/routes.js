@@ -7,6 +7,7 @@ import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, roster, validateProjectLink, workflowProjects, workflowSuggestions } from './access.js';
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets } from './budgets.js';
+import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
 import { clock, dateValue, shiftDate } from './dates.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
@@ -55,23 +56,26 @@ function publicSubmission(doc, entries = doc.entries) {
 r.get('/day/:date', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
   const memberId = scope.own;
+  const names = await syncClientProjects(models, scope.visible);
   const [projects, submission, assignments, settings] = await Promise.all([
     models.Project.find({ ...scoped(scope.visible), archived: false }).sort('name').lean(),
     models.Submission.findById(`${memberId}:${date}`).lean(),
     models.Assignment.find({ memberId }).lean(),
     models.Member.findById(memberId).lean(),
   ]);
-  const [catalog, suggestions, reviewAllowed] = await Promise.all([
+  const [catalog, suggestions, reviewAllowed, workItems, live] = await Promise.all([
     models.CatalogTask.find({ projectId: { $in: projects.map((project) => project._id) }, archived: false }).sort('title').lean(),
     workflowSuggestions(scope, memberId, date, projects),
     canLogReview(req.user),
+    listClientWork(projects, req.user),
+    projectWorkflowStatuses(submission ? [submission] : []),
   ]);
   res.json({
-    date, projects,
+    date, projects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })), workItems,
     catalog: await catalogAvailability(models, memberId, date, catalog.filter((task) => reviewAllowed || !isReview(task.title))),
     suggestions: suggestions.filter((task) => !isReview(task.title)),
     assignments, memberName: req.user.name,
-    submission: submission && publicSubmission(submission, submission.entries.filter((entry) => includes(scope.visible, entry.clientId))),
+    submission: live[0] && publicSubmission(live[0], live[0].entries.filter((entry) => includes(scope.visible, entry.clientId))),
     slackEnabled: slackConfigured(),
     hubstaffAccess: isSuper(req.user) || !!settings?.hubstaffAccess,
   });
@@ -95,7 +99,8 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
     return saveDay(req.user, models, scope, { date, key, entries, version, reviewAllowed, session });
   });
   const result = changed ? await deliverSubmission(models, key) : submission;
-  res.json(publicSubmission(result, result.entries.filter((entry) => includes(scope.visible, entry.clientId))));
+  const [live] = await projectWorkflowStatuses([result.toObject()]);
+  res.json(publicSubmission(live, live.entries.filter((entry) => includes(scope.visible, entry.clientId))));
 }));
 
 async function saveDay(user, models, scope, { date, key, entries, version, reviewAllowed, session }) {
@@ -115,6 +120,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     if (input._id && !existing) fail('A task has changed. Refresh before saving again.');
     if (existing && saved.some((row) => String(row._id) === input._id)) fail('Each task can only be included once');
     const sameProject = !!existing && existing.projectId === input.projectId;
+    if (existing?.workflowTaskId && !sameProject) fail('Remove the entry and add another to change its project');
     const project = sameProject ? null : await projectInScope(models, scope, input.projectId, false, session);
     if (project?.archived) fail('Select an active project');
     const projectId = String(project?._id || existing.projectId);
@@ -145,20 +151,18 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
         throw new HttpError(403, 'Only Simran, Krupali, Jaini and Riddhi can log Review hours');
       }
     }
-    let workflowTaskId;
-    if (input.workflowTaskId && !isReview(title)) {
-      workflowTaskId = idValue(input.workflowTaskId);
-      if (!(sameProject && existing.workflowTaskId === workflowTaskId)) {
-        const sourceProject = project || await projectInScope(models, scope, projectId, false, session);
-        const suggestions = await workflowSuggestions(scope, scope.own, date, [sourceProject]);
-        if (!suggestions.some((suggestion) => String(suggestion.id) === workflowTaskId)) fail('Select an available Workflow suggestion');
-      }
-    }
-    saved.push({
+    const row = {
       ...(existing && { _id: existing._id }),
       projectId, clientId, projectName: project?.name || existing.projectName,
-      title, hours, priority, status, catalogId: catalogTask && String(catalogTask._id), workflowTaskId,
-    });
+      title, hours, priority, status, catalogId: catalogTask && String(catalogTask._id),
+    };
+    const linkedProject = project || await projectInScope(models, scope, projectId, false, session);
+    if (existing?.workflowTaskId && input.workflowTaskId && input.workflowTaskId !== existing.workflowTaskId) {
+      fail('Remove the entry and add another to change its linked task');
+    }
+    await saveWorkflowEntry({ user, models, project: linkedProject, row, existing, input, date, session,
+      managed: includes(scope.managed, clientId) });
+    saved.push(row);
   }
   // A full-day save cannot remove entries for a client whose access was revoked.
   for (const existing of previous?.entries || []) {
@@ -182,7 +186,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
 }
 
 function comparableEntry(entry) {
-  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'title', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
+  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
 }
 
 async function reportRows(req, models, scope) {
@@ -195,7 +199,7 @@ async function reportRows(req, models, scope) {
     enforce(includes(scope.members, memberId));
     filter.memberId = memberId;
   } else if (scope.members !== null) filter.memberId = { $in: scope.members };
-  const documents = await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean();
+  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean());
   return documents.flatMap((doc) => {
     const scopeIds = doc.memberId === scope.own ? scope.visible : scope.managed;
     const entries = doc.entries.filter((entry) => includes(scopeIds, entry.clientId) &&
@@ -235,6 +239,7 @@ r.get('/missing/:date', route(async (req, res, models, scope) => {
 }));
 
 r.get('/manage', route(async (req, res, models, scope) => {
+  const names = await syncClientProjects(models, scope.managed);
   const [workflow, projects, members, leave] = await Promise.all([
     workflowProjects(scope), models.Project.find(scoped(scope.managed)).sort('name').lean(), roster(scope, models),
     models.Leave.find({ date: { $gte: shiftDate(clock().date, -31) }, ...(scope.members !== null && { memberId: { $in: scope.members } }) }).sort('date').lean(),
@@ -244,7 +249,8 @@ r.get('/manage', route(async (req, res, models, scope) => {
     models.CatalogTask.find({ projectId: { $in: projectIds } }).sort('title').lean(),
     models.Assignment.find({ projectId: { $in: projectIds }, ...(scope.members !== null && { memberId: { $in: scope.members } }) }).lean(),
   ]);
-  res.json({ ...workflow, dailyProjects: projects, members, catalog, assignments, leave });
+  res.json({ ...workflow, dailyProjects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })),
+    workItems: await listClientWork(projects, req.user), members, catalog, assignments, leave });
 }, true));
 
 r.post('/projects/import', route(async (req, res, models) => {

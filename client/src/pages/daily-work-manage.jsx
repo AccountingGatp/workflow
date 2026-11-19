@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useState } from 'react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
 import { Badge, Empty, ErrorBox, Skeleton } from '../ui.jsx';
@@ -106,10 +107,41 @@ function ProjectSetup({ data, save, active, select, superAdmin }) {
   </section>;
 }
 
+function ClientTaskList({ project, items, limits, save }) {
+  const [selected, setSelected] = useState('');
+  const [period, setPeriod] = useState('daily');
+  const [hours, setHours] = useState('');
+  const task = items.find((item) => item.id === selected);
+  function choose(id) {
+    setSelected(id);
+    const title = items.find((item) => item.id === id)?.title;
+    const limit = limits.find((item) => item.title.toLowerCase() === title?.toLowerCase() && !item.archived);
+    setPeriod(limit?.period || 'daily');
+    setHours(limit?.hours ?? '');
+  }
+  return <section className="card daily-card stack">
+    <h2>Client task list</h2>
+    <Link to={`/clients/${project.clientId}/projects/${project.workflowProjectId}`}>Open task list in Clients</Link>
+    {!items.length ? <Empty title="No client tasks yet" /> : <Form label="Save hour limit" submit={async () => {
+      if (task) await save(`/projects/${project._id}/catalog`, 'POST', { title: task.title, period, hours }, 'Hour limit saved.');
+    }}>
+      <div className="row-wrap daily-controls">
+        <Select label="Client task" value={selected} set={choose} required>
+          <option value="">Choose a task</option>
+          {items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+        </Select>
+        <Select label="Limit period" value={period} set={setPeriod}>
+          <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+        </Select>
+        <TextField label="Hours per period" type="number" min="0" max={periodLimits[period]} step="0.01"
+          value={hours} set={setHours} required />
+      </div>
+    </Form>}
+  </section>;
+}
+
 function Catalog({ project, items, save }) {
   const [task, field, setTask] = useForm(editingItem);
-  const [text, setText] = useState('');
-  const [importError, setImportError] = useState(null);
   return <section className="card daily-card stack">
     <h2>Task Name &amp; Description</h2>
     <Form label={task._id ? 'Update task' : 'Add task'} cancel={task._id ? () => setTask(editingItem) : undefined} submit={async () => {
@@ -137,25 +169,6 @@ function Catalog({ project, items, save }) {
           <button className="btn btn-sm" onClick={() => save(`/catalog/${item._id}`, 'PATCH', { archived: !item.archived }, item.archived ? 'Task restored.' : 'Task archived.')}>
             {item.archived ? 'Restore' : 'Archive'}
           </button></div>}</td></tr>)}</tbody></table></div> : <Empty title="No catalog tasks for this project" />}
-    <details><summary>Import tasks from a spreadsheet</summary>
-      <div className="stack daily-import">
-        <p className="muted">Paste up to 200 rows without headers in this order: task name, hours, optional description, and optional period (daily, weekly, monthly).</p>
-        <ErrorBox error={importError} />
-        <Form label="Import tasks" submit={async () => {
-          setImportError(null);
-          const rows = text.split(/\r?\n/).filter((line) => line.trim()).map((line) => line.split('\t'));
-          if (!rows.length || rows.some((row) => row.length < 2 || row.length > 4)) {
-            setImportError(new Error('Copy task name, hours, optional description, and optional period as separate spreadsheet columns.'));
-            return;
-          }
-          const result = await save(`/projects/${project._id}/catalog`, 'POST', {
-            items: rows.map(([title, hours, description, period]) => ({ title, hours, description, period: period?.trim().toLowerCase() || undefined })),
-          }, 'Catalog tasks imported.');
-          if (result) setText('');
-        }}><label className="field"><span>Spreadsheet rows</span><textarea className="input" rows={5} value={text} required
-          onChange={(event) => setText(event.target.value)} /></label></Form>
-      </div>
-    </details>
   </section>;
 }
 
@@ -248,7 +261,10 @@ export function ManageDailyWork({ onSaved }) {
     <ErrorBox error={saveError || error} />
     <ProjectSetup data={data} save={save} active={active} select={setProject} superAdmin={can.super} />
     {active && <>
-      <Catalog key={`catalog-${active._id}`} project={active} items={data.catalog.filter((row) => row.projectId === active._id)} save={save} />
+      {active.workflowProjectId ? <ClientTaskList key={active._id} project={active}
+        items={(data.workItems || []).filter((item) => item.projectId === active._id)}
+        limits={data.catalog.filter((item) => item.projectId === active._id)} save={save} />
+        : <Catalog key={`catalog-${active._id}`} project={active} items={data.catalog.filter((row) => row.projectId === active._id)} save={save} />}
       <Distribution key={`distribution-${active._id}`} project={active} members={data.members}
         assignments={data.assignments.filter((row) => row.projectId === active._id)} save={save} />
     </>}

@@ -1,4 +1,5 @@
 import { dailyModels } from './models.js';
+import { projectWorkflowStatuses } from './workflow-links.js';
 import { roster } from './access.js';
 import { clock, shiftDate } from './dates.js';
 import { postSlack, retrySlack, slackConfigured, submissionText } from './slack.js';
@@ -45,7 +46,7 @@ async function weeklyText(models, date) {
 async function incompleteText(models, date) {
   const data = await attendance(models, shiftDate(date, -6), date);
   const people = new Set(data.members.filter((member) => member.enrolled).map((member) => member.id));
-  const rows = data.entries.filter((entry) => people.has(entry.memberId) && !data.leave.has(entry._id))
+  const rows = (await projectWorkflowStatuses(data.entries)).filter((entry) => people.has(entry.memberId) && !data.leave.has(entry._id))
     .map((doc) => ({ ...doc, entries: doc.entries.filter((row) => row.status === 'incomplete') })).filter((doc) => doc.entries.length);
   return rows.length ? [`*Incomplete task report* · ${shiftDate(date, -6)} to ${date}`,
     ...rows.map((row) => submissionText(row, 'Incomplete tasks'))].join('\n\n') : null;
