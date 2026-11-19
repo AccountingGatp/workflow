@@ -1,5 +1,5 @@
 import GoogleSignIn from '../GoogleSignIn.jsx';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, BrandName, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
@@ -153,9 +153,12 @@ export function People() {
 }
 
 function SlackUserIdField({ value, onChange }) {
-  return <Field label="Slack user ID (optional)" hint="In Slack, open the person’s profile and choose Copy member ID.">
-    <input className="input" value={value} onChange={onChange} maxLength={64} placeholder="U012ABC3456" />
-  </Field>;
+  const id = useId();
+  return <div className="field">
+    <label htmlFor={id}>Slack user ID (optional)</label>
+    <input id={id} className="input" value={value} onChange={onChange} maxLength={64} placeholder="U012ABC3456" aria-describedby={`${id}-hint`} />
+    <span className="hint" id={`${id}-hint`}>In Slack, open the person’s profile and choose Copy member ID.</span>
+  </div>;
 }
 
 function EditPerson({ person, isSelf, onClose, onSaved }) {
