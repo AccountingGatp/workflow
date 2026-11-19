@@ -134,7 +134,23 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(calls.length, 2);
     await request(employee, `/day/${date}`, 'PUT', { entries: [], version: original.version }, 409);
     assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 0);
-    await request(lead, `/tasks/${source._id}`, 'PATCH', { confirmCompletion: true });
+    const statusPath = `/day/${date}/members/${employee._id}/entries/${updated.entries[0]._id}/status`;
+    const setStatus = (actor, status, version, reason, code = 200) => request(actor, statusPath, 'PATCH', { status, version, reason }, code);
+    const leadReport = await request(lead, `/reports?from=${date}`);
+    assert.equal(leadReport.submissions[0].entries[0].canReview, true);
+    await setStatus(other, 'complete', updated.version, undefined, 403);
+    await setStatus(lead, 'incomplete', updated.version, ' ', 400);
+    const returned = await setStatus(lead, 'incomplete', updated.version, 'Awaiting client approval');
+    assert.equal(returned.entry.incompleteReason, 'Awaiting client approval');
+    assert.equal(returned.entry.workflowStatus, 'in_progress');
+    assert.equal(returned.entry.hours, 2.25);
+    await setStatus(lead, 'complete', returned.version, undefined, 403);
+    await setStatus(employee, 'complete', updated.version, undefined, 409);
+    const resubmitted = await setStatus(employee, 'complete', returned.version);
+    assert.equal(resubmitted.entry.workflowStatus, 'pending_review');
+    assert.equal(resubmitted.entry.incompleteReason, undefined);
+    const approved = await setStatus(lead, 'complete', resubmitted.version);
+    assert.equal(approved.entry.status, 'complete');
     assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 1);
     assert.equal((await request(employee, `/day/${date}`)).submission.entries[0].status, 'complete');
     assert.equal((await request(other, `/reports?from=${date}`)).submissions.length, 0);
@@ -147,7 +163,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(scheduled);
     assert.equal(calls.length, 3);
     assert.match(calls[2].text, /All employees submitted/);
-    const removed = await put(employee, date, [], updated.version);
+    const removed = await put(employee, date, [], approved.version);
     assert.equal(calls.length, 3);
     await send(employee, date, removed.version);
     assert.equal(calls[3].thread_ts, '1.000001');
@@ -217,6 +233,16 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
       title: 'Payroll', notes: 'Reconcile payroll before posting', weeklyHours: '4 hours', frequency: 'Weekly-Friday' });
     const payrollSchedule = await TaskTemplate.create({ title: payroll.title, client: client._id, project: project._id,
       masterItem: payroll._id, assignees: [employee._id], frequency: 'weekly', weekday: 5, startsOn: new Date('2026-10-01') });
+    const rawSchedule = await ProjectWorkItem.create({ client: client._id, project: project._id,
+      title: 'Closeout', responsibleUser: employee._id, frequency: 'Monthly', executionDay: '15th of Every Month' });
+    const findsSuggestion = async (user, day, id) => (await getDay(user, day)).workItems.find((row) => row.id === String(id)).suggested;
+    assert.equal(await findsSuggestion(employee, '2026-10-23', payroll._id), true);
+    assert.equal(await findsSuggestion(employee, '2026-10-22', payroll._id), false);
+    assert.equal(await findsSuggestion(lead, '2026-10-23', payroll._id), false);
+    assert.equal(await findsSuggestion(employee, '2026-10-15', rawSchedule._id), true);
+    assert.equal(await findsSuggestion(employee, '2026-10-16', rawSchedule._id), false);
+    assert.deepEqual((await getDay(employee, '2026-10-23')).reviewProjects, []);
+    assert.ok((await getDay(lead, '2026-10-23')).reviewProjects.includes(daily._id));
     const payrollEntry = { ...time(payroll.title, 2), status: 'incomplete', workItemId: String(payroll._id) };
     const early = await log(employee, '2026-10-19', [payrollEntry]);
     const next = await getDay(employee, '2026-10-20');

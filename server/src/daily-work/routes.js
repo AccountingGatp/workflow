@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
-import { User } from '../models/index.js';
+import { Task, User } from '../models/index.js';
+import { applyTaskTransition, mayReview } from '../services/task-review.js';
 import { isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
@@ -74,6 +75,7 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
     date, projects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })), workItems,
     catalog: await catalogAvailability(models, memberId, date, budgetCatalog.filter((task) => reviewAllowed || !isReview(task.title))),
     assignments, memberName: req.user.name,
+    reviewProjects: reviewAllowed ? projects.filter((project) => includes(scope.managed, project.clientId)).map((project) => String(project._id)) : [],
     submission: live[0] && publicSubmission(live[0], live[0].entries.filter((entry) => includes(scope.visible, entry.clientId))),
     slackEnabled: slackConfigured(),
     hubstaffAccess: isSuper(req.user) || !!settings?.hubstaffAccess,
@@ -187,6 +189,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     }
     await saveWorkflowEntry({ user, models, project: linkedProject, row, existing, input, date, session,
       managed: includes(scope.managed, clientId), period: catalogTask?.period });
+    if (row.status === 'incomplete' && row.workflowStatus !== 'pending_review') row.incompleteReason = existing?.incompleteReason;
     saved.push(row);
   }
   // A full-day save cannot remove entries for a client whose access was revoked.
@@ -203,16 +206,76 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   await validateBudgets(models, scope.own, date, budgetCatalog, saved, previous?.entries || [], session);
   submission.memberName = user.name;
   submission.entries = saved;
-  if (submission.delivery !== 'uncertain') submission.delivery = 'skipped';
-  submission.deliveryAfter = new Date();
-  submission.deliveryAt = undefined;
+  markUnsent(submission);
   await submission.save({ session });
   return submission;
 }
 
 function comparableEntry(entry) {
-  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'description', 'note', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
+  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'description', 'note', 'incompleteReason', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
 }
+
+function markUnsent(submission) {
+  if (submission.delivery !== 'uncertain') submission.delivery = 'skipped';
+  submission.deliveryAfter = new Date();
+  submission.deliveryAt = undefined;
+}
+
+function reviewerCanUpdate(task, entry, user, scope) {
+  return task.status === 'pending_review' && String(task.submittedBy) !== scope.own &&
+    mayReview(task, { manager: includes(scope.managed, entry.clientId), actorId: user._id, actorRole: user.role });
+}
+
+r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res, models, scope) => {
+  const date = dateValue(req.params.date);
+  const memberId = idValue(req.params.memberId);
+  const entryId = idValue(req.params.id);
+  const own = scope.own === memberId;
+  enforce(own || includes(scope.members, memberId));
+  const { status, version } = req.body;
+  if (!['incomplete', 'complete'].includes(status)) fail('Choose a valid status');
+  const reason = status === 'incomplete' ? textValue(req.body.reason, 500) : undefined;
+
+  const submission = await models.Submission.db.transaction(async (session) => {
+    const doc = await models.Submission.findById(`${memberId}:${date}`).session(session);
+    const entry = doc?.entries.id(entryId);
+    if (!entry) throw new HttpError(404, 'Task entry not found');
+    enforce(includes(own ? scope.visible : scope.managed, entry.clientId));
+    if (doc.__v !== version) throw new HttpError(409, 'This task changed. Refresh before saving again.');
+    if (doc.delivery === 'sending') throw new HttpError(409, 'Slack delivery is in progress. Try again in a moment.');
+
+    if (entry.workflowTaskId) {
+      if (Task.db.getClient() !== models.Submission.db.getClient()) throw new HttpError(503, 'The linked Workflow task is unavailable');
+      const task = await Task.findOne({ _id: entry.workflowTaskId, client: entry.clientId, deletedAt: null }).session(session);
+      if (!task || !task.assignees.some((id) => String(id) === memberId)) {
+        throw new HttpError(409, 'The linked Workflow task is no longer available');
+      }
+      const reviewer = !own && reviewerCanUpdate(task, entry, req.user, scope);
+      enforce(own || reviewer);
+      if (task.status === 'done') throw new HttpError(409, 'This task is already completed');
+      if (!(task.status === 'pending_review' && own && status === 'complete')) {
+        applyTaskTransition(task, reviewer && status === 'complete' ? { confirmCompletion: true } :
+          { status: status === 'complete' ? 'done' : 'in_progress' }, {
+          manager: reviewer, isAssignee: own, actorId: req.user._id, actorRole: req.user.role,
+        });
+      }
+      if (task.isModified()) await task.save({ session });
+      entry.workflowStatus = task.status;
+      entry.status = task.status === 'done' ? 'complete' : 'incomplete';
+    } else {
+      enforce(own);
+      entry.status = status;
+    }
+    entry.incompleteReason = reason;
+    if (doc.isModified()) {
+      markUnsent(doc);
+      await doc.save({ session });
+    }
+    return doc;
+  });
+  const [live] = await projectWorkflowStatuses([submission.toObject()]);
+  res.json({ entry: live.entries.find((entry) => String(entry._id) === entryId), version: submission.__v });
+}));
 
 async function reportRows(req, models, scope) {
   const from = dateValue(req.query.from || clock().date);
@@ -224,7 +287,8 @@ async function reportRows(req, models, scope) {
     enforce(includes(scope.members, memberId));
     filter.memberId = memberId;
   } else if (scope.members !== null) filter.memberId = { $in: scope.members };
-  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean());
+  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean(),
+    (task, entry) => reviewerCanUpdate(task, entry, req.user, scope));
   return documents.flatMap((doc) => {
     const scopeIds = doc.memberId === scope.own ? scope.visible : scope.managed;
     const entries = doc.entries.filter((entry) => includes(scopeIds, entry.clientId) &&

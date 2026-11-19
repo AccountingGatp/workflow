@@ -56,6 +56,7 @@ const entry = new Schema({
   title: text,
   description: String,
   note: { type: String, maxlength: 500 },
+  incompleteReason: { type: String, maxlength: 500 },
   hours: { ...hours, required: true },
   priority: { type: String, enum: ['low', 'normal', 'high'], required: true },
   status: { type: String, enum: ['incomplete', 'complete'], required: true },

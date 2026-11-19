@@ -438,3 +438,18 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 @media (prefers-reduced-motion: reduce) {
   .daily-reveal { transition: none; }
 }
+
+.daily-open-suggestions { margin-top: 10px; }
+.daily-suggestions { margin-top: 18px; }
+.daily-suggestions .daily-project-tasks { max-height: min(42vh, 420px); }
+.daily-status-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(225px, auto); align-items: start; gap: 12px 20px;
+  padding: 14px clamp(14px, 2vw, 22px); }
+.daily-status-info { min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.daily-status-info h3 { font-size: 15px; }
+.daily-status-actions { justify-self: end; max-width: 100%; }
+.daily-status-actions form { width: min(100%, 330px); gap: 8px; }
+.daily-status-actions textarea { width: 100%; }
+@media (max-width: 700px) {
+  .daily-status-item { grid-template-columns: minmax(0, 1fr); }
+  .daily-status-actions { justify-self: stretch; }
+}

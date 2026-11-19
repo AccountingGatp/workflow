@@ -146,14 +146,16 @@ function EntryEditor({ date, data }) {
   }
 
   function add(item) {
-    if (!selected || !item || rows.length >= 40) return;
+    const source = data.projects.find((entry) => entry._id === item.projectId);
+    if (!source || busy || rows.length >= 40) return;
     const occurrence = item.occurrence;
     const key = crypto.randomUUID();
     newEntry.current = key;
     setRows((old) => [...old, {
-      key, projectId: selected._id, projectName: selected.name, title: item.title, description: item.description || '',
+      key, projectId: source._id, projectName: source.name, title: item.title, description: item.description || '',
       catalogId: item.catalogId, workItemId: item.catalogId ? undefined : item.id,
       checklist: occurrence?.checklist, workflowStatus: occurrence?.status,
+      workflowTaskId: item.occurrenceDueToday ? occurrence?.id : undefined,
       hours: '',
       priority: occurrence?.priority || 'normal', status: occurrence?.status === 'done' ? 'complete' : 'incomplete',
     }]);
@@ -212,10 +214,42 @@ function EntryEditor({ date, data }) {
     finally { setBusy(''); }
   }
 
+  const suggestions = [
+    ...data.workItems.filter((item) => item.canLog && item.suggested),
+    ...catalog.filter((task) => task.review && data.reviewProjects?.includes(task.projectId))
+      .map((task) => ({ ...task, id: task._id, catalogId: task._id })),
+  ].filter((item) => {
+    const picked = rows.some((row) => row.projectId === item.projectId &&
+      (row.catalogId === item.id || row.workItemId === item.id || (!row.catalogId && !row.workItemId && nameKey(row.title) === nameKey(item.title))));
+    const limit = taskFor({ ...item, workItemId: item.id });
+    return !picked && (!limit || available(limit) > 0);
+  });
+
   return <div className="daily-entry-layout">
     <section className="card daily-card daily-project-picker" aria-labelledby="daily-project-heading">
       <div className="row-wrap daily-header"><h2 id="daily-project-heading">Daily entry</h2><Badge cls="b-primary">{data.memberName}</Badge></div>
       <ProjectPicker projects={data.projects} selected={selected} onSelect={chooseProject} />
+      {selected && suggestions.length > 0 && <button type="button" className="btn btn-ghost btn-sm daily-open-suggestions"
+        onClick={() => chooseProject('')}>View suggestions</button>}
+      {!selected && suggestions.length > 0 && <section className="daily-suggestions" aria-labelledby="daily-suggestion-heading">
+        <h3 id="daily-suggestion-heading">Suggested for {date === today() ? 'today' : dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</h3>
+        <ul className="daily-project-tasks" aria-label="Suggested tasks">
+          {suggestions.map((item) => {
+            const source = data.projects.find((project) => project._id === item.projectId);
+            const limit = taskFor({ ...item, workItemId: item.id });
+            return <li key={item.id} className="daily-project-task">
+              <div className="daily-project-task-info">
+                <strong>{item.title}</strong>
+                <div className="small muted">{source?.name}{item.review ? ' · Team review' : ' · Scheduled'}</div>
+                {item.description && !item.review && <p className="small muted daily-task-description">{item.description}</p>}
+                {limit && <span className="small muted">{hours(available(limit))} h available</span>}
+              </div>
+              <button type="button" className="btn btn-tonal btn-sm" aria-label={`Add suggested ${item.title} from ${source?.name}`}
+                disabled={!!busy || rows.length >= 40} onClick={() => add(item)}><Plus size={15} /> Add</button>
+            </li>;
+          })}
+        </ul>
+      </section>}
       {!data.projects.length && <p className="small muted">Client projects you have access to appear here automatically.</p>}
     </section>
     {selected && <section className="card daily-card daily-project-task-panel" aria-labelledby="daily-project-tasks">
@@ -381,10 +415,69 @@ function EntryEditor({ date, data }) {
   </div>;
 }
 
+function StatusBadge({ entry }) {
+  const label = entry.status === 'complete' ? 'Completed' : entry.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete';
+  return <Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{label}</Badge>;
+}
+
+function TaskStatusRow({ entry, me, onSaved }) {
+  const { submission } = entry;
+  const own = submission.memberId === me;
+  const mayUpdate = entry.canReview || (own && !['done', 'unavailable'].includes(entry.workflowStatus));
+  const [showReason, setShowReason] = useState(false);
+  const [reason, setReason] = useState(entry.incompleteReason || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const toast = useToast();
+
+  async function save(status) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api(`${root}/day/${submission.date}/members/${submission.memberId}/entries/${entry._id}/status`, {
+        method: 'PATCH', body: { status, reason, version: submission.version },
+      });
+      setShowReason(false);
+      toast(result.entry.workflowStatus === 'pending_review' ? 'Submitted for TL review.' : 'Task status saved.');
+      onSaved();
+    } catch (error) {
+      setError(error);
+    } finally { setBusy(false); }
+  }
+
+  return <article className="card daily-status-item">
+    <div className="stack daily-status-info">
+      <div className="row-wrap"><h3>{entry.title}</h3><StatusBadge entry={entry} /></div>
+      <div className="small muted">{entry.projectName} · {submission.memberName} · <time dateTime={submission.date}>{dueLabel.format(new Date(`${submission.date}T00:00:00+05:30`))}</time> · {hours(entry.hours)} h</div>
+      {entry.note && <p className="small daily-task-description">{entry.note}</p>}
+      {entry.incompleteReason && !showReason && <p className="small daily-task-description"><strong>Reason</strong> {entry.incompleteReason}</p>}
+    </div>
+    {mayUpdate && <div className="daily-status-actions">
+      {!showReason ? <div className="row-wrap">
+        {entry.status !== 'complete' && (!own || entry.workflowStatus !== 'pending_review') &&
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
+          setReason(entry.incompleteReason || '');
+          setShowReason(true);
+        }}>Incomplete</button>
+      </div> : <form className="stack" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
+        <label className="field"><span>Why is this incomplete?</span>
+          <textarea className="input" autoFocus required rows={2} maxLength={500} disabled={busy}
+            value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+        <div className="row-wrap">
+          <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !reason.trim()}>Save status</button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setShowReason(false); setError(null); }}>Cancel</button>
+        </div>
+      </form>}
+      <ErrorBox error={error} />
+    </div>}
+  </article>;
+}
+
 const reportViews = ['member', 'status', 'summary'];
-function DailyReports({ tab, setDate, openEntry, me }) {
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
+function DailyReports({ tab, date, setDate, openEntry, me }) {
+  const [from, setFrom] = useState(date);
+  const [to, setTo] = useState(date);
   const [memberId, setMember] = useState('');
   const [projectId, setProject] = useState('');
   const [status, setStatus] = useState('');
@@ -392,7 +485,7 @@ function DailyReports({ tab, setDate, openEntry, me }) {
   const [slackError, setSlackError] = useState(null);
   const toast = useToast();
   const query = new URLSearchParams({ from, to, memberId, projectId, status: tab === 'status' ? status : '' });
-  const { data, error, loading } = useApi(`${root}/reports?${query}`);
+  const { data, error, loading, reload } = useApi(`${root}/reports?${query}`);
   const entries = (data?.submissions || []).flatMap((submission) => submission.entries.map((entry) => ({ ...entry, submission })));
   const projects = new Map();
   for (const entry of entries) {
@@ -431,7 +524,9 @@ function DailyReports({ tab, setDate, openEntry, me }) {
       <ErrorBox error={error || slackError} />
     </div>
     {loading ? <Skeleton /> : !error && (!entries.length ? <div className="card"><Empty title="No daily work matches these filters" /></div> :
-      tab === 'summary' ? <>
+      tab === 'status' ? <div className="stack" aria-label="Task statuses">
+        {entries.map((entry) => <TaskStatusRow key={entry._id} entry={entry} me={me} onSaved={reload} />)}
+      </div> : tab === 'summary' ? <>
         <div className="daily-metrics">
           <div className="card daily-card"><span>Logged hours</span><strong>{totalHours(entries)}</strong></div>
           <div className="card daily-card"><span>Tasks</span><strong>{entries.length}</strong></div>
@@ -443,7 +538,7 @@ function DailyReports({ tab, setDate, openEntry, me }) {
         <thead><tr><th>Member</th><th>Date</th><th>Project</th><th>Task</th><th>Hours</th><th>Priority</th><th>Status</th><th aria-label="Actions" /></tr></thead>
         <tbody>{entries.map((entry) => <tr key={entry._id}><td>{entry.submission.memberName}</td><td>{entry.submission.date}</td><td>{entry.projectName}</td>
           <td>{entry.title}{entry.note && <p className="small muted daily-task-description">{entry.note}</p>}</td><td>{hours(entry.hours)}</td><td className="daily-status">{entry.priority}</td>
-          <td><Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{entry.status === 'complete' ? 'Complete' : entry.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</Badge></td>
+          <td><StatusBadge entry={entry} /></td>
           <td>{entry.submission.memberId === me && <button className="btn btn-sm" onClick={() => { setDate(entry.submission.date); openEntry(); }}>Edit day</button>}</td>
         </tr>)}</tbody>
       </table></div>)}
@@ -504,7 +599,7 @@ export default function DailyWork() {
     </nav>
     {tab === 'entry' && (day.error ? <ErrorBox error={day.error} /> : day.loading || day.data?.date !== date ? <Skeleton /> :
       <EntryEditor key={date} date={date} data={day.data} />)}
-    {reportViews.includes(tab) && <DailyReports tab={tab} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
+    {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
     {tab === 'missing' && <Missing date={date} />}
     {tab === 'hubstaff' && <Hubstaff date={date} />}
     {tab === 'manage' && <ManageDailyWork onSaved={day.reload} />}
