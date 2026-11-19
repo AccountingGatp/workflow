@@ -2,6 +2,8 @@ import { User, TeamMembership, Client, ClientProject } from '../models/index.js'
 import { HttpError } from '../middleware/auth.js';
 import { isSuper, ledTeamIds, managedClientIds, visibleClientIds } from '../services/access.js';
 
+import { dailyReportSettings } from './settings.js';
+
 export async function dailyScope(user) {
   const own = String(user._id);
   if (isSuper(user)) return { own, managed: null, visible: null, members: null };
@@ -15,14 +17,16 @@ export async function dailyScope(user) {
 export const includes = (scope, id) => scope === null || scope.includes(String(id));
 
 export async function roster(scope, models, inactive = false) {
-  const filter = inactive ? {} : { active: true };
+  const filter = inactive ? {} : { active: true, deletedAt: null };
   if (scope.members !== null) filter._id = { $in: scope.members };
-  const users = await User.find(filter).select('name active').sort('name').lean();
+  const users = await User.find(filter).select('name active +dailyReport +slackUserId').sort('name').lean();
   const settings = await models.Member.find({ _id: { $in: users.map((user) => String(user._id)) } }).lean();
   const byId = new Map(settings.map((member) => [member._id, member]));
-  return users.map(({ _id, ...user }) => {
-    const settings = byId.get(String(_id));
-    return { ...user, id: String(_id), enrolled: false, shift: 'morning', ...settings };
+  return users.map(({ _id, dailyReport, ...user }) => {
+    const legacy = byId.get(String(_id));
+    const report = dailyReportSettings(dailyReport, legacy);
+    return { ...user, id: String(_id), ...legacy, shift: report.shiftStart < '12:00' ? 'morning' : 'afternoon',
+      enrolled: report.enabled, shiftStart: report.shiftStart, reminderAt: report.reminderAt };
   });
 }
 

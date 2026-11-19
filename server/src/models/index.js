@@ -10,6 +10,7 @@ export const userRoles = ['super_admin', 'manager', 'admin', 'employee'];
 export const User = model('User', new Schema({
   name: { type: String, required: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  dailyReport: { type: new Schema({ enabled: Boolean, shiftStart: String, reminderAt: String }, { _id: false }), select: false },
   slackUserId: { type: String, select: false, match: slackUserIdPattern },
   googleSubject: { type: String, unique: true, sparse: true, select: false },
   passwordHash: { type: String, required: true, select: false },

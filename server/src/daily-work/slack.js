@@ -24,7 +24,10 @@ function workDate(date) {
   return `${parts.weekday}, ${parts.month} ${day}${suffix}, ${parts.year}`;
 }
 
-export function dailySubmissionText({ memberName, date, entries }, slackUserId) {
+export const slackPerson = (name, id) =>
+  id && slackUserIdPattern.test(id) ? `<@${id}>` : escape(name);
+
+export function dailySubmissionText({ memberName, date, entries }, slackUserId, report = false) {
   const projects = new Map();
   for (const entry of entries) {
     const key = entry.projectId || entry.projectName;
@@ -34,8 +37,9 @@ export function dailySubmissionText({ memberName, date, entries }, slackUserId) 
     group.hours += entry.hours;
   }
   const lines = [
-    `${slackUserId && slackUserIdPattern.test(slackUserId) ? `<@${slackUserId}> ` : ''}Employee: ${escape(memberName)}`,
-    `Date: ${workDate(date)}`,
+    report ? `Employee: ${slackPerson(memberName, slackUserId)}` :
+      `${slackUserId && slackUserIdPattern.test(slackUserId) ? `<@${slackUserId}> ` : ''}Employee: ${escape(memberName)}`,
+    ...(!report ? [`Date: ${workDate(date)}`] : []),
     `:bar_chart: Summary: ${projects.size} ${projects.size === 1 ? 'project' : 'projects'}, ${hoursLabel(showHours(entries.reduce((sum, entry) => sum + entry.hours, 0)))} total`,
   ];
   if (!projects.size) return [...lines, 'All tasks removed for this day.'].join('\n');
@@ -44,8 +48,8 @@ export function dailySubmissionText({ memberName, date, entries }, slackUserId) 
     lines.push(`${index + 1}. ${escape(project.name)} - ${hoursLabel(showHours(project.hours))}`);
     for (const [taskIndex, entry] of project.entries.entries()) {
       lines.push(`   Task ${taskIndex + 1}: ${escape(entry.title)} (${showHours(entry.hours)}h) - Priority: ${priority[entry.priority] || 'Medium'}`);
-      if (entry.note) lines.push(`      Note: ${escape(entry.note)}`);
-      if (entry.incompleteReason && entry.status !== 'complete') lines.push(`      Incomplete: ${escape(entry.incompleteReason)}`);
+      if (entry.note && !report) lines.push(`      Note: ${escape(entry.note)}`);
+      if (entry.incompleteReason && entry.status !== 'complete') lines.push(`      ${report ? 'Reason' : 'Incomplete'}: ${escape(entry.incompleteReason)}`);
     }
   }
   return lines.join('\n');

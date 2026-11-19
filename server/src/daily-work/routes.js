@@ -331,7 +331,7 @@ r.get('/missing/:date', route(async (req, res, models, scope) => {
   ]);
   const expected = members.filter((member) => reportMember(member, date) && !leave.includes(member.id));
   res.json({ expected: expected.length, missing: expected.filter((member) => !submitted.includes(member.id))
-    .map(({ id, name, shift }) => ({ id, name, shift })) });
+    .map(({ id, name, shift, shiftStart }) => ({ id, name, shift, shiftStart })) });
 }));
 
 r.get('/manage', route(async (req, res, models, scope) => {

@@ -577,7 +577,7 @@ function Missing({ date }) {
     {!data.expected ? <Empty title="No submissions expected" /> :
       !data.missing.length ? <Empty title="All expected employees submitted" /> :
       <div className="table-wrap"><table className="table"><thead><tr><th>Employee</th><th>Shift</th></tr></thead>
-        <tbody>{data.missing.map((member) => <tr key={member.id}><td>{member.name}</td><td className="daily-status">{member.shift}</td></tr>)}</tbody>
+        <tbody>{data.missing.map((member) => <tr key={member.id}><td>{member.name}</td><td>{member.shiftStart ? `${member.shiftStart} IST` : member.shift}</td></tr>)}</tbody>
       </table></div>}
   </div>;
 }
