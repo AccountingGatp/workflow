@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { User, Team, TeamMembership, ClientPermission, ClientAssignment, userRoles } from '../models/index.js';
+import { User, Team, TeamMembership, ClientPermission, ClientAssignment, slackUserIdPattern, userRoles } from '../models/index.js';
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { audit, isSuper, ledTeamIds } from '../services/access.js';
 
@@ -8,10 +8,19 @@ const r = Router();
 
 /* ---------- Users ---------- */
 
+function parseSlackUserId(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') throw new HttpError(400, 'Enter a valid Slack user ID');
+  const id = value.trim().toUpperCase();
+  if (id && !slackUserIdPattern.test(id)) throw new HttpError(400, 'Enter a Slack user ID, such as U012ABC3456');
+  return id || null;
+}
+
 r.get('/users', ah(async (req, res) => {
   // Everyone signed in may look up colleagues by name (needed for assigning work);
   // memberships are attached so the UI can show which teams each person is in.
-  const users = await User.find({ deletedAt: null }).sort({ name: 1 }).lean();
+  const users = await User.find({ deletedAt: null })
+    .select(isSuper(req.user) ? '+slackUserId' : '').sort({ name: 1 }).lean();
   const memberships = await TeamMembership.find({ removedAt: null }).populate('team', 'name color').lean();
   const byUser = {};
   for (const m of memberships) (byUser[m.user] ||= []).push({ team: m.team, teamRole: m.teamRole });
@@ -19,19 +28,19 @@ r.get('/users', ah(async (req, res) => {
 }));
 
 r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
-  const { name, email, password, role = 'employee', title } = req.body || {};
+  const { name, email, password, role = 'employee', title, slackUserId } = req.body || {};
   if (!name || !email || !password) throw new HttpError(400, 'Name, email and password are required');
   if (!userRoles.includes(role)) throw new HttpError(400, 'Invalid role');
   if (await User.exists({ email: email.toLowerCase() })) throw new HttpError(409, 'That email is already in use');
-  const user = await User.create({ name, email, role, title, passwordHash: await bcrypt.hash(password, 10) });
+  const user = await User.create({ name, email, role, title, slackUserId: parseSlackUserId(slackUserId), passwordHash: await bcrypt.hash(password, 10) });
   audit(req.user, 'user.create', { entity: 'User', entityId: user._id, summary: `Created ${role.replace('_', ' ')} ${name}` });
   res.status(201).json(user);
 }));
 
 r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
-  const allowed = ['name', 'email', 'role', 'title', 'active'];
+  const allowed = ['name', 'email', 'role', 'title', 'active', 'slackUserId'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
-  const user = await User.findOne({ _id: req.params.id, deletedAt: null });
+  const user = await User.findOne({ _id: req.params.id, deletedAt: null }).select('+slackUserId');
   if (!user) throw new HttpError(404, 'User not found');
   if (String(user._id) === String(req.user._id) && (update.role && update.role !== 'super_admin' || update.active === false)) {
     throw new HttpError(400, 'You cannot demote or deactivate yourself');
@@ -49,13 +58,15 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
     }
   }
   if (update.role !== undefined && !userRoles.includes(update.role)) throw new HttpError(400, 'Invalid role');
-  const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '' };
+  if (update.slackUserId !== undefined) update.slackUserId = parseSlackUserId(update.slackUserId);
+  const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '',
+    active: user.active, slackUserId: user.slackUserId || null };
   Object.assign(user, update);
   try { await user.save(); } catch (err) {
     if (err.code === 11000) throw new HttpError(409, 'That email address is already used by another person');
     throw err;
   }
-  const changed = ['name', 'email', 'role', 'title', 'active'].filter(k => update[k] !== undefined && previous[k] !== update[k]);
+  const changed = allowed.filter(k => update[k] !== undefined && previous[k] !== update[k]);
   audit(req.user, 'user.update', { entity: 'User', entityId: user._id, summary: `Updated ${user.name}: ${changed.join(', ') || 'no changes'}` });
   res.json(user);
 }));

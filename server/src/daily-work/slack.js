@@ -1,5 +1,5 @@
 import { HttpError } from '../middleware/auth.js';
-import { User } from '../models/index.js';
+import { slackUserIdPattern, User } from '../models/index.js';
 
 export const slackConfigured = () => !!(process.env.DAILY_WORK_SLACK_TOKEN && process.env.DAILY_WORK_SLACK_CHANNEL);
 const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -34,7 +34,7 @@ export function dailySubmissionText({ memberName, date, entries }, slackUserId) 
     group.hours += entry.hours;
   }
   const lines = [
-    `${slackUserId ? `<@${slackUserId}> ` : ''}Employee: ${escape(memberName)}`,
+    `${slackUserId && slackUserIdPattern.test(slackUserId) ? `<@${slackUserId}> ` : ''}Employee: ${escape(memberName)}`,
     `Date: ${workDate(date)}`,
     `:bar_chart: Summary: ${projects.size} ${projects.size === 1 ? 'project' : 'projects'}, ${hoursLabel(showHours(entries.reduce((sum, entry) => sum + entry.hours, 0)))} total`,
   ];
@@ -49,24 +49,6 @@ export function dailySubmissionText({ memberName, date, entries }, slackUserId) 
     }
   }
   return lines.join('\n');
-}
-
-async function findSlackUser(memberId) {
-  try {
-    const member = await User.findById(memberId).select('email').lean();
-    if (!member?.email) return undefined;
-    const url = new URL('https://slack.com/api/users.lookupByEmail');
-    url.searchParams.set('email', member.email);
-    const response = await fetch(url, {
-      headers: { authorization: `Bearer ${process.env.DAILY_WORK_SLACK_TOKEN}` },
-      signal: AbortSignal.timeout(2500),
-    });
-    const result = response.ok && await response.json();
-    const id = result?.user?.id;
-    return result?.ok && typeof id === 'string' && /^[UW][A-Z0-9]+$/.test(id) ? id : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 export async function postSlack(text, { channel = process.env.DAILY_WORK_SLACK_CHANNEL, thread, userError = false } = {}) {
@@ -97,8 +79,8 @@ export async function deliverSubmission({ Submission }, id) {
   const filter = { _id: id, __v: sending.__v, delivery: 'sending' };
   let result;
   try {
-    const slackUserId = sending.slackTs ? undefined : await findSlackUser(sending.memberId);
-    result = await postSlack(dailySubmissionText(sending, slackUserId), {
+    const member = sending.slackTs ? null : await User.findById(sending.memberId).select('+slackUserId').lean();
+    result = await postSlack(dailySubmissionText(sending, member?.slackUserId), {
       channel: sending.slackChannel, thread: sending.slackTs,
     });
   } catch (error) {

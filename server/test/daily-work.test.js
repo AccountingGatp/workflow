@@ -39,7 +39,6 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
   });
   const realFetch = globalThis.fetch;
   const calls = [];
-  const lookups = [];
   let server;
   try {
     await mongoose.connect(db.getUri('workflow_test'));
@@ -47,10 +46,6 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
     process.env.DAILY_WORK_SLACK_CHANNEL = 'mock-channel';
     globalThis.fetch = (url, options) => {
-      if (String(url).startsWith('https://slack.com/api/users.lookupByEmail?')) {
-        lookups.push(new URL(url).searchParams.get('email'));
-        return Promise.resolve(Response.json({ ok: true, user: { id: 'U123TEST' } }));
-      }
       if (String(url) !== 'https://slack.com/api/chat.postMessage') return realFetch(url, options);
       const payload = JSON.parse(options.body);
       calls.push(payload);
@@ -60,7 +55,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     server = app.listen(0);
     const base = `http://127.0.0.1:${server.address().port}/api/daily-work`;
     async function request(user, path, method = 'GET', body, status = 200) {
-      const response = await fetch((/^\/(tasks|clients|templates|users)\//.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
+      const response = await fetch((/^\/(tasks|clients|templates|users)(?:\/|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
         method, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(user._id) }, JWT_SECRET) },
         body: body && JSON.stringify(body),
       });
@@ -132,6 +127,18 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await request(lead, masterPath, 'DELETE', undefined, 403);
     await request(manager, masterPath, 'PATCH', { title: master.title, notes: 'Master description' });
 
+    const created = await request(owner, '/users', 'POST', {
+      name: 'New Slack member', email: 'new-slack@example.test', password: 'example-pass', slackUserId: 'u123new',
+    }, 201);
+    assert.equal(created.slackUserId, 'U123NEW');
+    await request(employee, `/users/${employee._id}`, 'PATCH', { slackUserId: 'U999OTHER' }, 403);
+    await request(owner, `/users/${employee._id}`, 'PATCH', { slackUserId: '<@U123TEST>' }, 400);
+    await request(owner, `/users/${employee._id}`, 'PATCH', { slackUserId: ' U123TEST ' });
+    assert.equal((await request(owner, '/users')).find((user) => user._id === String(employee._id)).slackUserId, 'U123TEST');
+    assert.equal((await request(lead, '/users')).find((user) => user._id === String(employee._id)).slackUserId, undefined);
+    const cleared = await request(owner, `/users/${created._id}`, 'PATCH', { slackUserId: '' });
+    assert.equal(cleared.slackUserId, null);
+
     const entry = { title: 'Review ledger', projectId: daily._id, workflowTaskId: String(source._id), hours: 2, status: 'incomplete', priority: 'high' };
     await request(other, `/day/${date}`, 'PUT', { entries: [entry] }, 403);
     const put = (user, day, entries, version) => request(user, `/day/${day}`, 'PUT', { entries, version });
@@ -147,7 +154,6 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(calls[0].thread_ts, undefined);
     assert.match(calls[0].text, /^<@U123TEST> Employee: employee/);
     assert.match(calls[0].text, /Note: Check &lt;this&gt; first/);
-    assert.deepEqual(lookups, [employee.email]);
     await send(employee, date, posted.version);
     assert.equal(calls.length, 1);
     await request(employee, `/day/${date}`, 'PUT', { entries: [{ ...original.entries[0], hours: 2.25 }], version: posted.version }, 400);
@@ -162,7 +168,6 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.match(calls[1].text, /Task 1: Review ledger \(1\.75h\) - Priority: High/);
     await request(employee, `/day/${date}`, 'PUT', { entries: [{ ...updated.entries[0], hours: 1.8 }], version: updated.version }, 400);
     assert.match(calls[1].text, /^Employee: employee/);
-    assert.deepEqual(lookups, [employee.email]);
     assert.equal((await request(employee, `/tasks/${source._id}`)).checklist[0].done, true);
     const unchanged = await request(employee, `/day/${date}`, 'PUT', { entries: updated.entries, version: updated.version });
     assert.equal(unchanged.version, updated.version);
