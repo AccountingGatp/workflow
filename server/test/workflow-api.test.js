@@ -37,6 +37,15 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
       const data=await response.json();
       assert.equal(response.status,status,JSON.stringify(data));return data;
     }
+    const clientPath = `/clients/${client._id}`;
+    await request(outsider, clientPath, 'GET', undefined, 403);
+    const grant = await request(admin, `${clientPath}/permissions`, 'POST', { userId: String(outsider._id) }, 201);
+    const permissionList = (await request(admin, clientPath)).permissions;
+    assert.ok(permissionList.some((permission) => permission.user._id === String(outsider._id) && permission.user.role === 'admin'));
+    assert.equal((await request(outsider, clientPath)).canManage, false);
+    await request(admin, `${clientPath}/permissions/${grant._id}`, 'DELETE');
+    await request(outsider, clientPath, 'GET', undefined, 403);
+
     const draft={ title:'API fixture',client:String(client._id),project:String(project._id),assignees:[String(sathya._id)],dueDate:new Date().toISOString(),checklist:['Verify'] };
     await request(sathya,'/tasks','POST',draft,403);
     await request(outsider,'/tasks','POST',draft,403);
