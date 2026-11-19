@@ -278,7 +278,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(revised.entries[0].hours, 0.75);
 
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
-    assert.equal(leadCatalog.filter((task) => task.review).length, 2);
+    assert.equal(leadCatalog.filter((task) => task.review).length, 3);
     await log(owner, '2026-10-05', [time('Review', 1)], 403);
     await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.41, String(legacyProject))], 400);
     await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.4, String(legacyProject))]);
