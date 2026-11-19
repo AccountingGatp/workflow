@@ -466,6 +466,20 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const moved = await request(owner, `${settingsPath}/${customReminder._id}`, 'PUT', { ...customReminder, time: '19:00' });
     assert.deepEqual(moved.reminders.find((row) => row._id === customReminder._id).delivery,
       { state: 'sent', startedAt: attempt.toISOString() });
+
+    const customPath = `${settingsPath}/${customReminder._id}`;
+    const defaultPath = `${settingsPath}/${defaultReminder._id}`;
+    await request(lead, customPath, 'DELETE', undefined, 403);
+    assert.ok(!(await request(owner, customPath, 'DELETE')).reminders.some((row) => row._id === customReminder._id));
+    await request(owner, customPath, 'PUT', customReminder, 404);
+    assert.ok(await reportModels.Report.exists({ _id: deliveryKey }));
+    await reportModels.StatusReminder.deleteOne({ _id: defaultReminder._id });
+    assert.deepEqual((await request(owner, defaultPath, 'DELETE')).reminders, []);
+    await request(owner, defaultPath, 'PUT', defaultReminder, 409);
+    assert.deepEqual((await request(owner, settingsPath)).reminders, []);
+    await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '18:35'));
+    await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '19:00'));
+    assert.equal(calls.length, callsBeforeSchedule + 7);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

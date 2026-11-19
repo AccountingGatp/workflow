@@ -26,8 +26,10 @@ export function parseStatusReminder(value) {
 }
 
 export async function statusReminders(models) {
-  const reminders = await models.StatusReminder.find().select('name time enabled notifyChannel message').lean();
-  if (!reminders.some(({ _id }) => _id === defaultStatusReminder._id)) reminders.push(defaultStatusReminder);
+  const records = await models.StatusReminder.find({ $or: [{ deletedAt: null }, { _id: defaultStatusReminder._id }] })
+    .select('name time enabled notifyChannel message deletedAt').lean();
+  const reminders = records.filter(({ deletedAt }) => !deletedAt);
+  if (!records.some(({ _id }) => _id === defaultStatusReminder._id)) reminders.push(defaultStatusReminder);
   return reminders.sort((a, b) => a.time.localeCompare(b.time) || a.name.localeCompare(b.name));
 }
 

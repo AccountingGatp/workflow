@@ -59,7 +59,18 @@ r.put('/settings/reminders/:id', route(async (req, res, models) => {
   const isDefault = req.params.id === defaultStatusReminder._id;
   const _id = isDefault ? defaultStatusReminder._id : idValue(req.params.id);
   const reminder = parseStatusReminder(req.body);
-  const result = await models.StatusReminder.updateOne({ _id }, { $set: reminder }, { upsert: isDefault, runValidators: true });
+  const result = await models.StatusReminder.updateOne({ _id, deletedAt: null }, { $set: reminder }, { upsert: isDefault, runValidators: true });
+  if (!result.matchedCount && !result.upsertedCount) throw new HttpError(404, 'Reminder not found');
+  res.json(await reminderSettings(models));
+}, true));
+
+r.delete('/settings/reminders/:id', route(async (req, res, models) => {
+  const isDefault = req.params.id === defaultStatusReminder._id;
+  const _id = isDefault ? defaultStatusReminder._id : idValue(req.params.id);
+  // Keep a record for the built-in reminder so the fallback cannot recreate it.
+  const update = { $set: { deletedAt: new Date() } };
+  if (isDefault) update.$setOnInsert = defaultStatusReminder;
+  const result = await models.StatusReminder.updateOne({ _id }, update, { upsert: isDefault, runValidators: true });
   if (!result.matchedCount && !result.upsertedCount) throw new HttpError(404, 'Reminder not found');
   res.json(await reminderSettings(models));
 }, true));
