@@ -26,15 +26,16 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const tl = await person('TL','admin','tl@test.example');
     const outsider = await person('Other TL','admin','other@test.example');
     const krupali = await person('Krupali','admin','krupali.s@gatpsolutions.com');
+    const teammate = await person('New teammate','employee','new@test.example');
     const sathya = await person('Sathya Priya','employee','sathya.p@gatpsolutions.com');
     const client = await Client.create({ name:'Republic Supply Company LLC' });
     const project = await ClientProject.create({ client:client._id,name:'Bluntd' });
     const team = await Team.create({ name:'Bluntd team' });
-    await TeamMembership.create([{ user:tl._id,team:team._id,teamRole:'lead' },{ user:sathya._id,team:team._id }]);
+    await TeamMembership.create([{ user:tl._id,team:team._id,teamRole:'lead' },{ user:sathya._id,team:team._id },{ user:teammate._id,team:team._id }]);
     await ClientAssignment.create([{ client:client._id,team:team._id }, { client:client._id,admin:manager._id }]);
     async function request(user,path,method='GET',body,status=200) {
       const response = await fetch(base+path,{ method,headers:{ 'content-type':'application/json',authorization:'Bearer '+jwt.sign({sub:String(user._id)},JWT_SECRET) },body:body && JSON.stringify(body) });
-      const data=await response.json();
+      const data=await response.json().catch(() => null);
       assert.equal(response.status,status,JSON.stringify(data));return data;
     }
     const clientPath = `/clients/${client._id}`;
@@ -59,8 +60,18 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const approved=await request(tl,`/tasks/${task._id}`,'PATCH',{confirmCompletion:true});
     assert.equal(approved.status,'done');assert.equal(approved.reviewedBy,String(tl._id));
     await request(sathya,`/tasks/${task._id}`,'PATCH',{checklistItem:{id:task.checklist[0]._id,done:false}},400);
-    await request(tl,`/tasks/${task._id}`,'PATCH',{title:'Blocked TL edit'},403);
-    const reopened=await request(manager,`/tasks/${task._id}`,'PATCH',{title:'Updated by manager'});
+    const clientPath = `/clients/${client._id}`;
+    const projectPath = `${clientPath}/projects/${project._id}`;
+    const people = await request(tl, `${clientPath}/assignees`);
+    assert.ok(people.some((person) => person._id === String(teammate._id)));
+    assert.ok(!people.some((person) => person._id === String(outsider._id)));
+    await request(outsider, projectPath, 'PATCH', { description: 'Outside project' }, 403);
+    await request(tl, projectPath, 'PATCH', { description: 'Updated by the team lead' });
+    await request(tl, projectPath, 'DELETE', undefined, 404);
+    await request(tl,`/tasks/${task._id}`,'PATCH',{assignees:[String(outsider._id)]},400);
+    const reopened=await request(tl,`/tasks/${task._id}`,'PATCH',{title:'Updated by TL',assignees:[String(teammate._id)]});
+    assert.deepEqual(reopened.assignees,[String(teammate._id)]);
+    assert.equal((await request(teammate, clientPath))._id, String(client._id));
     assert.equal(reopened.status,'in_progress');assert.equal(reopened.reviewedBy,undefined);
     await request(tl,`/tasks/${task._id}`,'DELETE',undefined,403);
     await request(admin,`/tasks/${task._id}`,'DELETE');
@@ -72,7 +83,8 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const daily=await request(tl,'/templates','POST',{...draft,frequency:'daily'},201);
     const moved=await Task.findOne({template:daily.template._id});
     const originalDate=moved.dueDate;
-    await request(tl,`/templates/${daily.template._id}`,'PATCH',{active:false},403);
+    await request(tl,`/templates/${daily.template._id}`,'PATCH',{active:false});
+    assert.ok((await request(tl, '/templates')).find((item) => item._id === daily.template._id && item.canEdit));
     await request(manager,`/tasks/${moved._id}`,'PATCH',{dueDate:new Date(new Date(originalDate).getTime()+60*60000).toISOString()});
     await generateRecurringTasks(daily.template._id);
     assert.equal(await Task.countDocuments({template:daily.template._id,scheduledDate:originalDate}),1);

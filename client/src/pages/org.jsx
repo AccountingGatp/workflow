@@ -278,9 +278,9 @@ export function Recurring() {
                     <td><Avatars people={t.assignees} /></td>
                     <td>{t.assignees.length > 0 && t.assignees.every(a => a.role !== 'employee') ? 'Not required' : t.reviewer?.name || 'Client TL'}</td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
-                    <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>{can.editTasks && <>
+                    <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>{t.canEdit && <>
                       <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>
-                      <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Cancel future occurrences</button>
+                      {can.editTasks && <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Cancel future occurrences</button>}
                       <button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button>
                     </>}</div></td>
                   </tr>

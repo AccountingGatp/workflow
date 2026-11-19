@@ -14,7 +14,7 @@ function cleanEmailMatches(list) {
   return out;
 }
 import {
-  audit, isSuper, canMaintainTasks, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
+  audit, isSuper, clientAssignees, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
   canGrantDirectly, activePermissionFilter, teamLeads,
 } from '../services/access.js';
 
@@ -82,9 +82,16 @@ r.get('/clients/:id', ah(async (req, res) => {
     teams: assignments.filter((a) => a.team).map((a) => ({ ...a.team, assignmentId: a._id, lead: leads[String(a.team._id)] || null })),
     admins: assignments.filter((a) => a.admin).map((a) => ({ ...a.admin, assignmentId: a._id })),
     permissions, requests, canManage: manage,
-    canEditMasterList: manage && canMaintainTasks(req.user),
+    canEditMasterList: manage,
     isSuper: isSuper(req.user),
   });
+}));
+
+r.get('/clients/:id/assignees', ah(async (req, res) => {
+  if (!(await canManageClient(req.user, req.params.id))) throw new HttpError(403, 'Only managing admins can assign work');
+  const client = await Client.findById(req.params.id).select('_id');
+  if (!client) throw new HttpError(404, 'Client not found');
+  res.json(await clientAssignees(req.user, client._id));
 }));
 
 r.patch('/clients/:id', ah(async (req, res) => {
