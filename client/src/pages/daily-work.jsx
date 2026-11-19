@@ -124,11 +124,11 @@ function EntryEditor({ date, data, onSaved }) {
               if (selected && !nameKey(projectLabel(selected)).includes(nameKey(value))) setProject('');
             }} /></span>
         </label>
-        <label className="field"><span>Project</span><select className="select" value={filtered.some((item) => item._id === project) ? project : ''}
+        <div className="field"><label htmlFor="daily-project">Project</label><select id="daily-project" className="select" value={filtered.some((item) => item._id === project) ? project : ''}
           onChange={(event) => setProject(event.target.value)}>
           <option value="">Select a project</option>
           {filtered.map((item) => <option key={item._id} value={item._id}>{projectLabel(item)}</option>)}
-        </select></label>
+        </select></div>
         <button type="button" className="btn btn-tonal daily-add-project" onClick={() => add(selected)}
           disabled={!selected || !projectIds.has(project) || busy || rows.length >= 40}><Plus size={16} /> Add task</button>
       </div>
@@ -163,7 +163,8 @@ function EntryEditor({ date, data, onSaved }) {
             <legend>{row.projectName}</legend>
             <div className="daily-task-heading">
               <div className="stack daily-task-name">
-                {hasPicker && <label className="field"><span>Project task</span><select className="select"
+                {hasPicker && <div className="field"><label htmlFor={`project-task-${row.key}`}>Project task</label>
+                  <select id={`project-task-${row.key}`} className="select"
                   data-entry-focus={!row.title || undefined}
                   value={row.workItemId || (catalog.some((item) => item._id === row.catalogId) ? row.catalogId : '')}
                   onChange={(event) => chooseTask(row, event.target.value)}>
@@ -171,7 +172,7 @@ function EntryEditor({ date, data, onSaved }) {
                   {shared.map((item) => <option key={item.id} value={item.id} disabled={!item.canLog}>{item.title}</option>)}
                   {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h {item.period}</option>)}
                 </select>{catalog.find((item) => item._id === row.catalogId)?.description &&
-                  <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</label>}
+                  <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</div>}
                 {linked ? <strong className="daily-task-linked">{row.title}</strong> : showTitle && <label className="field"><span>Task</span>
                   <input className="input" maxLength={230} required readOnly={!!row.workItemId || (!!row.catalogId && !!task)} value={row.title}
                     data-entry-focus={(!hasPicker && !row.title) || undefined}
@@ -191,12 +192,14 @@ function EntryEditor({ date, data, onSaved }) {
                   Up to {hours(remaining)} h · {task.period}{task.review ? ' · across projects' : ''}
                 </span>}
               </div>
-              <label className="field"><span>Priority</span><select className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
+              <div className="field"><label htmlFor={`priority-${row.key}`}>Priority</label>
+                <select id={`priority-${row.key}`} className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
                 <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-              </select></label>
-              <label className="field"><span>Status</span><select className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
+              </select></div>
+              <div className="field"><label htmlFor={`status-${row.key}`}>Status</label>
+                <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
                 <option value="incomplete">{row.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
-              </select></label>
+              </select></div>
             </div>
             {!!row.checklist?.length && <div className="stack daily-entry-checklist">
               {row.checklist.map((step) => <label key={step._id} className="row">
