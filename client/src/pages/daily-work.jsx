@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ClipboardList, Plus, Search, Send, StickyNote, Trash2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
+import { useDailyWorkReportQuery, useSaveDailyTaskStatusMutation } from '../daily-work-data.js';
 import { Badge, Empty, ErrorBox, PageHead, Skeleton } from '../ui.jsx';
 
 const root = '/daily-work';
@@ -444,43 +445,42 @@ function StatusBadge({ entry }) {
   return <Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{label}</Badge>;
 }
 
-function TaskStatusActions({ entry, onSaved }) {
+function TaskStatusActions({ entry }) {
   const { submission } = entry;
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState(entry.incompleteReason || '');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
+  const [saveStatus, { isLoading: busy }] = useSaveDailyTaskStatusMutation();
 
   async function save(status) {
-    setBusy(true);
     setError(null);
     try {
-      await api(`${root}/day/${submission.date}/members/${submission.memberId}/entries/${entry._id}/status`, {
-        method: 'PATCH', body: { status, reason, version: submission.version },
-      });
+      await saveStatus({
+        date: submission.date, memberId: submission.memberId, entryId: entry._id,
+        status, reason, version: submission.version,
+      }).unwrap();
       setShowReason(false);
       toast('Task status saved.');
-      onSaved();
     } catch (error) {
       setError(error);
-    } finally { setBusy(false); }
+    }
   }
 
-  return <div className="stack daily-status-actions">
+  return <div className="stack daily-status-actions" aria-busy={busy}>
     {showReason
       ? <form className="stack daily-status-reason" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
         <label className="field"><span>Why is this incomplete?</span>
           <textarea className="input" autoFocus required rows={2} maxLength={500} disabled={busy}
             value={reason} onChange={(event) => setReason(event.target.value)} /></label>
         <div className="row-wrap">
-          <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !reason.trim()}>Save status</button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !reason.trim()}>{busy ? 'Saving…' : 'Save status'}</button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setShowReason(false); setError(null); }}>Cancel</button>
         </div>
       </form>
       : <div className="row-wrap">
         {entry.status !== 'complete' &&
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>{busy ? 'Saving…' : 'Mark completed'}</button>}
         <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
           setReason(entry.incompleteReason || '');
           setShowReason(true);
@@ -490,7 +490,7 @@ function TaskStatusActions({ entry, onSaved }) {
   </div>;
 }
 
-function TaskStatusTable({ entries, reload }) {
+function TaskStatusTable({ entries }) {
   return <div className="card table-wrap" role="region" aria-label="Daily task completion" tabIndex={0}>
     <table className="table daily-status-table">
       <thead><tr><th scope="col">Task</th><th scope="col">Project</th><th scope="col">Member</th><th scope="col">Date</th>
@@ -507,7 +507,7 @@ function TaskStatusTable({ entries, reload }) {
           <td><time dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></td>
           <td className="mono">{hours(entry.hours)}</td><td className="daily-status">{entry.priority}</td>
           <td><StatusBadge entry={entry} /></td>
-          <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} onSaved={reload} />}</td>
+          <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} />}</td>
         </tr>;
       })}</tbody>
     </table>
@@ -528,8 +528,13 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
   const [sending, setSending] = useState(false);
   const [slackError, setSlackError] = useState(null);
   const toast = useToast();
-  const query = new URLSearchParams({ from, to, memberId, projectId, status: tab === 'status' ? status : '' });
-  const { data, error, loading, reload } = useApi(`${root}/reports?${query}`);
+  const query = new URLSearchParams({ from, to, memberId, projectId, status: tab === 'status' ? status : '' }).toString();
+  const report = useDailyWorkReportQuery(query, { refetchOnMountOrArgChange: true });
+  const { error } = report;
+  const allowed = ![401, 403].includes(error?.status);
+  const data = allowed ? report.currentData : undefined;
+  const filterOptions = allowed ? report.data : undefined;
+  const loading = report.isFetching && !data;
   const entries = (data?.submissions || []).flatMap((submission) => submission.entries.map((entry) => ({ ...entry, submission })));
   const projects = new Map();
   for (const entry of entries) {
@@ -553,10 +558,10 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
         <DateField label="From date" value={from} onChange={(date) => { setFrom(date); if (date > to) setTo(date); }} />
         <DateField label="To date" value={to} onChange={setTo} />
         <label className="field"><span>Member</span><select className="select" value={memberId} onChange={(event) => setMember(event.target.value)}>
-          <option value="">All available members</option>{data?.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+          <option value="">All available members</option>{filterOptions?.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
         </select></label>
         <label className="field"><span>Project</span><select className="select" value={projectId} onChange={(event) => setProject(event.target.value)}>
-          <option value="">All projects</option>{data?.projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}
+          <option value="">All projects</option>{filterOptions?.projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}
         </select></label>
         {tab === 'status' && <label className="field"><span>Status</span><select className="select" aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="">All statuses</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option>
@@ -567,8 +572,8 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
       </div>
       <ErrorBox error={error || slackError} />
     </div>
-    {loading ? <Skeleton /> : !error && (!entries.length ? <div className="card"><Empty title="No daily work matches these filters" /></div> :
-      tab === 'status' ? <TaskStatusTable entries={entries} reload={reload} /> : tab === 'summary' ? <>
+    {loading ? <Skeleton /> : data && (!entries.length ? <div className="card"><Empty title="No daily work matches these filters" /></div> :
+      tab === 'status' ? <TaskStatusTable entries={entries} /> : tab === 'summary' ? <>
         <div className="daily-metrics">
           <div className="card daily-card"><span>Logged hours</span><strong>{totalHours(entries)}</strong></div>
           <div className="card daily-card"><span>Tasks</span><strong>{entries.length}</strong></div>
@@ -606,15 +611,12 @@ export default function DailyWork() {
   const [params, setParams] = useSearchParams();
   const [date, setDate] = useState(today);
   const { user } = useAuth();
-  const day = useApi(`${root}/day/${date}`);
   const tabs = [['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
   const requested = params.get('tab');
   const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
-  const choose = (id) => {
-    if (id === 'entry' && tab !== 'entry') day.reload();
-    setParams(id === 'entry' ? {} : { tab: id });
-  };
+  const day = useApi(tab === 'entry' ? `${root}/day/${date}` : null);
+  const choose = (id) => setParams(id === 'entry' ? {} : { tab: id });
   return <div className="daily-work-page" data-entry={tab === 'entry' ? '' : undefined}>
     <PageHead title="Daily Work">
       {['entry', 'missing'].includes(tab) && <DateField value={date} onChange={setDate} />}

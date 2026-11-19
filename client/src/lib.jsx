@@ -5,16 +5,20 @@ const TOKEN_KEY = 'ka.token';
 const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
 const setToken = (t) => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } };
 
-export async function api(path, { method = 'GET', body } = {}) {
+export async function api(path, { method = 'GET', body, signal } = {}) {
   const offline = () => Object.assign(new Error('Can’t reach the server. Make sure the API server is running, then try again.'), { offline: true });
   let res;
   try {
     res = await fetch(`/api${path}`, {
       method,
+      signal,
       headers: { 'content-type': 'application/json', ...(getToken() && { authorization: `Bearer ${getToken()}` }) },
       body: body ? JSON.stringify(body) : undefined,
     });
-  } catch { throw offline(); }
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw offline();
+  }
   const data = await res.json().catch(() => null);
   // The dev proxy answers 5xx with no JSON body when the API server is down
   if (!data && res.status >= 500) throw offline();
@@ -25,27 +29,34 @@ export async function api(path, { method = 'GET', body } = {}) {
 
 /** Tiny data hook: { data, error, loading, reload }. */
 export function useApi(path, deps = []) {
-  const [state, setState] = useState({ data: null, error: null, loading: true });
-  const requestId = useRef(0);
+  const [state, setState] = useState({ source: null, data: null, error: null, loading: true });
+  const request = useRef(null);
   const load = useCallback(() => {
-    const current = ++requestId.current;
+    request.current?.abort();
     if (!path) {
-      setState({ data: null, error: null, loading: false });
+      setState({ source: load, data: null, error: null, loading: false });
       return;
     }
-    setState(s => ({ ...s, loading: true }));
-    api(path).then(data => {
-      if (requestId.current === current) setState({ data, error: null, loading: false });
+    const controller = new AbortController();
+    request.current = controller;
+    setState((previous) => {
+      const data = previous.source === load ? previous.data : null;
+      return { source: load, data, error: null, loading: data === null };
+    });
+    api(path, { signal: controller.signal }).then(data => {
+      if (!controller.signal.aborted) setState({ source: load, data, error: null, loading: false });
     }).catch(error => {
-      if (requestId.current === current) setState({ data: null, error, loading: false });
+      if (!controller.signal.aborted) setState({ source: load, data: null, error, loading: false });
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, ...deps]);
   useEffect(() => {
     load();
-    return () => { requestId.current++; };
+    return () => { request.current?.abort(); };
   }, [load]);
-  return { ...state, reload: load };
+  const { source, data, error, loading } = state;
+  if (source !== load) return { data: null, error: null, loading: !!path, reload: load };
+  return { data, error, loading, reload: load };
 }
 
 /** Server-paginated task list; only one page is kept in the browser. */
