@@ -106,7 +106,7 @@ export async function listClientWork(projects, user, date, session, catalog = []
       String(entry._id) === String(item.scheduledTemplate));
     const override = catalog.find((entry) => entry.projectId === projectId && taskName(entry.title) === taskName(item.title));
     const templatePeriod = template?.frequency === 'semimonthly' ? 'monthly' : template?.frequency;
-    const period = override?.period || settings.period || templatePeriod;
+    const period = override?.period || settings.period || templatePeriod || (settings.hours != null ? 'daily' : undefined);
     const range = date && periodRange(date, period);
     const occurrences = tasks.filter((task) => String(task.masterItem) === String(item._id) ||
       (template && String(task.template) === String(template._id)));

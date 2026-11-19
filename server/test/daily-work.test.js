@@ -118,7 +118,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.match(calls[0].text, /Note: Check &lt;this&gt; first/);
     await send(employee, date, posted.version);
     assert.equal(calls.length, 1);
-    const changed = await put(employee, date, [{ ...original.entries[0], note: '', hours: 2.25, status: 'complete',
+    await request(employee, `/day/${date}`, 'PUT', { entries: [{ ...original.entries[0], hours: 2.25 }], version: posted.version }, 400);
+    const changed = await put(employee, date, [{ ...original.entries[0], note: '', hours: 1.75, status: 'complete',
       checklistChanges: [{ id: String(source.checklist[0]._id), done: true }] }], posted.version);
     assert.equal(changed.entries[0].note, '');
     assert.equal(changed.entries[0].workflowStatus, 'pending_review');
@@ -126,7 +127,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const updated = await send(employee, date, changed.version);
     assert.equal(calls[1].thread_ts, '1.000001');
     assert.equal(calls[1].reply_broadcast, false);
-    assert.match(calls[1].text, /2.25 h/);
+    assert.match(calls[1].text, /1\.75 h/);
+    await request(employee, `/day/${date}`, 'PUT', { entries: [{ ...updated.entries[0], hours: 1.8 }], version: updated.version }, 400);
     assert.match(calls[1].text, /awaiting TL review/);
     assert.equal((await request(employee, `/tasks/${source._id}`)).checklist[0].done, true);
     const unchanged = await request(employee, `/day/${date}`, 'PUT', { entries: updated.entries, version: updated.version });
@@ -143,7 +145,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const returned = await setStatus(lead, 'incomplete', updated.version, 'Awaiting client approval');
     assert.equal(returned.entry.incompleteReason, 'Awaiting client approval');
     assert.equal(returned.entry.workflowStatus, 'in_progress');
-    assert.equal(returned.entry.hours, 2.25);
+    assert.equal(returned.entry.hours, 1.75);
     await setStatus(lead, 'complete', returned.version, undefined, 403);
     await setStatus(employee, 'complete', updated.version, undefined, 409);
     const resubmitted = await setStatus(employee, 'complete', returned.version);
@@ -233,6 +235,11 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
       title: 'Payroll', notes: 'Reconcile payroll before posting', weeklyHours: '4 hours', frequency: 'Weekly-Friday' });
     const payrollSchedule = await TaskTemplate.create({ title: payroll.title, client: client._id, project: project._id,
       masterItem: payroll._id, assignees: [employee._id], frequency: 'weekly', weekday: 5, startsOn: new Date('2026-10-01') });
+    const timedWithoutFrequency = await ProjectWorkItem.create({ client: client._id, project: project._id,
+      title: 'One-time register work', responsibleUser: employee._id, weeklyHours: '45 minutes' });
+    const assignedBudget = (await getDay(employee, '2026-10-15')).catalog.find((row) => row.workItemId === String(timedWithoutFrequency._id));
+    assert.equal(assignedBudget.hours, 0.75);
+    assert.equal(assignedBudget.period, 'daily');
     const rawSchedule = await ProjectWorkItem.create({ client: client._id, project: project._id,
       title: 'Closeout', responsibleUser: employee._id, frequency: 'Monthly', executionDay: '15th of Every Month' });
     const findsSuggestion = async (user, day, id) => (await getDay(user, day)).workItems.find((row) => row.id === String(id)).suggested;

@@ -155,6 +155,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
 
     const enteredTitle = textValue(input.title, 230);
     const hours = hoursValue(input.hours);
+    if (existing && hours > existing.hours) fail('Saved task hours can only be reduced');
     const { priority, status } = input;
     if (!['low', 'normal', 'high'].includes(priority) || !['incomplete', 'complete'].includes(status)) fail('Choose a valid status and priority');
     const projectCatalog = catalog.filter((item) => item.projectId === projectId);
