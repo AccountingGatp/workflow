@@ -178,6 +178,10 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     const projectWork = workItems.filter((item) => item.projectId === projectId);
     const master = projectWork.find((item) => item.id === (input.workItemId || existing?.workItemId)) ||
       projectWork.find((item) => taskName(item.title) === taskName(title));
+    if (!sameProject && !catalogTask && !master &&
+      (projectWork.length || projectCatalog.some((item) => !item.archived && !isReview(item.title)))) {
+      fail('Select a task from this project’s task list');
+    }
     const description = master?.description || textValue(input.description ?? existing?.description, 3000, false);
     const row = {
       ...(existing && { _id: existing._id }),

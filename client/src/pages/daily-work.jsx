@@ -138,6 +138,7 @@ function EntryEditor({ date, data }) {
       !masterItems.some((item) => nameKey(item.title) === nameKey(task.title)))
       .map((task) => ({ ...task, id: task._id, catalogId: task._id, canLog: true })),
   ].sort((a, b) => a.title.localeCompare(b.title));
+  const canAddCustom = !projectTasks.some((task) => !task.review);
   const visibleTasks = projectTasks.filter((item) => [item.title, item.description || '']
     .some((text) => nameKey(text).includes(nameKey(taskSearch))));
 
@@ -268,12 +269,12 @@ function EntryEditor({ date, data }) {
     </section>
     {selected && <section className="card daily-card daily-project-task-panel" aria-labelledby="daily-project-tasks">
       <h2 id="daily-project-tasks">{selected.name} tasks</h2>
-      <label className="field daily-task-search"><span>Find a task</span>
+      {projectTasks.length > 0 && <label className="field daily-task-search"><span>Find a task</span>
         <span className="daily-search"><Search size={17} aria-hidden="true" />
           <input className="input" type="search" placeholder="Search tasks and descriptions" value={taskSearch}
             onChange={(event) => setTaskSearch(event.target.value)} /></span>
-      </label>
-      {!visibleTasks.length ? <p className="small muted">{taskSearch.trim() ? 'No tasks match your search.' : 'No tasks are listed for this project.'}</p> :
+      </label>}
+      {projectTasks.length > 0 && (!visibleTasks.length ? <p className="small muted">No tasks match your search.</p> :
         <ul className="daily-project-tasks" aria-label="Project tasks">
           {visibleTasks.map((item) => {
             const limit = taskFor({ ...item, workItemId: item.id });
@@ -295,7 +296,12 @@ function EntryEditor({ date, data }) {
               </button>
             </li>;
           })}
-        </ul>}
+        </ul>)}
+      {canAddCustom && <div className="row-wrap daily-header daily-task-search">
+        <p className="small muted">This project has no predefined tasks.</p>
+        <button type="button" className="btn btn-tonal btn-sm" disabled={!!busy || rows.length >= 40}
+          onClick={() => add({ projectId: selected._id, title: '' })}><Plus size={15} /> Add custom task</button>
+      </div>}
     </section>}
     <section ref={editor} className="card daily-task-editor" aria-labelledby="daily-selected-heading">
       <div className="row-wrap daily-header daily-editor-bar">
