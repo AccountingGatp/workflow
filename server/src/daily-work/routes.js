@@ -12,6 +12,7 @@ import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientP
 import { clock, dateValue, shiftDate } from './dates.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
+import { defaultStatusReminder, parseStatusReminder, statusReminders } from './settings.js';
 
 const r = Router();
 const fail = (message) => { throw new HttpError(400, message); };
@@ -39,6 +40,25 @@ const route = (handler, superOnly = false) => ah(async (req, res) => {
   const [models, scope] = await Promise.all([dailyModels(), dailyScope(req.user)]);
   await handler(req, res, models, scope);
 });
+
+r.get('/settings/reminders', route(async (_req, res, models) => {
+  res.json({ reminders: await statusReminders(models), slackConfigured: slackConfigured() });
+}, true));
+
+r.post('/settings/reminders', route(async (req, res, models) => {
+  const reminder = parseStatusReminder(req.body);
+  await models.StatusReminder.create({ _id: String(new mongoose.Types.ObjectId()), ...reminder });
+  res.status(201).json({ reminders: await statusReminders(models), slackConfigured: slackConfigured() });
+}, true));
+
+r.put('/settings/reminders/:id', route(async (req, res, models) => {
+  const isDefault = req.params.id === defaultStatusReminder._id;
+  const _id = isDefault ? defaultStatusReminder._id : idValue(req.params.id);
+  const reminder = parseStatusReminder(req.body);
+  const result = await models.StatusReminder.updateOne({ _id }, { $set: reminder }, { upsert: isDefault, runValidators: true });
+  if (!result.matchedCount && !result.upsertedCount) throw new HttpError(404, 'Reminder not found');
+  res.json({ reminders: await statusReminders(models), slackConfigured: slackConfigured() });
+}, true));
 
 async function projectInScope(models, scope, id, managing = false, session) {
   const project = await models.Project.findById(idValue(id)).session(session || null);

@@ -81,6 +81,15 @@ submissionSchema.index({ delivery: 1, deliveryAfter: 1 });
 const reportSchema = new Schema({ _id: String, state: text, startedAt: Date, expiresAt: Date });
 reportSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+const statusReminderSchema = new Schema({
+  _id: String,
+  name: { ...text, maxlength: 80 },
+  time: text,
+  enabled: { type: Boolean, required: true },
+  notifyChannel: { type: Boolean, required: true },
+  message: { ...text, maxlength: 1000 },
+}, timestamps);
+
 const budgetRevisionSchema = new Schema({ _id: String, revision: Number });
 const catalogInitialization = new WeakMap();
 
@@ -112,6 +121,7 @@ export async function dailyModels() {
     Leave: model('DailyLeave', leaveSchema, 'leave'),
     Submission: model('DailySubmission', submissionSchema, 'daily_submissions'),
     Report: model('DailySlackReport', reportSchema, 'slack_report_runs'),
+    StatusReminder: model('DailyStatusReminder', statusReminderSchema, 'status_reminders'),
   };
   await Promise.all(Object.values(models).map((item) => item.init()));
   if (!catalogInitialization.has(db)) {

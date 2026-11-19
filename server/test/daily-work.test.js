@@ -429,6 +429,34 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(calls.at(-1).text, '<!channel> Team, please update the work status of your tasks on Workflow.');
     await runDailyWorkJobs(at(shiftDate(nextDate, 1), '18:35'));
     assert.equal(calls.length, callsBeforeSchedule + 5);
+
+    const settingsPath = '/settings/reminders';
+    const { reminders } = await request(owner, settingsPath);
+    const defaultReminder = reminders[0];
+    assert.equal(defaultReminder.time, '18:35');
+    await request(lead, settingsPath, 'GET', undefined, 403);
+    await request(employee, settingsPath, 'POST', defaultReminder, 403);
+    await request(manager, `${settingsPath}/${defaultReminder._id}`, 'PUT', defaultReminder, 403);
+    await request(owner, settingsPath, 'POST', { ...defaultReminder, time: '25:00' }, 400);
+    await request(owner, `${settingsPath}/${defaultReminder._id}`, 'PUT', { ...defaultReminder, enabled: false });
+    const savedReminder = await request(owner, settingsPath, 'POST', {
+      name: 'Close notes', time: '23:58', enabled: true, notifyChannel: false, message: 'Update A & B <notes>.',
+    }, 201);
+    const customReminder = savedReminder.reminders.find((row) => row.name === 'Close notes');
+    assert.equal(customReminder.time, '23:58');
+    const reminderDay = shiftDate(nextDate, 2);
+    await runDailyWorkJobs(at(reminderDay, '18:35'));
+    assert.equal(calls.length, callsBeforeSchedule + 5);
+    await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '00:00'));
+    await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '00:05'));
+    assert.equal(calls.length, callsBeforeSchedule + 6);
+    assert.equal(calls.at(-1).text, 'Update A &amp; B &lt;notes&gt;.');
+    await request(owner, `${settingsPath}/${customReminder._id}`, 'PUT', {
+      ...customReminder, time: '18:40', notifyChannel: true, message: 'Update your close notes.',
+    });
+    await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '18:40'));
+    assert.equal(calls.length, callsBeforeSchedule + 7);
+    assert.equal(calls.at(-1).text, '<!channel> Update your close notes.');
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

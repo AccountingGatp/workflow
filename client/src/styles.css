@@ -445,3 +445,10 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-status-actions, .daily-status-reason { gap: 8px; }
 .daily-status-actions { min-width: 155px; }
 .daily-status-reason textarea { width: 100%; }
+
+.reminder-section-head, .reminder-preview-head { justify-content: space-between; }
+.reminder-card h3, .reminder-message { overflow-wrap: anywhere; }
+.reminder-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.reminder-preview { padding: 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.reminder-message { white-space: pre-wrap; }
+.reminder-mention { margin-right: 6px; padding: 1px 4px; border-radius: var(--r-sm); background: var(--primary-soft); color: var(--primary); font-weight: 600; }

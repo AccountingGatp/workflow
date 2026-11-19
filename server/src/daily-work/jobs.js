@@ -2,8 +2,8 @@ import { dailyModels } from './models.js';
 import { projectWorkflowStatuses } from './workflow-links.js';
 import { roster } from './access.js';
 import { clock, shiftDate } from './dates.js';
-import { dailySubmissionText, postSlack, retrySlack, slackConfigured, slackPerson } from './slack.js';
-import { validTime } from './settings.js';
+import { dailySubmissionText, postSlack, retrySlack, slackConfigured, slackPerson, statusReminderText } from './slack.js';
+import { statusReminders, validTime } from './settings.js';
 
 const activeDate = (member, date) => member.enrolled && (!member.reportFrom || member.reportFrom <= date);
 const minutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
@@ -108,10 +108,14 @@ export async function runDailyWorkJobs(now = new Date()) {
   const models = await dailyModels();
   await retrySlack(models);
   const { date, time, weekday } = clock(now);
-  if (withinWindow(time, '18:35')) {
-    await sendScheduled(models, `status-reminder:${date}`, now,
-      () => '<!channel> Team, please update the work status of your tasks on Workflow.');
-  }
+  const configured = await statusReminders(models);
+  await Promise.all(configured.filter((reminder) => {
+    const elapsed = (minutes(time) - minutes(reminder.time) + 1440) % 1440;
+    return reminder.enabled && elapsed < 25;
+  }).map((reminder) => {
+    const reminderDate = time < reminder.time ? shiftDate(date, -1) : date;
+    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, () => statusReminderText(reminder));
+  }));
   const allReports = process.env.DAILY_WORK_SLACK_REPORTS === 'true';
   if (!allReports && process.env.DAILY_WORK_SHIFT_REPORTS !== 'true') return;
   const yesterday = shiftDate(date, -1);
