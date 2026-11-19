@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import app, { handleErrors } from '../src/app.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
-import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, ProjectWorkItem, Task } from '../src/models/index.js';
+import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, ProjectWorkItem, Task, TaskTemplate } from '../src/models/index.js';
 import { dailyModels } from '../src/daily-work/models.js';
 import { clock, shiftDate } from '../src/daily-work/dates.js';
 import { runDailyWorkJobs } from '../src/daily-work/jobs.js';
@@ -77,12 +77,12 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await request(lead, `/projects/${daily._id}/members/${employee._id}`, 'PUT', { hours: 2 }, 403);
     await request(lead, '/projects/import', 'POST', { text: 'Blocked' }, 403);
     await request(owner, `/projects/${daily._id}/catalog`, 'POST', {
-      items: [{ title: 'Book payroll', hours: 1.5 }, { title: 'Check vendor statements', hours: 0.5 }],
+      items: [{ title: 'Book payroll', hours: 1.5 }, { title: 'Check vendor statements', hours: 0.5 }, { title: 'Review ledger', hours: 3 }],
     }, 201);
     await request(owner, `/projects/${daily._id}/members/${employee._id}`, 'PUT', { hours: 2 });
     await request(owner, `/members/${employee._id}`, 'PUT', { enrolled: true, shift: 'afternoon', reportFrom: date });
     const day = await request(employee, `/day/${date}`);
-    assert.deepEqual(day.suggestions.map((row) => row.id), [String(source._id)]);
+    assert.equal(day.workItems.find((row) => row.id === String(master._id)).occurrence.id, String(source._id));
     assert.equal(day.catalog.find((row) => row.title === 'Book payroll').hours, 1.5);
     assert.equal(day.assignments[0].hours, 2);
     assert.deepEqual((await request(other, `/day/${date}`)).projects, []);
@@ -180,6 +180,23 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(linkedTask.status, 'pending_review');
     await log(employee, '2026-10-09', linked.entries, 200, linked.version);
     assert.equal(await Task.countDocuments({ masterItem: shared._id }), 1);
+
+    const payroll = await ProjectWorkItem.create({ client: client._id, project: project._id,
+      title: 'Payroll', notes: 'Reconcile payroll before posting', weeklyHours: '4 hours', frequency: 'Weekly-Friday' });
+    const payrollSchedule = await TaskTemplate.create({ title: payroll.title, client: client._id, project: project._id,
+      masterItem: payroll._id, assignees: [employee._id], frequency: 'weekly', weekday: 5, startsOn: new Date('2026-10-01') });
+    const payrollEntry = { ...time(payroll.title, 2), status: 'incomplete', workItemId: String(payroll._id) };
+    const early = await log(employee, '2026-10-19', [payrollEntry]);
+    const next = await getDay(employee, '2026-10-20');
+    const payrollBudget = next.catalog.find((row) => row.workItemId === String(payroll._id));
+    assert.equal(payrollBudget.remainingHours, 2);
+    assert.equal(payrollBudget.period, 'weekly');
+    assert.equal(next.workItems.find((row) => row.id === String(payroll._id)).description, payroll.notes);
+    await log(employee, '2026-10-20', [{ ...payrollEntry, hours: 2.01 }], 400);
+    const later = await log(employee, '2026-10-20', [payrollEntry]);
+    assert.equal(later.entries[0].workflowTaskId, early.entries[0].workflowTaskId);
+    assert.equal(await Task.countDocuments({ template: payrollSchedule._id }), 1);
+    assert.equal((await getDay(employee, '2026-10-26')).catalog.find((row) => row.workItemId === String(payroll._id)).remainingHours, 4);
 
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
     assert.equal(leadCatalog.filter((task) => task.review).length, 2);

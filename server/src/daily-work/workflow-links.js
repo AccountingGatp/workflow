@@ -2,8 +2,10 @@ import { Types } from 'mongoose';
 import { Client, ClientProject, ProjectWorkItem, Task, TaskTemplate, User } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 import { canSeeClient } from '../services/access.js';
+import { matches, materializeOccurrence } from '../services/recurrence.js';
+import { shiftDate } from './dates.js';
 import { applyTaskTransition } from '../services/task-review.js';
-import { catalogCollation, ensureReviewCatalog, isReview, taskName } from './budgets.js';
+import { catalogCollation, ensureReviewCatalog, isReview, periodBounds, periodLimits, taskName } from './budgets.js';
 
 export async function syncClientProjects(models, clientIds) {
   const clients = await Client.find({ ...(clientIds === null ? {} : { _id: { $in: clientIds } }), status: { $ne: 'inactive' } })
@@ -42,23 +44,88 @@ export async function syncClientProjects(models, clientIds) {
   return clientNames;
 }
 
-function estimatedHours(value) {
-  const parsed = value?.trim().match(/^(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)?(?:\s+(?:daily|weekly|monthly))?$/i);
-  if (!parsed) return undefined;
+function settingsFor(item) {
+  const raw = item.weeklyHours?.trim() || '';
+  const parsed = raw.match(/^(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m)?(?:\s+(daily|weekly|monthly))?$/i);
+  const frequency = item.frequency?.trim().toLowerCase() || '';
+  const period = parsed?.[3]?.toLowerCase() || frequency.match(/^(daily|weekly|monthly)\b/)?.[1];
+  if (!parsed) return { period };
   const hours = Number(parsed[1]) / (/^m/i.test(parsed[2] || '') ? 60 : 1);
-  return hours <= 24 ? Math.round(hours * 100) / 100 : undefined;
+  return { period, hours: hours <= (periodLimits[period] || 24) ? Math.round(hours * 100) / 100 : undefined };
 }
 
-export async function listClientWork(projects, user) {
+const dayStartFor = (date) => new Date(`${date}T00:00:00+05:30`);
+const periodRange = (date, period) => {
+  const [start, end] = periodBounds(date, period || 'daily');
+  return { $gte: dayStartFor(start), $lt: dayStartFor(shiftDate(end, 1)) };
+};
+const occurrenceMatches = (task, range, memberId) =>
+  task.dueDate >= range.$gte && task.dueDate < range.$lt && task.assignees.some((id) => String(id) === memberId);
+const taskDetail = (task) => task && ({
+  id: String(task._id), priority: task.priority, checklist: task.checklist, status: task.status,
+});
+
+export async function listClientWork(projects, user, date, session, catalog = []) {
   const ids = projects.map((project) => project.workflowProjectId).filter(Boolean);
   const items = await ProjectWorkItem.find({ project: { $in: ids }, active: { $ne: false } })
-    .select('project client title responsible responsibleUser weeklyHours frequency').sort('title').lean();
+    .select('project client title responsible responsibleUser weeklyHours frequency notes scheduledTemplate').sort('title').session(session || null).lean();
+  const templates = items.length ? await TaskTemplate.find({ active: true, $or: [
+    { masterItem: { $in: items.map((item) => item._id) } },
+    { _id: { $in: items.map((item) => item.scheduledTemplate).filter(Boolean) } },
+  ] }).select('masterItem frequency').session(session || null).lean() : [];
+  const periodDates = date ? Object.keys(periodLimits).map((period) => periodRange(date, period)) : [];
+  const tasks = date && items.length ? await Task.find({
+    project: { $in: ids }, assignees: user._id, deletedAt: null, status: { $ne: 'cancelled' },
+    dueDate: { $gte: new Date(Math.min(...periodDates.map((range) => +range.$gte))), $lt: new Date(Math.max(...periodDates.map((range) => +range.$lt))) },
+    $or: [{ masterItem: { $in: items.map((item) => item._id) } },
+      { template: { $in: items.map((item) => item.scheduledTemplate).filter(Boolean) } }],
+  }).select('assignees dueDate masterItem template status checklist priority').sort({ dueDate: 1 }).lean() : [];
   const projectFor = new Map(projects.filter((row) => row.workflowProjectId).map((row) => [row.workflowProjectId, String(row._id)]));
-  return items.filter((item) => !isReview(item.title)).map((item) => ({
-    id: String(item._id), projectId: projectFor.get(String(item.project)), title: item.title,
-    responsible: item.responsible, frequency: item.frequency, hours: estimatedHours(item.weeklyHours),
-    canLog: !item.responsibleUser || String(item.responsibleUser) === String(user._id),
-  }));
+  return items.filter((item) => !isReview(item.title)).map((item) => {
+    const settings = settingsFor(item);
+    const projectId = projectFor.get(String(item.project));
+    const template = templates.find((entry) => String(entry.masterItem) === String(item._id) ||
+      String(entry._id) === String(item.scheduledTemplate));
+    const override = catalog.find((entry) => entry.projectId === projectId && taskName(entry.title) === taskName(item.title));
+    const templatePeriod = template?.frequency === 'semimonthly' ? 'monthly' : template?.frequency;
+    const period = override?.period || settings.period || templatePeriod;
+    const range = date && periodRange(date, period);
+    const task = date && tasks.find((task) => (String(task.masterItem) === String(item._id) ||
+      (template && String(task.template) === String(template._id))) && occurrenceMatches(task, range, String(user._id)));
+    return {
+      id: String(item._id), projectId, title: item.title,
+      description: item.notes, responsible: item.responsible, frequency: item.frequency, ...settings, period,
+      occurrence: taskDetail(task), canLog: !item.responsibleUser || String(item.responsibleUser) === String(user._id) || !!task,
+    };
+  });
+}
+
+async function findMasterOccurrence(master, filter, date, overridePeriod, session, memberId) {
+  const template = await TaskTemplate.findOne({
+    $or: [{ masterItem: master._id }, ...(master.scheduledTemplate ? [{ _id: master.scheduledTemplate }] : [])],
+    active: true,
+  }).session(session);
+  const period = overridePeriod || settingsFor(master).period || (template?.frequency === 'semimonthly' ? 'monthly' : template?.frequency) || 'daily';
+  const range = periodRange(date, period);
+  const occurrence = { ...filter, dueDate: range,
+    $or: [{ masterItem: master._id }, ...(template ? [{ template: template._id }] : [])] };
+  const found = await Task.findOne(occurrence).sort({ dueDate: 1 }).session(session);
+  if (found || !template) return found;
+  if (!template.assignees.some((id) => String(id) === memberId)) {
+    throw new HttpError(403, 'This client task is assigned to another employee');
+  }
+  const [from, to] = periodBounds(date, period);
+  for (let day = from; day <= to; day = shiftDate(day, 1)) {
+    // Use the recurring scheduler's local-day rules and its regular 17:00 due time.
+    const due = new Date(`${day}T17:00:00`);
+    const starts = new Date(template.startsOn);
+    starts.setHours(0, 0, 0, 0);
+    if (due < starts || !matches(template, due)) continue;
+    await materializeOccurrence(template, due, session);
+    const task = await Task.findOne({ ...filter, template: template._id, $or: [{ scheduledDate: due }, { dueDate: due }] }).session(session);
+    if (task) return task;
+  }
+  return null;
 }
 
 function readableSource(task, row) {
@@ -78,7 +145,7 @@ export async function projectWorkflowStatuses(submissions) {
   }) }));
 }
 
-export async function saveWorkflowEntry({ user, models, project, row, existing, input, date, session, managed }) {
+export async function saveWorkflowEntry({ user, models, project, row, existing, input, date, session, managed, period }) {
   const taskId = input.workflowTaskId || existing?.workflowTaskId;
   let masterId = input.workItemId || existing?.workItemId;
   if (isReview(row.title)) return;
@@ -105,9 +172,6 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
     if (!Types.ObjectId.isValid(masterId) || !projectId) throw new HttpError(400, 'Choose a task from this project');
     master = await ProjectWorkItem.findOne({ _id: masterId, project: projectId, client: row.clientId }).session(session).lean();
     if (!master || (master.active === false && !taskId)) throw new HttpError(404, 'This task is no longer in the client’s list');
-    if (master.responsibleUser && String(master.responsibleUser) !== memberId && !taskId) {
-      throw new HttpError(403, 'This client task is assigned to another employee');
-    }
   }
   if (taskId) {
     if (!Types.ObjectId.isValid(taskId)) throw new HttpError(400, 'Choose a valid Workflow task');
@@ -125,21 +189,15 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
       throw new HttpError(404, 'This Workflow task is no longer available to you');
     }
   } else if (master) {
-    const [scheduled] = await TaskTemplate.find({ $or: [{ masterItem: master._id }, ...(master.scheduledTemplate ? [{ _id: master.scheduledTemplate }] : [])], active: true })
-      .select('_id').limit(1).session(session).lean();
-    const occurrence = scheduled
-      ? { dueDate: { $lt: dayEnd }, $and: [
-        { $or: [{ masterItem: master._id }, { template: scheduled._id }] },
-        { $or: [{ status: { $ne: 'done' } }, { dueDate: { $gte: dayStart } }] },
-      ] }
-      : { masterItem: master._id, dueDate: { $gte: dayStart, $lt: dayEnd } };
-    task = await Task.findOne({ ...filter, ...occurrence }).sort({ dueDate: -1 }).session(session);
-    if (!task && scheduled) throw new HttpError(400, 'No occurrence of this scheduled client task is available for this date');
+    task = await findMasterOccurrence(master, filter, date, period, session, memberId);
   } else if (!existing) {
     const sameDay = { ...filter, project: projectId || null, title: row.title, dueDate: { $gte: dayStart, $lt: dayEnd } };
     task = await Task.findOne(sameDay).collation(catalogCollation).session(session);
   }
   if (!task) {
+    if (master?.responsibleUser && String(master.responsibleUser) !== memberId) {
+      throw new HttpError(403, 'This client task is assigned to another employee');
+    }
     const lead = user.role === 'employee' && user.reviewLead
       ? await User.findOne({ _id: user.reviewLead, active: true, role: 'admin', deletedAt: null }).session(session).lean()
       : null;
@@ -147,7 +205,7 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
       client: row.clientId, project: projectId, masterItem: master?._id,
       title: master?.title || row.title, dueDate: new Date(`${date}T12:00:00+05:30`),
       assignees: [user._id], owner: user._id, createdBy: user._id, reviewer: lead && await canSeeClient(lead, row.clientId) ? lead._id : undefined,
-      priority: row.priority, status: 'in_progress',
+      priority: row.priority, sop: row.description || undefined, status: 'in_progress',
     });
   }
 

@@ -5,8 +5,8 @@ import { User } from '../models/index.js';
 import { isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
-import { dailyScope, includes, roster, validateProjectLink, workflowProjects, workflowSuggestions } from './access.js';
-import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets } from './budgets.js';
+import { dailyScope, includes, roster, validateProjectLink, workflowProjects } from './access.js';
+import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets, withClientBudgets } from './budgets.js';
 import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
 import { clock, dateValue, shiftDate } from './dates.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
@@ -63,17 +63,16 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
     models.Assignment.find({ memberId }).lean(),
     models.Member.findById(memberId).lean(),
   ]);
-  const [catalog, suggestions, reviewAllowed, workItems, live] = await Promise.all([
+  const [catalog, reviewAllowed, live] = await Promise.all([
     models.CatalogTask.find({ projectId: { $in: projects.map((project) => project._id) }, archived: false }).sort('title').lean(),
-    workflowSuggestions(scope, memberId, date, projects),
     canLogReview(req.user),
-    listClientWork(projects, req.user),
     projectWorkflowStatuses(submission ? [submission] : []),
   ]);
+  const workItems = await listClientWork(projects, req.user, date, undefined, catalog);
+  const budgetCatalog = withClientBudgets(catalog, workItems);
   res.json({
     date, projects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })), workItems,
-    catalog: await catalogAvailability(models, memberId, date, catalog.filter((task) => reviewAllowed || !isReview(task.title))),
-    suggestions: suggestions.filter((task) => !isReview(task.title)),
+    catalog: await catalogAvailability(models, memberId, date, budgetCatalog.filter((task) => reviewAllowed || !isReview(task.title))),
     assignments, memberName: req.user.name,
     submission: live[0] && publicSubmission(live[0], live[0].entries.filter((entry) => includes(scope.visible, entry.clientId))),
     slackEnabled: slackConfigured(),
@@ -114,6 +113,9 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   if (!previous && !entries.length) fail('Add at least one task');
   const projectIds = [...new Set([...entries, ...(previous?.entries || [])].map((entry) => idValue(entry.projectId)))];
   const catalog = await models.CatalogTask.find({ projectId: { $in: projectIds } }).session(session).lean();
+  const linkedProjects = await models.Project.find({ _id: { $in: projectIds }, ...scoped(scope.visible) }).session(session).lean();
+  const workItems = await listClientWork(linkedProjects, user, undefined, session);
+  const budgetCatalog = withClientBudgets(catalog, workItems);
   const saved = [];
   for (const input of entries) {
     const existing = input._id && previous?.entries.id(idValue(input._id));
@@ -135,7 +137,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     const { priority, status } = input;
     if (!['low', 'normal', 'high'].includes(priority) || !['incomplete', 'complete'].includes(status)) fail('Choose a valid status and priority');
     const projectCatalog = catalog.filter((item) => item.projectId === projectId);
-    const namedTask = projectCatalog.find((item) => taskName(item.title) === taskName(enteredTitle));
+    const namedTask = projectCatalog.find((item) => !item.archived && taskName(item.title) === taskName(enteredTitle));
     let catalogTask = namedTask;
     if (input.catalogId) {
       catalogTask = projectCatalog.find((item) => String(item._id) === idValue(input.catalogId));
@@ -151,17 +153,20 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
         throw new HttpError(403, 'Only Simran, Krupali, Jaini and Riddhi can log Review hours');
       }
     }
+    const master = workItems.find((item) => item.projectId === projectId &&
+      (item.id === (input.workItemId || existing?.workItemId) || taskName(item.title) === taskName(title)));
+    const description = master?.description || textValue(input.description ?? existing?.description, 3000, false);
     const row = {
       ...(existing && { _id: existing._id }),
       projectId, clientId, projectName: project?.name || existing.projectName,
-      title, hours, priority, status, catalogId: catalogTask && String(catalogTask._id),
+      title, description, hours, priority, status, catalogId: catalogTask && String(catalogTask._id),
     };
     const linkedProject = project || await projectInScope(models, scope, projectId, false, session);
     if (existing?.workflowTaskId && input.workflowTaskId && input.workflowTaskId !== existing.workflowTaskId) {
       fail('Remove the entry and add another to change its linked task');
     }
     await saveWorkflowEntry({ user, models, project: linkedProject, row, existing, input, date, session,
-      managed: includes(scope.managed, clientId) });
+      managed: includes(scope.managed, clientId), period: catalogTask?.period });
     saved.push(row);
   }
   // A full-day save cannot remove entries for a client whose access was revoked.
@@ -175,7 +180,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   if (!initial && JSON.stringify(saved.map(comparableEntry)) === JSON.stringify(previous.entries.map(comparableEntry))) {
     return { submission, changed: false };
   }
-  await validateBudgets(models, scope.own, date, catalog, saved, previous?.entries || [], session);
+  await validateBudgets(models, scope.own, date, budgetCatalog, saved, previous?.entries || [], session);
   submission.memberName = user.name;
   submission.entries = saved;
   submission.delivery = slackConfigured() && (initial || submission.slackTs) ? 'pending' : 'skipped';
@@ -186,7 +191,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
 }
 
 function comparableEntry(entry) {
-  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
+  return ['_id', 'projectId', 'catalogId', 'workflowTaskId', 'workflowStatus', 'workItemId', 'title', 'description', 'hours', 'priority', 'status'].map((field) => String(entry[field] ?? ''));
 }
 
 async function reportRows(req, models, scope) {

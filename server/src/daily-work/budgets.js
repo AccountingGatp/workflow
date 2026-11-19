@@ -60,7 +60,7 @@ function entryKeys(entry, matching) {
   if (isReview(entry.title)) return [reviewKey];
   const linked = entry.catalogId;
   const named = matching.get(`${entry.projectId}:${taskName(entry.title)}`);
-  return [...new Set([linked, named].filter(Boolean))];
+  return [...new Set([linked, entry.workItemId, named].filter(Boolean))];
 }
 
 function entryTotals(entries, names) {
@@ -95,6 +95,14 @@ async function periodUsage(models, memberId, date, catalog, session) {
     }
   }
   return budgets;
+}
+
+export function withClientBudgets(catalog, workItems) {
+  const configured = catalogNames(catalog.filter((task) => !task.archived));
+  return [...catalog, ...workItems.filter((item) => item.period && item.hours != null &&
+    !configured.has(`${item.projectId}:${taskName(item.title)}`)).map((item) => ({
+    _id: item.id, projectId: item.projectId, title: item.title, hours: item.hours, period: item.period, workItemId: item.id,
+  }))];
 }
 
 export async function catalogAvailability(models, memberId, date, catalog) {

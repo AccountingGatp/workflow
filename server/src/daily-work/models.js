@@ -54,6 +54,7 @@ const entry = new Schema({
   workflowStatus: String,
   workItemId: String,
   title: text,
+  description: String,
   hours: { ...hours, required: true },
   priority: { type: String, enum: ['low', 'normal', 'high'], required: true },
   status: { type: String, enum: ['incomplete', 'complete'], required: true },

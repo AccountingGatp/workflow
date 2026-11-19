@@ -30,6 +30,7 @@ function EntryEditor({ date, data, onSaved }) {
   const [rows, setRows] = useState(() => (data.submission?.entries || []).map((entry) => ({ ...entry, key: entry._id })));
   const [project, setProject] = useState('');
   const [search, setSearch] = useState('');
+  const [taskSearch, setTaskSearch] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const editor = useRef(null);
@@ -46,15 +47,11 @@ function EntryEditor({ date, data, onSaved }) {
   const projectLabel = (item) => item.clientName && item.clientName !== item.name ? `${item.clientName} / ${item.name}` : item.name;
   const filtered = data.projects.filter((item) => nameKey(projectLabel(item)).includes(nameKey(search)));
   const selected = data.projects.find((item) => item._id === project);
-  const projectIds = new Set(filtered.map((item) => item._id));
-  const visibleSuggestions = data.suggestions.filter((suggestion) =>
-    (selected ? suggestion.projectId === selected._id : projectIds.has(suggestion.projectId)) &&
-    !rows.some((row) => row.workflowTaskId === suggestion.id));
   const update = (key, patch) => setRows((old) => old.map((row) => row.key === key ? { ...row, ...patch } : row));
 
   function taskFor(row) {
     return data.catalog.find((task) => task.projectId === row.projectId &&
-      (task._id === row.catalogId || nameKey(task.title) === nameKey(row.title)));
+      (task._id === row.catalogId || (task.workItemId && task.workItemId === row.workItemId) || nameKey(task.title) === nameKey(row.title)));
   }
 
   function available(task, excludedKey) {
@@ -66,30 +63,34 @@ function EntryEditor({ date, data, onSaved }) {
     return Math.max(0, Math.round(task.remainingHours * 100) - used) / 100;
   }
 
-  function add(item, suggestion) {
-    if (!item || rows.length >= 40) return;
-    const assignment = data.assignments.find((row) => row.projectId === item._id);
-    const task = suggestion && taskFor({ projectId: item._id, title: suggestion.title });
+  const masterItems = data.workItems.filter((item) => item.projectId === project);
+  const projectTasks = [
+    ...masterItems,
+    ...data.catalog.filter((task) => task.projectId === project && !task.workItemId &&
+      !masterItems.some((item) => nameKey(item.title) === nameKey(task.title)))
+      .map((task) => ({ ...task, id: task._id, catalogId: task._id, canLog: true })),
+  ].sort((a, b) => a.title.localeCompare(b.title));
+  const visibleTasks = projectTasks.filter((item) => [item.title, item.description || '']
+    .some((text) => nameKey(text).includes(nameKey(taskSearch))));
+
+  function chooseProject(id) {
+    setProject(id);
+    setTaskSearch('');
+  }
+
+  function add(item) {
+    if (!selected || rows.length >= 40) return;
+    const assignment = data.assignments.find((row) => row.projectId === project);
+    const occurrence = item?.occurrence;
     const key = crypto.randomUUID();
     newEntry.current = key;
     setRows((old) => [...old, {
-      key, projectId: item._id, projectName: item.name, title: task?.title || suggestion?.title || '',
-      catalogId: task?._id, workflowTaskId: suggestion?.id, workItemId: suggestion?.workItemId,
-      checklist: suggestion?.checklist, workflowStatus: suggestion?.workflowStatus,
-      hours: task ? Math.min(assignment?.hours ?? task.hours, available(task), 24) : assignment?.hours ?? '',
-      priority: suggestion?.priority || 'normal', status: 'incomplete',
+      key, projectId: selected._id, projectName: selected.name, title: item?.title || '', description: item?.description || '',
+      catalogId: item?.catalogId, workItemId: item && !item.catalogId ? item.id : undefined,
+      checklist: occurrence?.checklist, workflowStatus: occurrence?.status,
+      hours: item ? '' : assignment?.hours ?? '',
+      priority: occurrence?.priority || 'normal', status: occurrence?.status === 'done' ? 'complete' : 'incomplete',
     }]);
-  }
-
-  function chooseTask(row, id) {
-    const master = data.workItems.find((item) => item.id === id && item.projectId === row.projectId);
-    const task = master ? taskFor({ projectId: row.projectId, title: master.title }) : data.catalog.find((item) => item._id === id);
-    const occurrence = master && data.suggestions.find((item) => item.workItemId === id && item.projectId === row.projectId);
-    update(row.key, {
-      catalogId: task?._id, workItemId: master?.id, workflowTaskId: occurrence?.id,
-      title: master?.title || task?.title || '', hours: task ? Math.min(task.hours, available(task, row.key), 24) : master?.hours ?? '',
-      checklist: occurrence?.checklist, workflowStatus: occurrence?.workflowStatus, checklistChanges: undefined, status: 'incomplete',
-    });
   }
 
   async function submit(event) {
@@ -121,20 +122,54 @@ function EntryEditor({ date, data, onSaved }) {
             onChange={(event) => {
               const value = event.target.value;
               setSearch(value);
-              if (selected && !nameKey(projectLabel(selected)).includes(nameKey(value))) setProject('');
+              if (selected && !nameKey(projectLabel(selected)).includes(nameKey(value))) chooseProject('');
             }} /></span>
         </label>
         <div className="field"><label htmlFor="daily-project">Project</label><select id="daily-project" className="select" value={filtered.some((item) => item._id === project) ? project : ''}
-          onChange={(event) => setProject(event.target.value)}>
+          onChange={(event) => chooseProject(event.target.value)}>
           <option value="">Select a project</option>
           {filtered.map((item) => <option key={item._id} value={item._id}>{projectLabel(item)}</option>)}
         </select></div>
-        <button type="button" className="btn btn-tonal daily-add-project" onClick={() => add(selected)}
-          disabled={!selected || !projectIds.has(project) || busy || rows.length >= 40}><Plus size={16} /> Add task</button>
       </div>
       {!data.projects.length && <p className="small muted">Client projects you have access to appear here automatically.</p>}
       {!!data.projects.length && !filtered.length && <p className="small muted">No projects match your search.</p>}
     </section>
+    {selected && <section className="card daily-card daily-project-task-panel" aria-labelledby="daily-project-tasks">
+      <div className="row-wrap daily-header">
+        <h2 id="daily-project-tasks">{selected.name} tasks</h2>
+        <button type="button" className="btn btn-tonal btn-sm" disabled={busy || rows.length >= 40} onClick={() => add()}>
+          <Plus size={15} /> Custom task
+        </button>
+      </div>
+      <label className="field daily-task-search"><span>Find a task</span>
+        <span className="daily-search"><Search size={17} aria-hidden="true" />
+          <input className="input" type="search" placeholder="Search tasks and descriptions" value={taskSearch}
+            onChange={(event) => setTaskSearch(event.target.value)} /></span>
+      </label>
+      {!visibleTasks.length ? <p className="small muted">{taskSearch.trim() ? 'No tasks match your search.' : 'No tasks are listed for this project.'}</p> :
+        <ul className="daily-project-tasks" aria-label="Project tasks">
+          {visibleTasks.map((item) => {
+            const limit = taskFor({ ...item, workItemId: item.id });
+            const remaining = limit && available(limit);
+            const period = limit?.period || item.period;
+            return <li key={item.id} className="daily-project-task">
+              <div className="daily-project-task-info">
+                <strong>{item.title}</strong>
+                {item.description && <p className="small muted daily-task-description">{item.description}</p>}
+                {period && <div className="row-wrap small muted">
+                  <span className="daily-status">{period}</span>
+                  <span>{limit ? `${hours(remaining)} h left of ${hours(limit.hours)} h` : 'Hour limit not set'}</span>
+                </div>}
+                {!item.canLog && <span className="small muted">Assigned to {item.responsible || 'another employee'}</span>}
+              </div>
+              <button type="button" className="btn btn-tonal btn-sm" aria-label={`Add ${item.title}`}
+                disabled={!item.canLog || busy || rows.length >= 40 || remaining === 0} onClick={() => add(item)}>
+                <Plus size={15} /> Add
+              </button>
+            </li>;
+          })}
+        </ul>}
+    </section>}
     <form ref={editor} onSubmit={submit} className="card daily-task-editor" aria-labelledby="daily-selected-heading">
       <div className="row-wrap daily-header daily-editor-bar">
         <div><h2 id="daily-selected-heading">Selected tasks</h2><p className="small muted">{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</p></div>
@@ -145,38 +180,31 @@ function EntryEditor({ date, data, onSaved }) {
       </div>
       <div className="daily-editor-body stack">
         <ErrorBox error={error} />
-        {!rows.length && <Empty icon={ClipboardList} title="No tasks selected">Select a project and add a task, or pick a Workflow suggestion.</Empty>}
+        {!rows.length && <Empty icon={ClipboardList} title="No tasks selected">Choose a task from the project list to start logging hours.</Empty>}
         {rows.map((row) => {
-          const shared = data.workItems.filter((item) => item.projectId === row.projectId);
-          const linked = !!row._id && !!row.workflowTaskId;
-          const catalog = data.catalog.filter((item) => item.projectId === row.projectId &&
-            !shared.some((reference) => nameKey(reference.title) === nameKey(item.title)));
+          const linked = !!(row.workflowTaskId || row.workItemId || row.catalogId);
           const task = taskFor(row);
           const remaining = task && available(task, row.key);
           const original = submission?.entries.find((entry) => entry._id === row._id);
           const existingHours = original && task &&
             (original.catalogId === task._id || nameKey(original.title) === nameKey(task.title)) ? original.hours : 0;
           const maxHours = task ? Math.min(24, Math.max(remaining, existingHours)) : 24;
-          const hasPicker = !linked && !!(catalog.length || shared.length);
-          const showTitle = !hasPicker || !(row.workItemId || row.catalogId);
           return <fieldset className="daily-entry" key={row.key} data-entry-key={row.key} disabled={busy}>
             <legend>{row.projectName}</legend>
             <div className="daily-task-heading">
               <div className="stack daily-task-name">
-                {hasPicker && <div className="field"><label htmlFor={`project-task-${row.key}`}>Project task</label>
-                  <select id={`project-task-${row.key}`} className="select"
-                  data-entry-focus={!row.title || undefined}
-                  value={row.workItemId || (catalog.some((item) => item._id === row.catalogId) ? row.catalogId : '')}
-                  onChange={(event) => chooseTask(row, event.target.value)}>
-                  <option value="">Custom task</option>
-                  {shared.map((item) => <option key={item.id} value={item.id} disabled={!item.canLog}>{item.title}</option>)}
-                  {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h {item.period}</option>)}
-                </select>{catalog.find((item) => item._id === row.catalogId)?.description &&
-                  <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</div>}
-                {linked ? <strong className="daily-task-linked">{row.title}</strong> : showTitle && <label className="field"><span>Task</span>
-                  <input className="input" maxLength={230} required readOnly={!!row.workItemId || (!!row.catalogId && !!task)} value={row.title}
-                    data-entry-focus={(!hasPicker && !row.title) || undefined}
-                    onChange={(event) => update(row.key, { title: event.target.value, catalogId: undefined, workflowTaskId: undefined })} /></label>}
+                {linked ? <>
+                  <strong className="daily-task-linked">{row.title}</strong>
+                  {row.description && <p className="small muted daily-task-description">{row.description}</p>}
+                </> : <>
+                  <label className="field"><span>Task</span>
+                    <input className="input" maxLength={230} required value={row.title}
+                      data-entry-focus={!row.title || undefined}
+                      onChange={(event) => update(row.key, { title: event.target.value })} /></label>
+                  <label className="field"><span>Description</span>
+                    <textarea className="input" rows={2} maxLength={3000} value={row.description || ''}
+                      onChange={(event) => update(row.key, { description: event.target.value })} /></label>
+                </>}
               </div>
               <button type="button" className="btn btn-ghost icon-btn daily-task-remove" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
                 onClick={() => setRows((old) => old.filter((item) => item.key !== row.key))}><Trash2 size={17} /></button>
@@ -221,29 +249,6 @@ function EntryEditor({ date, data, onSaved }) {
         </button>
       </div>
     </form>
-    <section className="card daily-card daily-suggestion-panel" aria-labelledby="daily-suggestions-heading">
-      <div className="row-wrap daily-header">
-        <h2 id="daily-suggestions-heading">Workflow suggestions</h2>
-        {selected && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setProject(''); setSearch(''); }}>Show all projects</button>}
-      </div>
-      {!visibleSuggestions.length ? <p className="small muted">No suggested tasks {selected ? 'for this project' : 'for this selection'}.</p> :
-        <ul className="daily-suggestions" aria-label="Suggested tasks">
-          {visibleSuggestions.map((suggestion) => {
-            const item = data.projects.find((project) => project._id === suggestion.projectId);
-            if (!item) return null;
-            return <li key={suggestion.id} className="daily-suggestion">
-              <div className="daily-suggestion-info">
-                <strong>{suggestion.title}</strong>
-                <span className="small muted">{item.name}{suggestion.dueDate && ` · Due ${dueLabel.format(new Date(suggestion.dueDate))}`}</span>
-              </div>
-              <button type="button" className="btn btn-tonal btn-sm" aria-label={`Add ${suggestion.title}${suggestion.dueDate ? `, due ${dueLabel.format(new Date(suggestion.dueDate))}` : ''}`}
-                disabled={busy || rows.length >= 40} onClick={() => add(item, suggestion)}>
-                <Plus size={15} /> Add
-              </button>
-            </li>;
-          })}
-        </ul>}
-    </section>
   </div>;
 }
 
