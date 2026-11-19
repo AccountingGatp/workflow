@@ -357,19 +357,54 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-header { justify-content: space-between; }
 .daily-controls { align-items: flex-end; margin-block: 10px; }
 .daily-controls .field { flex: 1 1 155px; min-width: 0; }
-.daily-suggestions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px, 100%), 1fr)); gap: 10px; margin-top: 12px; }
-.daily-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
-.daily-entry { border: 1px solid var(--border); border-radius: 8px; min-width: 0; margin: 0; padding: 12px; }
-.daily-entry legend { color: var(--text-2); font-weight: 600; padding-inline: 5px; }
-.daily-entry-grid { display: grid; grid-template-columns: minmax(140px, 3fr) minmax(72px, 1fr) minmax(105px, 1fr) minmax(125px, 1fr) auto; gap: 10px; align-items: end; }
-.daily-entry-grid > .field:first-child:has(select) { grid-column: 1 / -1; }
+.content:has(.daily-work-page[data-entry]) { max-width: none; }
+.daily-entry-layout { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+.daily-task-editor { min-width: 0; }
+.daily-picker-fields { margin-top: 14px; }
+.daily-picker-fields .field, .daily-task-name { min-width: 0; }
+.daily-picker-fields .select, .daily-task-name .input, .daily-task-name .select { width: 100%; }
+.daily-search { position: relative; display: block; }
+.daily-search > svg { position: absolute; top: 50%; left: 12px; translate: 0 -50%; color: var(--text-3); pointer-events: none; }
+.daily-search > .input { width: 100%; padding-left: 38px; }
+.daily-add-project { align-self: flex-end; }
+.daily-suggestion-panel > p { margin-top: 12px; }
+.daily-suggestions { display: grid; gap: 8px; margin: 12px 0 0; padding: 2px 4px 2px 2px; list-style: none;
+  max-height: clamp(220px, 42vh, 540px); overflow: auto; scrollbar-width: thin; }
+.daily-suggestion { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
+.daily-suggestion-info { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.daily-suggestion-info strong { font-weight: 600; }
+.daily-editor-bar, .daily-editor-body, .daily-editor-footer { padding: 14px clamp(14px, 2vw, 22px); }
+.daily-editor-bar { background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 1px solid var(--border); }
+.daily-editor-bar h2 { margin-bottom: 2px; }
+.daily-editor-totals { gap: 10px; }
+.daily-editor-body { min-height: 146px; }
+.daily-editor-footer { border-top: 1px solid var(--border); }
+.daily-editor-footer .btn { margin-left: auto; }
+.daily-entry { border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; margin: 0; padding: 12px; }
+.daily-entry legend { color: var(--text-2); font-size: 12px; font-weight: 600; padding-inline: 5px; overflow-wrap: anywhere; }
+.daily-task-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-bottom: 12px; }
+.daily-task-linked { display: block; padding-top: 6px; overflow-wrap: anywhere; }
+.daily-task-remove { width: 34px; min-height: 34px; height: 34px; }
+.daily-task-remove:hover:not(:disabled) { color: var(--danger); background: var(--danger-soft); }
+.daily-entry-grid { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1fr) minmax(0, 1.35fr); gap: 10px; align-items: start; }
 .daily-entry-grid .input, .daily-entry-grid .select { min-width: 0; width: 100%; }
+.daily-entry-checklist { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.daily-entry-checklist label { overflow-wrap: anywhere; }
+@media (min-width: 1025px) {
+  .daily-entry-layout { display: grid; grid-template-columns: minmax(300px, .85fr) minmax(0, 1.5fr);
+    grid-template-rows: auto 1fr; grid-template-areas: "project editor" "suggestions editor"; align-items: start; }
+  .daily-project-picker { grid-area: project; }
+  .daily-task-editor { grid-area: editor; }
+  .daily-suggestion-panel { grid-area: suggestions; }
+  .daily-editor-body { max-height: clamp(260px, calc(100dvh - 390px), 840px); overflow: auto; scrollbar-width: thin; }
+}
+@media (max-width: 420px) {
+  .daily-entry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .daily-entry-grid > :last-child { grid-column: 1 / -1; }
+}
 .daily-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .daily-metrics .card { display: flex; flex-direction: column; gap: 5px; }
 .daily-metrics strong { font-size: 1.75rem; }
 .daily-status { text-transform: capitalize; }
 .daily-import { margin-top: 12px; }
-@media (max-width: 890px) {
-  .daily-entry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .daily-entry-title { grid-column: 1 / -1; }
-}
