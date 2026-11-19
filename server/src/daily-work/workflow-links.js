@@ -3,7 +3,7 @@ import { Client, ClientProject, ProjectWorkItem, Task, TaskTemplate, User } from
 import { HttpError } from '../middleware/auth.js';
 import { canSeeClient } from '../services/access.js';
 import { matches, materializeOccurrence } from '../services/recurrence.js';
-import { shiftDate } from './dates.js';
+import { clock, shiftDate } from './dates.js';
 import { applyTaskTransition } from '../services/task-review.js';
 import { catalogCollation, ensureReviewCatalog, isReview, periodBounds, periodLimits, taskName } from './budgets.js';
 
@@ -65,21 +65,39 @@ const taskDetail = (task) => task && ({
   id: String(task._id), priority: task.priority, checklist: task.checklist, status: task.status,
 });
 
+const weekdays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+function masterScheduledOn(item, day) {
+  const frequency = (item.frequency || '').toLowerCase();
+  const schedule = `${frequency} ${item.executionDay || ''}`.toLowerCase();
+  if (/^(monthly|biweekly|semi.?monthly)\b/.test(frequency)) {
+    const monthDays = [...schedule.matchAll(/\b([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\b/g)].map((match) => Number(match[1]));
+    if (/\b(?:month[- ]end|last day)\b/.test(schedule)) monthDays.push(31);
+    return matches({ frequency: 'semimonthly', monthDays }, day);
+  }
+  const listed = [...schedule.matchAll(/\b(sun|mon|tue|wed|thu|fri|sat)(?:day|sday|nesday|rsday|urday)?\b/g)]
+    .map((match) => weekdays.indexOf(match[1]));
+  return listed.length ? listed.includes(day.getDay()) :
+    /^daily\b/.test(frequency) && matches({ frequency: 'daily' }, day);
+}
+
 export async function listClientWork(projects, user, date, session, catalog = []) {
   const ids = projects.map((project) => project.workflowProjectId).filter(Boolean);
   const items = await ProjectWorkItem.find({ project: { $in: ids }, active: { $ne: false } })
-    .select('project client title responsible responsibleUser weeklyHours frequency notes scheduledTemplate').sort('title').session(session || null).lean();
+    .select('project client title responsible responsibleUser weeklyHours frequency notes executionDay scheduledTemplate').sort('title').session(session || null).lean();
   const templates = items.length ? await TaskTemplate.find({ active: true, $or: [
     { masterItem: { $in: items.map((item) => item._id) } },
     { _id: { $in: items.map((item) => item.scheduledTemplate).filter(Boolean) } },
-  ] }).select('masterItem frequency').session(session || null).lean() : [];
+  ] }).select('masterItem frequency assignees weekday weekdays monthDay monthDays startsOn').session(session || null).lean() : [];
+  const memberId = String(user._id);
+  const calendarDay = date && new Date(`${date}T12:00:00`);
   const periodDates = date ? Object.keys(periodLimits).map((period) => periodRange(date, period)) : [];
   const tasks = date && items.length ? await Task.find({
     project: { $in: ids }, assignees: user._id, deletedAt: null, status: { $ne: 'cancelled' },
     dueDate: { $gte: new Date(Math.min(...periodDates.map((range) => +range.$gte))), $lt: new Date(Math.max(...periodDates.map((range) => +range.$lt))) },
     $or: [{ masterItem: { $in: items.map((item) => item._id) } },
       { template: { $in: items.map((item) => item.scheduledTemplate).filter(Boolean) } }],
-  }).select('assignees dueDate masterItem template status checklist priority').sort({ dueDate: 1 }).lean() : [];
+  }).select('assignees dueDate scheduledDate masterItem template status checklist priority').sort({ dueDate: 1 }).lean() : [];
   const projectFor = new Map(projects.filter((row) => row.workflowProjectId).map((row) => [row.workflowProjectId, String(row._id)]));
   return items.filter((item) => !isReview(item.title)).map((item) => {
     const settings = settingsFor(item);
@@ -90,12 +108,23 @@ export async function listClientWork(projects, user, date, session, catalog = []
     const templatePeriod = template?.frequency === 'semimonthly' ? 'monthly' : template?.frequency;
     const period = override?.period || settings.period || templatePeriod;
     const range = date && periodRange(date, period);
-    const task = date && tasks.find((task) => (String(task.masterItem) === String(item._id) ||
-      (template && String(task.template) === String(template._id))) && occurrenceMatches(task, range, String(user._id)));
+    const occurrences = tasks.filter((task) => String(task.masterItem) === String(item._id) ||
+      (template && String(task.template) === String(template._id)));
+    const dueToday = date && occurrences.find((task) => clock(task.dueDate).date === date);
+    const task = dueToday || (date && occurrences.find((task) => occurrenceMatches(task, range, memberId)));
+    const assigned = item.responsibleUser ? String(item.responsibleUser) === memberId :
+      Boolean(item.responsible && taskName(item.responsible) === taskName(user.name));
+    const suggested = date && (dueToday
+      ? !['done', 'pending_review'].includes(dueToday.status)
+      : template
+        ? template.assignees.some((id) => String(id) === memberId) &&
+          (!template.startsOn || clock(template.startsOn).date <= date) && matches(template, calendarDay) &&
+          !occurrences.some((item) => item.scheduledDate && clock(item.scheduledDate).date === date)
+        : !item.scheduledTemplate && assigned && masterScheduledOn(item, calendarDay) && !['done', 'pending_review'].includes(task?.status));
     return {
       id: String(item._id), projectId, title: item.title,
       description: item.notes, responsible: item.responsible, frequency: item.frequency, ...settings, period,
-      occurrence: taskDetail(task), canLog: !item.responsibleUser || String(item.responsibleUser) === String(user._id) || !!task,
+      occurrence: taskDetail(task), occurrenceDueToday: Boolean(dueToday), suggested: Boolean(suggested), canLog: !item.responsibleUser || String(item.responsibleUser) === String(user._id) || !!task,
     };
   });
 }
@@ -109,6 +138,15 @@ async function findMasterOccurrence(master, filter, date, overridePeriod, sessio
   const range = periodRange(date, period);
   const occurrence = { ...filter, dueDate: range,
     $or: [{ masterItem: master._id }, ...(template ? [{ template: template._id }] : [])] };
+  if (template?.frequency === 'semimonthly' && template.assignees.some((id) => String(id) === memberId)) {
+    const due = new Date(`${date}T17:00:00`);
+    if (clock(template.startsOn).date <= date && matches(template, due)) {
+      await materializeOccurrence(template, due, session);
+      const exact = await Task.findOne({ ...filter, template: template._id,
+        $or: [{ scheduledDate: due }, { dueDate: periodRange(date, 'daily') }] }).session(session);
+      if (exact) return exact;
+    }
+  }
   const found = await Task.findOne(occurrence).sort({ dueDate: 1 }).session(session);
   if (found || !template) return found;
   if (!template.assignees.some((id) => String(id) === memberId)) {
@@ -132,16 +170,20 @@ function readableSource(task, row) {
   return task && String(task.client) === String(row.clientId);
 }
 
-export async function projectWorkflowStatuses(submissions) {
+export async function projectWorkflowStatuses(submissions, canReview) {
   const ids = [...new Set(submissions.flatMap((doc) => doc.entries.map((row) => row.workflowTaskId).filter(Boolean)))];
   if (!ids.length) return submissions;
-  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist').lean();
+  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist reviewer submittedBy').lean();
   const states = new Map(tasks.map((task) => [String(task._id), task]));
   return submissions.map((doc) => ({ ...doc, entries: doc.entries.map((row) => {
     if (!row.workflowTaskId) return row;
     const task = states.get(row.workflowTaskId);
     if (!readableSource(task, row)) return { ...row, workflowStatus: 'unavailable' };
-    return { ...row, title: task.title, checklist: task.checklist, workflowStatus: task.status, status: task.status === 'done' ? 'complete' : 'incomplete' };
+    return { ...row, title: task.title, checklist: task.checklist, workflowStatus: task.status,
+      status: task.status === 'done' ? 'complete' : 'incomplete',
+      incompleteReason: task.status === 'done' ? undefined : row.incompleteReason,
+      ...(canReview && { canReview: canReview(task, row) }),
+    };
   }) }));
 }
 
