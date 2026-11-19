@@ -411,7 +411,6 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-metrics .card { display: flex; flex-direction: column; gap: 5px; }
 .daily-metrics strong { font-size: 1.75rem; }
 .daily-status { text-transform: capitalize; }
-.daily-import { margin-top: 12px; }
 
 .daily-project-combo { position: relative; }
 .daily-project-combo .input { padding-right: 42px; }

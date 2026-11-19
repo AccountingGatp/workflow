@@ -3,7 +3,6 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ClipboardList, Plus, Search, Send, StickyNote, Trash2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
 import { Badge, Empty, ErrorBox, PageHead, Skeleton } from '../ui.jsx';
-import { ManageDailyWork } from './daily-work-manage.jsx';
 
 const root = '/daily-work';
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' }).format(new Date());
@@ -580,29 +579,13 @@ function Missing({ date }) {
   </div>;
 }
 
-function Hubstaff({ date }) {
-  const { data, error, loading, reload } = useApi(`${root}/hubstaff/${date}`);
-  return <div className="card daily-card stack">
-    <div className="row-wrap daily-header"><h2>Hubstaff</h2><button className="btn" onClick={reload}>Refresh</button></div>
-    <p className="muted">Hours are for the selected date. Current Project shows the latest project for members Hubstaff reports as online.</p>
-    <ErrorBox error={error} />
-    {loading ? <Skeleton /> : !error && (data.rows.length ? <div className="table-wrap"><table className="table"><thead>
-      <tr><th>Employee</th><th>Tracked hours</th><th>Last activity</th><th>Current Project</th></tr></thead>
-      <tbody>{data.rows.map((row) => <tr key={row.id}><td>{row.name}</td><td>{hours(row.hours)}</td>
-        <td>{row.lastActivity ? new Date(row.lastActivity).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '—'}</td><td>{row.currentProject || '—'}</td>
-      </tr>)}</tbody></table></div> : <Empty title="No Hubstaff members mapped" />)}
-  </div>;
-}
-
 export default function DailyWork() {
   const [params, setParams] = useSearchParams();
   const [date, setDate] = useState(today);
-  const { user, can } = useAuth();
+  const { user } = useAuth();
   const day = useApi(`${root}/day/${date}`);
   const tabs = [['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
-  if (can.super || day.data?.hubstaffAccess) tabs.push(['hubstaff', 'Hubstaff']);
-  if (can.super) tabs.push(['manage', 'Manage Data']);
   const requested = params.get('tab');
   const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
   const choose = (id) => {
@@ -611,7 +594,7 @@ export default function DailyWork() {
   };
   return <div className="daily-work-page" data-entry={tab === 'entry' ? '' : undefined}>
     <PageHead title="Daily Work">
-      {['entry', 'missing', 'hubstaff'].includes(tab) && <DateField value={date} onChange={setDate} />}
+      {['entry', 'missing'].includes(tab) && <DateField value={date} onChange={setDate} />}
     </PageHead>
     <nav className="daily-tabs" aria-label="Daily Work">
       {tabs.map(([id, label]) => <button key={id} type="button" className={`daily-tab ${id === tab ? 'active' : ''}`}
@@ -621,7 +604,5 @@ export default function DailyWork() {
       <EntryEditor key={date} date={date} data={day.data} />)}
     {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
     {tab === 'missing' && <Missing date={date} />}
-    {tab === 'hubstaff' && <Hubstaff date={date} />}
-    {tab === 'manage' && <ManageDailyWork onSaved={day.reload} />}
   </div>;
 }
