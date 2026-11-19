@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus, Send, Trash2 } from 'lucide-react';
+import { ClipboardList, Plus, Search, Send, Trash2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
 import { Badge, Empty, ErrorBox, PageHead, Skeleton } from '../ui.jsx';
 import { ManageDailyWork } from './daily-work-manage.jsx';
@@ -9,6 +9,7 @@ const root = '/daily-work';
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' }).format(new Date());
 const hours = (number) => Number(number || 0).toFixed(2);
 const nameKey = (value) => value.trim().toLowerCase();
+const dueLabel = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' });
 const totalHours = (rows) => hours(rows.reduce((sum, item) => sum + Number(item.hours || 0), 0));
 const deliveryLabel = {
   sent: 'Saved and sent to Slack.',
@@ -31,11 +32,23 @@ function EntryEditor({ date, data, onSaved }) {
   const [search, setSearch] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const editor = useRef(null);
+  const newEntry = useRef(null);
   const toast = useToast();
+  useEffect(() => {
+    if (!newEntry.current) return;
+    const row = editor.current?.querySelector(`[data-entry-key="${newEntry.current}"]`);
+    const field = row?.querySelector('[data-entry-focus]');
+    newEntry.current = null;
+    field?.focus({ preventScroll: true });
+    row?.scrollIntoView?.({ block: 'nearest' });
+  }, [rows]);
   const projectLabel = (item) => item.clientName && item.clientName !== item.name ? `${item.clientName} / ${item.name}` : item.name;
   const filtered = data.projects.filter((item) => nameKey(projectLabel(item)).includes(nameKey(search)));
   const selected = data.projects.find((item) => item._id === project);
+  const projectIds = new Set(filtered.map((item) => item._id));
   const visibleSuggestions = data.suggestions.filter((suggestion) =>
+    (selected ? suggestion.projectId === selected._id : projectIds.has(suggestion.projectId)) &&
     !rows.some((row) => row.workflowTaskId === suggestion.id));
   const update = (key, patch) => setRows((old) => old.map((row) => row.key === key ? { ...row, ...patch } : row));
 
@@ -57,8 +70,10 @@ function EntryEditor({ date, data, onSaved }) {
     if (!item || rows.length >= 40) return;
     const assignment = data.assignments.find((row) => row.projectId === item._id);
     const task = suggestion && taskFor({ projectId: item._id, title: suggestion.title });
+    const key = crypto.randomUUID();
+    newEntry.current = key;
     setRows((old) => [...old, {
-      key: crypto.randomUUID(), projectId: item._id, projectName: item.name, title: task?.title || suggestion?.title || '',
+      key, projectId: item._id, projectName: item.name, title: task?.title || suggestion?.title || '',
       catalogId: task?._id, workflowTaskId: suggestion?.id, workItemId: suggestion?.workItemId,
       checklist: suggestion?.checklist, workflowStatus: suggestion?.workflowStatus,
       hours: task ? Math.min(assignment?.hours ?? task.hours, available(task), 24) : assignment?.hours ?? '',
@@ -97,99 +112,138 @@ function EntryEditor({ date, data, onSaved }) {
     finally { setBusy(false); }
   }
 
-  return <div className="stack">
-    <div className="card daily-card">
-      <div className="row-wrap daily-header"><h2>Daily entry</h2><Badge cls="b-primary">{data.memberName}</Badge></div>
-      <div className="row-wrap daily-controls">
-        <label className="field"><span>Find a project</span><input className="input" type="search" placeholder="Search projects" value={search}
-          onChange={(event) => { setSearch(event.target.value); setProject(''); }} /></label>
-        <label className="field"><span>Project</span><select className="select" value={project} onChange={(event) => setProject(event.target.value)}>
+  return <div className="daily-entry-layout">
+    <section className="card daily-card daily-project-picker" aria-labelledby="daily-project-heading">
+      <div className="row-wrap daily-header"><h2 id="daily-project-heading">Daily entry</h2><Badge cls="b-primary">{data.memberName}</Badge></div>
+      <div className="stack daily-picker-fields">
+        <label className="field"><span>Find a project</span>
+          <span className="daily-search"><Search size={17} aria-hidden="true" /><input className="input" type="search" placeholder="Search by client or project" value={search}
+            onChange={(event) => {
+              const value = event.target.value;
+              setSearch(value);
+              if (selected && !nameKey(projectLabel(selected)).includes(nameKey(value))) setProject('');
+            }} /></span>
+        </label>
+        <div className="field"><label htmlFor="daily-project">Project</label><select id="daily-project" className="select" value={filtered.some((item) => item._id === project) ? project : ''}
+          onChange={(event) => setProject(event.target.value)}>
           <option value="">Select a project</option>
           {filtered.map((item) => <option key={item._id} value={item._id}>{projectLabel(item)}</option>)}
-        </select></label>
-        <button type="button" className="btn" onClick={() => add(selected)} disabled={!selected || busy || rows.length >= 40}><Plus size={16} /> Add task</button>
+        </select></div>
+        <button type="button" className="btn btn-tonal daily-add-project" onClick={() => add(selected)}
+          disabled={!selected || !projectIds.has(project) || busy || rows.length >= 40}><Plus size={16} /> Add task</button>
       </div>
-      {!data.projects.length && <p className="muted">Client projects you have access to appear here automatically.</p>}
-    </div>
-    {!!visibleSuggestions.length && <div className="card daily-card">
-      <h2>Workflow suggestions</h2>
-      <div className="daily-suggestions">
-        {visibleSuggestions.map((suggestion) => {
-          const item = data.projects.find((project) => project._id === suggestion.projectId);
-          return <div key={suggestion.id} className="daily-suggestion">
-            <div><strong>{suggestion.title}</strong><div className="small muted">{item.name}</div></div>
-            <button type="button" className="btn btn-sm" disabled={busy || rows.length >= 40} onClick={() => add(item, suggestion)}>
-              <Plus size={14} /> Add
-            </button>
-          </div>;
+      {!data.projects.length && <p className="small muted">Client projects you have access to appear here automatically.</p>}
+      {!!data.projects.length && !filtered.length && <p className="small muted">No projects match your search.</p>}
+    </section>
+    <form ref={editor} onSubmit={submit} className="card daily-task-editor" aria-labelledby="daily-selected-heading">
+      <div className="row-wrap daily-header daily-editor-bar">
+        <div><h2 id="daily-selected-heading">Selected tasks</h2><p className="small muted">{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</p></div>
+        <div className="row-wrap daily-editor-totals" aria-live="polite">
+          <span className="small muted">{rows.length} {rows.length === 1 ? 'task' : 'tasks'}</span>
+          <Badge cls="b-primary"><span className="mono">{totalHours(rows)} h</span></Badge>
+        </div>
+      </div>
+      <div className="daily-editor-body stack">
+        <ErrorBox error={error} />
+        {!rows.length && <Empty icon={ClipboardList} title="No tasks selected">Select a project and add a task, or pick a Workflow suggestion.</Empty>}
+        {rows.map((row) => {
+          const shared = data.workItems.filter((item) => item.projectId === row.projectId);
+          const linked = !!row._id && !!row.workflowTaskId;
+          const catalog = data.catalog.filter((item) => item.projectId === row.projectId &&
+            !shared.some((reference) => nameKey(reference.title) === nameKey(item.title)));
+          const task = taskFor(row);
+          const remaining = task && available(task, row.key);
+          const original = submission?.entries.find((entry) => entry._id === row._id);
+          const existingHours = original && task &&
+            (original.catalogId === task._id || nameKey(original.title) === nameKey(task.title)) ? original.hours : 0;
+          const maxHours = task ? Math.min(24, Math.max(remaining, existingHours)) : 24;
+          const hasPicker = !linked && !!(catalog.length || shared.length);
+          const showTitle = !hasPicker || !(row.workItemId || row.catalogId);
+          return <fieldset className="daily-entry" key={row.key} data-entry-key={row.key} disabled={busy}>
+            <legend>{row.projectName}</legend>
+            <div className="daily-task-heading">
+              <div className="stack daily-task-name">
+                {hasPicker && <div className="field"><label htmlFor={`project-task-${row.key}`}>Project task</label>
+                  <select id={`project-task-${row.key}`} className="select"
+                  data-entry-focus={!row.title || undefined}
+                  value={row.workItemId || (catalog.some((item) => item._id === row.catalogId) ? row.catalogId : '')}
+                  onChange={(event) => chooseTask(row, event.target.value)}>
+                  <option value="">Custom task</option>
+                  {shared.map((item) => <option key={item.id} value={item.id} disabled={!item.canLog}>{item.title}</option>)}
+                  {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h {item.period}</option>)}
+                </select>{catalog.find((item) => item._id === row.catalogId)?.description &&
+                  <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</div>}
+                {linked ? <strong className="daily-task-linked">{row.title}</strong> : showTitle && <label className="field"><span>Task</span>
+                  <input className="input" maxLength={230} required readOnly={!!row.workItemId || (!!row.catalogId && !!task)} value={row.title}
+                    data-entry-focus={(!hasPicker && !row.title) || undefined}
+                    onChange={(event) => update(row.key, { title: event.target.value, catalogId: undefined, workflowTaskId: undefined })} /></label>}
+              </div>
+              <button type="button" className="btn btn-ghost icon-btn daily-task-remove" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
+                onClick={() => setRows((old) => old.filter((item) => item.key !== row.key))}><Trash2 size={17} /></button>
+            </div>
+            <div className="daily-entry-grid">
+              <div className="field">
+                <label htmlFor={`hours-${row.key}`}>Hours</label>
+                <input id={`hours-${row.key}`} className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
+                  aria-describedby={task ? `hours-limit-${row.key}` : undefined}
+                  data-entry-focus={!!row.title || undefined}
+                  onChange={(event) => update(row.key, { hours: event.target.value })} />
+                {task && <span id={`hours-limit-${row.key}`} className="hint">
+                  Up to {hours(remaining)} h · {task.period}{task.review ? ' · across projects' : ''}
+                </span>}
+              </div>
+              <div className="field"><label htmlFor={`priority-${row.key}`}>Priority</label>
+                <select id={`priority-${row.key}`} className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
+                <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
+              </select></div>
+              <div className="field"><label htmlFor={`status-${row.key}`}>Status</label>
+                <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
+                <option value="incomplete">{row.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
+              </select></div>
+            </div>
+            {!!row.checklist?.length && <div className="stack daily-entry-checklist">
+              {row.checklist.map((step) => <label key={step._id} className="row">
+                <input type="checkbox" checked={row.checklistChanges?.find((change) => change.id === step._id)?.done ?? step.done}
+                  disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)}
+                  onChange={(event) => update(row.key, { checklistChanges: [
+                    ...(row.checklistChanges || []).filter((change) => change.id !== step._id),
+                    ...(event.target.checked === step.done ? [] : [{ id: step._id, done: event.target.checked }]),
+                  ] })} />{step.text}
+              </label>)}
+            </div>}
+          </fieldset>;
         })}
       </div>
-    </div>}
-    <form onSubmit={submit} className="card daily-card stack">
-      <div className="row-wrap daily-header"><h2>Tasks for {date}</h2><Badge>{totalHours(rows)} h total</Badge></div>
-      <ErrorBox error={error} />
-      {!rows.length && <Empty title="No tasks entered">Choose a project or add a Workflow suggestion.</Empty>}
-      {rows.map((row) => {
-        const shared = data.workItems.filter((item) => item.projectId === row.projectId);
-        const linked = !!row._id && !!row.workflowTaskId;
-        const catalog = data.catalog.filter((item) => item.projectId === row.projectId &&
-          !shared.some((reference) => nameKey(reference.title) === nameKey(item.title)));
-        const task = taskFor(row);
-        const remaining = task && available(task, row.key);
-        const original = submission?.entries.find((entry) => entry._id === row._id);
-        const existingHours = original && task &&
-          (original.catalogId === task._id || nameKey(original.title) === nameKey(task.title)) ? original.hours : 0;
-        const maxHours = task ? Math.min(24, Math.max(remaining, existingHours)) : 24;
-        return <fieldset className="daily-entry" key={row.key} disabled={busy}>
-          <legend>{row.projectName}</legend>
-          <div className="daily-entry-grid">
-            {!linked && !!(catalog.length || shared.length) && <label className="field daily-entry-title"><span>Project task</span><select className="select"
-              value={row.workItemId || (catalog.some((item) => item._id === row.catalogId) ? row.catalogId : '')}
-              onChange={(event) => chooseTask(row, event.target.value)}>
-              <option value="">Custom task</option>
-              {shared.map((item) => <option key={item.id} value={item.id} disabled={!item.canLog}>{item.title}</option>)}
-              {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h {item.period}</option>)}
-            </select>{catalog.find((item) => item._id === row.catalogId)?.description &&
-              <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</label>}
-            <label className="field daily-entry-title"><span>Task</span><input className="input" maxLength={230} required readOnly={linked || !!row.workItemId || (!!row.catalogId && !!task)} value={row.title}
-              onChange={(event) => update(row.key, { title: event.target.value, catalogId: undefined, workflowTaskId: undefined })} /></label>
-            <div className="field">
-              <label htmlFor={`hours-${row.key}`}>Hours</label>
-              <input id={`hours-${row.key}`} className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
-                aria-describedby={task ? `hours-limit-${row.key}` : undefined}
-                onChange={(event) => update(row.key, { hours: event.target.value })} />
-              {task && <span id={`hours-limit-${row.key}`} className="hint">
-                Up to {hours(remaining)} h · {task.period}{task.review ? ' · across projects' : ''}
-              </span>}
-            </div>
-            <label className="field"><span>Priority</span><select className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
-              <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-            </select></label>
-            <label className="field"><span>Status</span><select className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
-              <option value="incomplete">{row.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
-            </select></label>
-            <button type="button" className="btn btn-ghost icon-btn" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
-              onClick={() => setRows((old) => old.filter((item) => item.key !== row.key))}><Trash2 size={17} /></button>
-          </div>
-          {!!row.checklist?.length && <div className="stack">
-            {row.checklist.map((step) => <label key={step._id} className="row">
-              <input type="checkbox" checked={row.checklistChanges?.find((change) => change.id === step._id)?.done ?? step.done}
-                disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)}
-                onChange={(event) => update(row.key, { checklistChanges: [
-                  ...(row.checklistChanges || []).filter((change) => change.id !== step._id),
-                  ...(event.target.checked === step.done ? [] : [{ id: step._id, done: event.target.checked }]),
-                ] })} />{step.text}
-            </label>)}
-          </div>}
-        </fieldset>;
-      })}
-      <div className="row-wrap daily-header">
-        <span className="small muted">{deliveryLabel[submission?.delivery] || ''}</span>
+      <div className="row-wrap daily-header daily-editor-footer">
+        <span className="small muted" role="status">{deliveryLabel[submission?.delivery] || ''}</span>
         <button className="btn btn-primary" disabled={busy || (!rows.length && !submission)}>
           <Send size={16} />{busy ? 'Saving…' : submission ? 'Save changes' : data.slackEnabled ? 'Send' : 'Save'}
         </button>
       </div>
     </form>
+    <section className="card daily-card daily-suggestion-panel" aria-labelledby="daily-suggestions-heading">
+      <div className="row-wrap daily-header">
+        <h2 id="daily-suggestions-heading">Workflow suggestions</h2>
+        {selected && <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setProject(''); setSearch(''); }}>Show all projects</button>}
+      </div>
+      {!visibleSuggestions.length ? <p className="small muted">No suggested tasks {selected ? 'for this project' : 'for this selection'}.</p> :
+        <ul className="daily-suggestions" aria-label="Suggested tasks">
+          {visibleSuggestions.map((suggestion) => {
+            const item = data.projects.find((project) => project._id === suggestion.projectId);
+            if (!item) return null;
+            return <li key={suggestion.id} className="daily-suggestion">
+              <div className="daily-suggestion-info">
+                <strong>{suggestion.title}</strong>
+                <span className="small muted">{item.name}{suggestion.dueDate && ` · Due ${dueLabel.format(new Date(suggestion.dueDate))}`}</span>
+              </div>
+              <button type="button" className="btn btn-tonal btn-sm" aria-label={`Add ${suggestion.title}${suggestion.dueDate ? `, due ${dueLabel.format(new Date(suggestion.dueDate))}` : ''}`}
+                disabled={busy || rows.length >= 40} onClick={() => add(item, suggestion)}>
+                <Plus size={15} /> Add
+              </button>
+            </li>;
+          })}
+        </ul>}
+    </section>
   </div>;
 }
 
@@ -306,8 +360,8 @@ export default function DailyWork() {
     if (id === 'entry' && tab !== 'entry') day.reload();
     setParams(id === 'entry' ? {} : { tab: id });
   };
-  return <>
-    <PageHead title="Daily Work" subtitle="Log project work and hours with your Workflow account.">
+  return <div className="daily-work-page" data-entry={tab === 'entry' ? '' : undefined}>
+    <PageHead title="Daily Work">
       {['entry', 'missing', 'hubstaff'].includes(tab) && <DateField value={date} onChange={setDate} />}
     </PageHead>
     <nav className="daily-tabs" aria-label="Daily Work">
@@ -320,5 +374,5 @@ export default function DailyWork() {
     {tab === 'missing' && <Missing date={date} />}
     {tab === 'hubstaff' && <Hubstaff date={date} />}
     {tab === 'manage' && <ManageDailyWork onSaved={day.reload} />}
-  </>;
+  </div>;
 }
