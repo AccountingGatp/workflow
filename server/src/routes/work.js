@@ -191,7 +191,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const canEdit = await canManageClient(req.user, task.client._id);
   const isAssignee = task.assignees.some((person) => String(person._id) === String(req.user._id));
   res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || isAssignee,
-    canChangeChecklist: task.status !== 'done' && (canEdit || isAssignee), canDelete: isSuper(req.user) });
+    canChangeChecklist: canEdit || (task.status !== 'done' && isAssignee), canDelete: isSuper(req.user) });
 }));
 
 r.post('/tasks', ah(async (req, res) => {
