@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, CalendarCheck, CheckSquare, Building2, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Mail as MailIcon,
+  LayoutDashboard, CalendarCheck, CheckSquare, Building2, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Settings, Mail as MailIcon,
 } from 'lucide-react';
 import { useAuth, useApi, ROLE_LABEL } from './lib.jsx';
 import { Avatar, BrandName } from './ui.jsx';
@@ -47,6 +47,7 @@ export default function Layout() {
         {can.manage && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>
         {can.super && item('/people', Users, 'People')}
+        {can.super && item('/settings', Settings, 'Settings')}
         {can.manage && item('/access', ShieldCheck, 'Access', pending ? <span className="count">{pending}</span> : null)}
         {can.manage && item('/audit', History, 'Activity log')}
         <div className="sidebar-foot">

@@ -8,6 +8,7 @@ import { AuthProvider, ToastProvider, useAuth } from './lib.jsx';
 import { createWorkflowStore } from './daily-work-data.js';
 import Layout from './Layout.jsx';
 import DailyWork from './pages/daily-work.jsx';
+import Settings from './pages/settings.jsx';
 import { MyWork, Overview } from './pages/work.jsx';
 import { Clients, ClientDetail } from './pages/clients.jsx';
 import { ClientProjects } from './pages/projects.jsx';
@@ -45,6 +46,7 @@ function WorkflowRoutes({ can }) {
           <Route path="teams" element={<Navigate to="/clients" replace />} />
           <Route path="recurring" element={guard(can.manage, <Recurring />)} />
           <Route path="people" element={guard(can.super, <People />)} />
+          <Route path="settings" element={guard(can.super, <Settings />)} />
           <Route path="access" element={guard(can.manage, <Access />)} />
           <Route path="audit" element={guard(can.manage, <Audit />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
