@@ -169,10 +169,11 @@ function readableSource(task, row) {
   return task && String(task.client) === String(row.clientId);
 }
 
-export async function projectWorkflowStatuses(submissions) {
+export async function projectWorkflowStatuses(submissions, actorId) {
   const ids = [...new Set(submissions.flatMap((doc) => doc.entries.map((row) => row.workflowTaskId).filter(Boolean)))];
   if (!ids.length) return submissions;
-  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select('client title status checklist').lean();
+  const fields = actorId ? 'client title status checklist assignees completedBy' : 'client title status checklist';
+  const tasks = await Task.find({ _id: { $in: ids }, deletedAt: null }).select(fields).lean();
   const states = new Map(tasks.map((task) => [String(task._id), task]));
   return submissions.map((doc) => ({ ...doc, entries: doc.entries.map((row) => {
     if (!row.workflowTaskId) return row;
@@ -181,6 +182,10 @@ export async function projectWorkflowStatuses(submissions) {
     return { ...row, title: task.title, checklist: task.checklist, workflowStatus: task.status,
       status: task.status === 'done' ? 'complete' : 'incomplete',
       incompleteReason: task.status === 'done' ? undefined : row.incompleteReason,
+      ...(actorId && {
+        workflowAssignedToMember: task.assignees?.some((assignee) => String(assignee) === doc.memberId) ?? false,
+        workflowCompletedByActor: String(task.completedBy) === String(actorId),
+      }),
     };
   }) }));
 }

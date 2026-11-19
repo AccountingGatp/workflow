@@ -228,6 +228,13 @@ function markUnsent(submission) {
   submission.deliveryAt = undefined;
 }
 
+function statusEntry(entry, own, scope) {
+  const { workflowAssignedToMember, workflowCompletedByActor, ...row } = entry;
+  const manager = includes(scope.managed, row.clientId);
+  return { ...row, canUpdateStatus: workflowAssignedToMember !== false &&
+    (manager || (own && (row.workflowStatus !== 'done' || workflowCompletedByActor))) };
+}
+
 r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
   const memberId = idValue(req.params.memberId);
@@ -273,8 +280,9 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
     }
     return doc;
   });
-  const [live] = await projectWorkflowStatuses([submission.toObject()]);
-  res.json({ entry: live.entries.find((entry) => String(entry._id) === entryId), version: submission.__v });
+  const [live] = await projectWorkflowStatuses([submission.toObject()], req.user._id);
+  const entry = live.entries.find((row) => String(row._id) === entryId);
+  res.json({ entry: statusEntry(entry, own, scope), version: submission.__v });
 }));
 
 async function reportRows(req, models, scope) {
@@ -287,16 +295,14 @@ async function reportRows(req, models, scope) {
     enforce(includes(scope.members, memberId));
     filter.memberId = memberId;
   } else if (scope.members !== null) filter.memberId = { $in: scope.members };
-  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean());
+  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean(), req.user._id);
   return documents.flatMap((doc) => {
-    const scopeIds = doc.memberId === scope.own ? scope.visible : scope.managed;
+    const own = doc.memberId === scope.own;
+    const scopeIds = own ? scope.visible : scope.managed;
     const entries = doc.entries.filter((entry) => includes(scopeIds, entry.clientId) &&
       (!req.query.projectId || entry.projectId === req.query.projectId) &&
       (!req.query.status || entry.status === req.query.status));
-    return entries.length ? [publicSubmission(doc, entries.map((entry) => ({
-      ...entry, canUpdateStatus: entry.workflowStatus !== 'done' &&
-        (doc.memberId === scope.own || includes(scope.managed, entry.clientId)),
-    })))] : [];
+    return entries.length ? [publicSubmission(doc, entries.map((entry) => statusEntry(entry, own, scope)))] : [];
   });
 }
 
