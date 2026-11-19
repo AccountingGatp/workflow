@@ -417,11 +417,8 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-project-options li { padding: 8px 10px; border-radius: var(--r-sm); overflow-wrap: anywhere; }
 .daily-project-options [role="option"] { cursor: pointer; }
 .daily-project-options [aria-selected="true"] { background: var(--primary-soft); color: var(--primary); }
-.daily-entry-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start;
-  text-align: start; gap: 10px; width: 100%; padding: 0; background: none; border: 0; color: inherit; font: inherit; }
-button.daily-entry-summary { grid-template-columns: minmax(0, 1fr) auto auto auto; cursor: pointer; }
-.daily-entry-summary > svg { align-self: center; transition: rotate .2s ease; }
-.daily-entry-summary[aria-expanded="true"] > svg { rotate: 180deg; }
+.daily-entry-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center;
+  text-align: start; gap: 10px; width: 100%; padding: 0; background: none; border: 0; cursor: pointer; color: inherit; font: inherit; }
 .daily-entry-summary strong, .daily-entry-summary small { display: block; overflow-wrap: anywhere; }
 .daily-entry-summary .badge { text-transform: capitalize; }
 .daily-row-project { display: block; margin-bottom: 4px; overflow-wrap: anywhere; }
@@ -434,14 +431,17 @@ button.daily-entry-summary { grid-template-columns: minmax(0, 1fr) auto auto aut
 .daily-note textarea { width: 100%; }
 .daily-row-actions { justify-content: flex-end; margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) {
-  .daily-reveal, .daily-entry-summary > svg { transition: none; }
+  .daily-reveal { transition: none; }
 }
 
 .daily-open-suggestions { margin-top: 10px; }
 .daily-suggestions { margin-top: 18px; }
 .daily-suggestions .daily-project-tasks { max-height: min(42vh, 420px); }
-.daily-status-details { gap: 6px; padding-top: 10px; }
-.daily-status-footer { gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-.daily-status-toolbar { justify-content: space-between; }
-.daily-status-reason { width: min(100%, 400px); gap: 8px; }
+.daily-status-table :is(th, td) { padding-inline: 14px; }
+.daily-status-table td { vertical-align: top; }
+.daily-status-table td:first-child { min-width: 185px; overflow-wrap: anywhere; }
+.daily-status-table time { white-space: nowrap; }
+.daily-status-table .daily-task-description { margin-top: 4px; }
+.daily-status-actions, .daily-status-reason { gap: 8px; }
+.daily-status-actions { min-width: 155px; }
 .daily-status-reason textarea { width: 100%; }

@@ -1,126 +1,23 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { CalendarClock, AlertTriangle, CalendarRange, Plus, Search, Users, Clock, CheckCircle2 } from 'lucide-react';
-import { useApi, usePaginatedTasks, useAuth, dueInfo, STATUS, fmtDate } from '../lib.jsx';
-import { Avatar, Badge, Empty, PageHead, Skeleton, TeamTag } from '../ui.jsx';
-import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
-import ProjectWorkRegister from './project-work-register.jsx';
-
-function Stat({ icon: Icon, label, value, tone, selected, onClick }) {
-  return (
-    <button className={`card stat clickable ${selected ? 'selected' : ''}`} onClick={onClick} aria-pressed={selected}>
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <span className="stat-label">{label}</span>
-        <span className="stat-icon" style={{ background: `var(--${tone}-soft)`, color: `var(--${tone})` }}><Icon size={18} /></span>
-      </div>
-      <span className="stat-value">{value ?? '–'}</span>
-    </button>
-  );
-}
+import { useNavigate } from 'react-router-dom';
+import { Users, Clock } from 'lucide-react';
+import { useApi, usePaginatedTasks, useAuth, STATUS, fmtDate } from '../lib.jsx';
+import { Avatar, Badge, Empty, PageHead, Skeleton } from '../ui.jsx';
+import { TaskDrawer, TaskListCard, TaskPagination } from '../tasks.jsx';
+import { DailyTaskStatus } from './daily-work.jsx';
 
 /* ---------- My work (every role) ---------- */
 
-const RECENT_DONE_DAYS = 7;
-const recentlyDone = (t) => t.status === 'done' && Date.now() - new Date(t.completedAt || t.updatedAt) < RECENT_DONE_DAYS * 864e5;
-const upcomingWeekTask = (t) => {
-  if (t.status === 'done' || dueInfo(t).bucket !== 'upcoming') return false;
-  const due = new Date(t.dueDate).getTime();
-  const nextWeek = new Date();
-  nextWeek.setDate(nextWeek.getDate() + 7);
-  nextWeek.setHours(23, 59, 59, 999);
-  return due <= nextWeek.getTime() && ['weekly', 'monthly', 'semimonthly'].includes(t.template?.frequency);
-};
-
-
 export function MyWork() {
-  const { user, can } = useAuth();
-  const [view, setView] = useState(() => (can.manage ? 'clients' : 'mine'));
-  const [bucket, setBucket] = useState('today');
-  const [client, setClient] = useState('');
-  const [project, setProject] = useState('');
-  const [q, setQ] = useState('');
-  const [openId, setOpenId] = useState(null);
-  const [creating, setCreating] = useState(false);
-  const clients = useApi('/clients');
-  const projects = useApi(client ? `/clients/${client}/projects` : null, [client]);
-  const clientDetails = useApi(client ? `/clients/${client}` : null, [client]);
-  const projectData = projects.data || [];
-  const selectedProject = projectData.find(p => p._id === project);
-  const master = useApi(project && project !== 'unassigned' && client ? `/clients/${client}/projects/${project}/work-items` : null, [client, project]);
-  const scope = view === 'clients' ? 'all' : 'mine';
-  const query = `scope=${scope}&view=${bucket === 'all' ? 'active' : bucket}&client=${client}&project=${project}&q=${encodeURIComponent(q)}`;
-  const tasks = usePaginatedTasks(query);
-  const summary = useApi(`/task-summary?scope=${scope}&client=${client}&project=${project}&q=${encodeURIComponent(q)}`, [scope, client, project, q]);
-  const reload = () => { tasks.reload(); summary.reload(); };
-  const toggle = useTaskToggle(reload);
-  const counts = summary.data || {};
+  const { user } = useAuth();
   const hour = new Date().getHours();
-  const pick = (b) => setBucket((cur) => cur === b ? 'active' : b);
-
-  return (
-    <>
-      <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' · ').pop().split(' ')[0]}`}
-        subtitle={view === 'clients' ? 'Scheduled client tasks and deadlines. Master project work items are kept separately.' : 'Your assigned scheduled work. Reference-only master items are not due tasks.'}>
-        {can.manage && <div className="chips" role="tablist" aria-label="Whose work">
-          <button className={`chip ${view === 'clients' ? 'on' : ''}`} role="tab" aria-selected={view === 'clients'} onClick={() => setView('clients')}><Users size={16} />Client work</button>
-          <button className={`chip ${view === 'mine' ? 'on' : ''}`} role="tab" aria-selected={view === 'mine'} onClick={() => setView('mine')}>Assigned to me</button>
-        </div>}
-        {can.manage && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
-      </PageHead>
-      <div className="grid grid-4" style={{ marginBottom: 24 }}>
-        <Stat icon={CalendarClock} label="Due today" value={summary.data ? counts.today : undefined} tone="warning" selected={bucket === 'today'} onClick={() => pick('today')} />
-        <Stat icon={AlertTriangle} label="Overdue" value={summary.data ? counts.overdue : undefined} tone="danger" selected={bucket === 'overdue'} onClick={() => pick('overdue')} />
-        <Stat icon={CalendarRange} label="Weekly / monthly · next 7 days" value={summary.data ? counts.upcoming : undefined} tone="primary" selected={bucket === 'upcoming'} onClick={() => pick('upcoming')} />
-        <Stat icon={CheckCircle2} label="Completed · last 7 days" value={summary.data ? counts.done : undefined} tone="success" selected={bucket === 'done'} onClick={() => pick('done')} />
-      </div>
-      <div className="row-wrap" style={{ marginBottom: 16 }}>
-        <select className="select" style={{ maxWidth: 280 }} value={client} onChange={e => { setClient(e.target.value); setProject(""); }} aria-label="Filter by client">
-          <option value="">All clients</option>{(clients.data || []).map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
-        </select>
-        {client && projectData.length > 0 && <select className="select" style={{ maxWidth: 260 }} value={project} onChange={e => setProject(e.target.value)} aria-label="Filter by project">
-          <option value="">All projects</option>
-          {projectData.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
-          <option value="unassigned">Needs project assignment</option>
-        </select>}
-        <div className="spacer" />
-        <select className="select" style={{ width: 'auto', minHeight: 40, borderRadius: 999 }} value={bucket} onChange={e => setBucket(e.target.value)} aria-label="Show">
-          <option value="today">Due today</option><option value="overdue">Overdue</option>
-          <option value="upcoming">Weekly / monthly · next 7 days</option><option value="done">Recently completed</option>
-          <option value="active">All actionable work</option>
-        </select>
-        <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search tasks" value={q} onChange={e => setQ(e.target.value)} aria-label="Search tasks" /></div>
-      </div>
-      {client && projectData.length > 0 && <div className="card card-pad" style={{ marginBottom: 16 }}>
-        <div className="row-wrap" style={{ justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <h3>{selectedProject ? selectedProject.name + ' · Master work list' : 'Project master task lists'}</h3>
-            <p className="small muted" style={{ marginTop: 5 }}>
-              {selectedProject && master.data ? `${master.data.length} master reference items. Only actual dated assignments appear in the counts below.` :
-                'Master work items hold scope, SOPs and links; they are not automatically assigned or scheduled.'}
-            </p>
-          </div>
-          {project && project !== 'unassigned' ?
-            <Link to={`/clients/${client}/projects/${project}`} className="btn btn-outline">Open complete project task list</Link> :
-            <Link to={`/clients/${client}/projects`} className="btn btn-outline">View project task lists</Link>}
-        </div>
-      </div>}
-      {client && project && project !== 'unassigned' && <ProjectWorkRegister
-        key={project}
-        clientId={client}
-        projectId={project}
-        canManage={!!clientDetails.data?.canEditMasterList}
-        canArchive={!!clientDetails.data?.canManage}
-      />}
-      <div className="row-wrap" style={{ marginBottom: 10 }}>
-        <h3>Scheduled tasks &amp; completion</h3>
-        <span className="small muted">Only dated assignments appear here; master work items are listed separately.</span>
-      </div>
-      <TaskListCard tasks={tasks.data} loading={tasks.loading} showPeople={view === 'clients'} onOpen={t => setOpenId(t._id)} onToggle={toggle} emptyTitle="No scheduled tasks match" />
-      <TaskPagination {...tasks} />
-      {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={reload} />}
-      {creating && <TaskForm onClose={() => setCreating(false)} onSaved={reload} />}
-    </>
-  );
+  return <>
+    <PageHead title={`Good ${hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'}, ${user.name.split(' · ').pop().split(' ')[0]}`} />
+    <section className="stack" aria-labelledby="my-work-task-status">
+      <h2 id="my-work-task-status">Daily task completion</h2>
+      <DailyTaskStatus />
+    </section>
+  </>;
 }
 
 /* ---------- Client manager dashboard ---------- */
