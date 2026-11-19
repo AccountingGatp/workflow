@@ -387,7 +387,7 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-task-linked { display: block; padding-top: 6px; overflow-wrap: anywhere; }
 .daily-task-remove { width: 34px; min-height: 34px; height: 34px; }
 .daily-task-remove:hover:not(:disabled) { color: var(--danger); background: var(--danger-soft); }
-.daily-entry-grid { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1fr) minmax(0, 1.35fr); gap: 10px; align-items: start; }
+.daily-entry-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .daily-entry-grid .input, .daily-entry-grid .select { min-width: 0; width: 100%; }
 .daily-entry-checklist { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .daily-entry-checklist label { overflow-wrap: anywhere; }
@@ -403,10 +403,6 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   .daily-work-page[data-entry] .daily-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .daily-work-page[data-entry] .daily-tab { flex: 0 0 auto; white-space: nowrap; }
 }
-@media (max-width: 420px) {
-  .daily-entry-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .daily-entry-grid > :last-child { grid-column: 1 / -1; }
-}
 .daily-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
 .daily-metrics .card { display: flex; flex-direction: column; gap: 5px; }
 .daily-metrics strong { font-size: 1.75rem; }
@@ -421,8 +417,11 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-project-options li { padding: 8px 10px; border-radius: var(--r-sm); overflow-wrap: anywhere; }
 .daily-project-options [role="option"] { cursor: pointer; }
 .daily-project-options [aria-selected="true"] { background: var(--primary-soft); color: var(--primary); }
-.daily-entry-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center;
-  text-align: start; gap: 10px; width: 100%; padding: 0; background: none; border: 0; cursor: pointer; color: inherit; font: inherit; }
+.daily-entry-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start;
+  text-align: start; gap: 10px; width: 100%; padding: 0; background: none; border: 0; color: inherit; font: inherit; }
+button.daily-entry-summary { grid-template-columns: minmax(0, 1fr) auto auto auto; cursor: pointer; }
+.daily-entry-summary > svg { align-self: center; transition: rotate .2s ease; }
+.daily-entry-summary[aria-expanded="true"] > svg { rotate: 180deg; }
 .daily-entry-summary strong, .daily-entry-summary small { display: block; overflow-wrap: anywhere; }
 .daily-entry-summary .badge { text-transform: capitalize; }
 .daily-row-project { display: block; margin-bottom: 4px; overflow-wrap: anywhere; }
@@ -435,20 +434,14 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-note textarea { width: 100%; }
 .daily-row-actions { justify-content: flex-end; margin-top: 10px; }
 @media (prefers-reduced-motion: reduce) {
-  .daily-reveal { transition: none; }
+  .daily-reveal, .daily-entry-summary > svg { transition: none; }
 }
 
 .daily-open-suggestions { margin-top: 10px; }
 .daily-suggestions { margin-top: 18px; }
 .daily-suggestions .daily-project-tasks { max-height: min(42vh, 420px); }
-.daily-status-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(225px, auto); align-items: start; gap: 12px 20px;
-  padding: 14px clamp(14px, 2vw, 22px); }
-.daily-status-info { min-width: 0; gap: 4px; overflow-wrap: anywhere; }
-.daily-status-info h3 { font-size: 15px; }
-.daily-status-actions { justify-self: end; max-width: 100%; }
-.daily-status-actions form { width: min(100%, 330px); gap: 8px; }
-.daily-status-actions textarea { width: 100%; }
-@media (max-width: 700px) {
-  .daily-status-item { grid-template-columns: minmax(0, 1fr); }
-  .daily-status-actions { justify-self: stretch; }
-}
+.daily-status-details { gap: 6px; padding-top: 10px; }
+.daily-status-footer { gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.daily-status-toolbar { justify-content: space-between; }
+.daily-status-reason { width: min(100%, 400px); gap: 8px; }
+.daily-status-reason textarea { width: 100%; }
