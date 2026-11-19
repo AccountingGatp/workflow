@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ClipboardList, Plus, Search, Send, StickyNote, Trash2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
@@ -90,6 +90,29 @@ const savedRow = (entry, key = entry._id) => ({ ...entry, key, collapsed: true }
 const entryPayload = ({ _id, projectId, title, description, note, hours, status, priority, catalogId, workItemId, workflowTaskId, checklistChanges }) => ({
   _id, projectId, title, description, note, hours, status, priority, catalogId, workItemId, workflowTaskId, checklistChanges,
 });
+
+function DailyTaskCard({ entry, expanded, showSummary = true, onToggle, context, footer, children }) {
+  const detailsId = useId();
+  const summary = <>
+    <span><strong>{entry.title}</strong><small className="muted">{entry.projectName}{context}</small></span>
+    <span className="mono">{hours(entry.hours)} h</span>
+    <Badge cls={entry.priority === 'high' ? 'b-danger' : 'b-primary'}>{entry.priority}</Badge>
+  </>;
+
+  return <article className="daily-entry" data-entry-key={entry.key}>
+    {showSummary && (onToggle
+      ? <button className="daily-entry-summary" type="button" data-focus-summary
+        aria-label={`${expanded ? 'Close' : 'Open'} ${entry.title} details`}
+        aria-expanded={expanded} aria-controls={detailsId} onClick={onToggle}>
+        {summary}<ChevronDown size={16} aria-hidden="true" />
+      </button>
+      : <div className="daily-entry-summary">{summary}</div>)}
+    {children && <div id={detailsId} className="daily-reveal" data-open={expanded}>
+      <div inert={!expanded}>{children}</div>
+    </div>}
+    {footer}
+  </article>;
+}
 
 function EntryEditor({ date, data }) {
   const [submission, setSubmission] = useState(data.submission);
@@ -333,104 +356,89 @@ function EntryEditor({ date, data }) {
             !data.workItems.some((item) => item.projectId === row.projectId && nameKey(item.title) === nameKey(row.title));
           const maxHours = original && !customEdit ? original.hours : task ? Math.min(24, remaining) : 24;
           const hintId = `hours-limit-${row.key}`;
-          return <article className="daily-entry" key={row.key} data-entry-key={row.key}>
-            {row.collapsed && <button className="daily-entry-summary" type="button" data-focus-summary
-              aria-label={`Open ${row.title} details`} aria-expanded="false" onClick={() => {
-                newEntry.current = row.key;
-                update(row.key, { collapsed: false, noteOpen: !!row.note });
-              }}>
-              <span><strong>{row.title}</strong><small className="muted">{row.projectName}</small></span>
-              <span className="mono">{hours(row.hours)} h</span>
-              <Badge cls={row.priority === 'high' ? 'b-danger' : 'b-primary'}>{row.priority}</Badge>
-              <ChevronDown size={16} aria-hidden="true" />
-            </button>}
-            <div className="daily-reveal" data-open={!row.collapsed}>
-              <div inert={!!row.collapsed}>
-                <form onSubmit={(event) => { event.preventDefault(); saveRow(row); }}>
-                  <fieldset className="daily-entry-fields" disabled={!!busy}>
-                    <span className="small muted daily-row-project">{row.projectName}</span>
-                    <div className="daily-task-heading">
-                      <div className="stack daily-task-name">
-                        {linked ? <>
-                          <strong className="daily-task-linked">{row.title}</strong>
-                          {row.description && <p className="small muted daily-task-description">{row.description}</p>}
-                        </> : <>
-                          <label className="field"><span>Task</span>
-                            <input className="input" maxLength={230} required value={row.title}
-                              data-entry-focus={!row.title || undefined}
-                              onChange={(event) => update(row.key, { title: event.target.value })} /></label>
-                          <label className="field"><span>Description</span>
-                            <textarea className="input" rows={2} maxLength={3000} value={row.description || ''}
-                              onChange={(event) => update(row.key, { description: event.target.value })} /></label>
-                        </>}
-                      </div>
-                      <button type="button" className="btn btn-ghost icon-btn daily-task-remove" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
-                        onClick={() => saveRow(row, true)}><Trash2 size={17} /></button>
-                    </div>
-                    <div className="daily-entry-grid">
-                      <div className="field">
-                        <label htmlFor={`hours-${row.key}`}>Hours</label>
-                        <input id={`hours-${row.key}`} className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
-                          aria-describedby={original || task || row.hoursAdjusted ? hintId : undefined}
-                          data-entry-focus={!!row.title || undefined}
-                          onFocus={(event) => event.target.select()}
-                          onChange={(event) => {
-                            const { value, valueAsNumber } = event.target;
-                            const hoursAdjusted = valueAsNumber > maxHours;
-                            update(row.key, { hours: hoursAdjusted ? String(maxHours) : value, hoursAdjusted });
-                          }} />
-                        {(original || task || row.hoursAdjusted) && <span id={hintId} className="hint" aria-live="polite">
-                          {row.hoursAdjusted ? `Adjusted to ${hours(maxHours)} h.` : original
-                            ? `Up to ${hours(maxHours)} h${customEdit ? '' : ' · Saved time can only be reduced'}`
-                            : `Up to ${hours(maxHours)} h · ${task.period}${task.review ? ' · across projects' : ''}`}
-                        </span>}
-                      </div>
-                      <div className="field"><label htmlFor={`priority-${row.key}`}>Priority</label>
-                        <select id={`priority-${row.key}`} className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
-                        <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
-                      </select></div>
-                      <div className="field"><label htmlFor={`status-${row.key}`}>Status</label>
-                        <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
-                        <option value="incomplete">Incomplete</option><option value="complete">Complete</option>
-                      </select></div>
-                    </div>
-                    {!!row.checklist?.length && <div className="stack daily-entry-checklist">
-                      {row.checklist.map((step) => <label key={step._id} className="row">
-                        <input type="checkbox" checked={row.checklistChanges?.find((change) => change.id === step._id)?.done ?? step.done}
-                          disabled={['done', 'unavailable'].includes(row.workflowStatus)}
-                          onChange={(event) => update(row.key, { checklistChanges: [
-                            ...(row.checklistChanges || []).filter((change) => change.id !== step._id),
-                            ...(event.target.checked === step.done ? [] : [{ id: step._id, done: event.target.checked }]),
-                          ] })} />{step.text}
-                      </label>)}
-                    </div>}
-                    <div className="daily-note">
-                      {!row.noteOpen && <button type="button" className="btn btn-ghost btn-sm" aria-expanded="false" onClick={() => {
-                        update(row.key, { noteOpen: true });
-                        requestAnimationFrame(() => document.getElementById(`note-${row.key}`)?.focus());
-                      }}><StickyNote size={15} /> Add note</button>}
-                      <div className="daily-reveal" data-open={!!row.noteOpen}>
-                        <div inert={!row.noteOpen}><label className="field">
-                          <span>Note <span className="muted">(optional)</span></span>
-                          <textarea className="input" id={`note-${row.key}`} rows={2} maxLength={500} value={row.note || ''}
-                            onChange={(event) => update(row.key, { note: event.target.value })} />
-                        </label></div>
-                      </div>
-                    </div>
-                    <div className="row-wrap daily-row-actions">
-                      {original && <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
-                        newEntry.current = row.key;
-                        setRows((old) => old.map((item) => item.key === row.key ? savedRow(original, row.key) : item));
-                      }}>Cancel</button>}
-                      <button type="submit" className="btn btn-primary btn-sm" aria-label={`Save ${row.title || 'task'}`}>
-                        {busy === row.key ? 'Saving…' : 'Save task'}
-                      </button>
-                    </div>
-                  </fieldset>
-                </form>
-              </div>
-            </div>
-          </article>;
+          return <DailyTaskCard key={row.key} entry={row} expanded={!row.collapsed} showSummary={!!row.collapsed} onToggle={() => {
+            newEntry.current = row.key;
+            update(row.key, { collapsed: false, noteOpen: !!row.note });
+          }}>
+            <form onSubmit={(event) => { event.preventDefault(); saveRow(row); }}>
+              <fieldset className="daily-entry-fields" disabled={!!busy}>
+                <span className="small muted daily-row-project">{row.projectName}</span>
+                <div className="daily-task-heading">
+                  <div className="stack daily-task-name">
+                    {linked ? <>
+                      <strong className="daily-task-linked">{row.title}</strong>
+                      {row.description && <p className="small muted daily-task-description">{row.description}</p>}
+                    </> : <>
+                      <label className="field"><span>Task</span>
+                        <input className="input" maxLength={230} required value={row.title}
+                          data-entry-focus={!row.title || undefined}
+                          onChange={(event) => update(row.key, { title: event.target.value })} /></label>
+                      <label className="field"><span>Description</span>
+                        <textarea className="input" rows={2} maxLength={3000} value={row.description || ''}
+                          onChange={(event) => update(row.key, { description: event.target.value })} /></label>
+                    </>}
+                  </div>
+                  <button type="button" className="btn btn-ghost icon-btn daily-task-remove" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
+                    onClick={() => saveRow(row, true)}><Trash2 size={17} /></button>
+                </div>
+                <div className="daily-entry-grid">
+                  <div className="field">
+                    <label htmlFor={`hours-${row.key}`}>Hours</label>
+                    <input id={`hours-${row.key}`} className="input" type="number" min="0" max={maxHours} step="0.01" required value={row.hours}
+                      aria-describedby={original || task || row.hoursAdjusted ? hintId : undefined}
+                      data-entry-focus={!!row.title || undefined}
+                      onFocus={(event) => event.target.select()}
+                      onChange={(event) => {
+                        const { value, valueAsNumber } = event.target;
+                        const hoursAdjusted = valueAsNumber > maxHours;
+                        update(row.key, { hours: hoursAdjusted ? String(maxHours) : value, hoursAdjusted });
+                      }} />
+                    {(original || task || row.hoursAdjusted) && <span id={hintId} className="hint" aria-live="polite">
+                      {row.hoursAdjusted ? `Adjusted to ${hours(maxHours)} h.` : original
+                        ? `Up to ${hours(maxHours)} h${customEdit ? '' : ' · Saved time can only be reduced'}`
+                        : `Up to ${hours(maxHours)} h · ${task.period}${task.review ? ' · across projects' : ''}`}
+                    </span>}
+                  </div>
+                  <div className="field"><label htmlFor={`priority-${row.key}`}>Priority</label>
+                    <select id={`priority-${row.key}`} className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
+                    <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
+                  </select></div>
+                </div>
+                {!!row.checklist?.length && <div className="stack daily-entry-checklist">
+                  {row.checklist.map((step) => <label key={step._id} className="row">
+                    <input type="checkbox" checked={row.checklistChanges?.find((change) => change.id === step._id)?.done ?? step.done}
+                      disabled={['done', 'unavailable'].includes(row.workflowStatus)}
+                      onChange={(event) => update(row.key, { checklistChanges: [
+                        ...(row.checklistChanges || []).filter((change) => change.id !== step._id),
+                        ...(event.target.checked === step.done ? [] : [{ id: step._id, done: event.target.checked }]),
+                      ] })} />{step.text}
+                  </label>)}
+                </div>}
+                <div className="daily-note">
+                  {!row.noteOpen && <button type="button" className="btn btn-ghost btn-sm" aria-expanded="false" onClick={() => {
+                    update(row.key, { noteOpen: true });
+                    requestAnimationFrame(() => document.getElementById(`note-${row.key}`)?.focus());
+                  }}><StickyNote size={15} /> Add note</button>}
+                  <div className="daily-reveal" data-open={!!row.noteOpen}>
+                    <div inert={!row.noteOpen}><label className="field">
+                      <span>Note <span className="muted">(optional)</span></span>
+                      <textarea className="input" id={`note-${row.key}`} rows={2} maxLength={500} value={row.note || ''}
+                        onChange={(event) => update(row.key, { note: event.target.value })} />
+                    </label></div>
+                  </div>
+                </div>
+                <div className="row-wrap daily-row-actions">
+                  {original && <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+                    newEntry.current = row.key;
+                    setRows((old) => old.map((item) => item.key === row.key ? savedRow(original, row.key) : item));
+                  }}>Cancel</button>}
+                  <button type="submit" className="btn btn-primary btn-sm" aria-label={`Save ${row.title || 'task'}`}>
+                    {busy === row.key ? 'Saving…' : 'Save task'}
+                  </button>
+                </div>
+              </fieldset>
+            </form>
+          </DailyTaskCard>;
         })}
       </div>
     </section>
@@ -445,6 +453,7 @@ function StatusBadge({ entry }) {
 function TaskStatusRow({ entry, onSaved }) {
   const { submission } = entry;
   const mayUpdate = entry.canUpdateStatus;
+  const [expanded, setExpanded] = useState(false);
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState(entry.incompleteReason || '');
   const [busy, setBusy] = useState(false);
@@ -466,22 +475,24 @@ function TaskStatusRow({ entry, onSaved }) {
     } finally { setBusy(false); }
   }
 
-  return <article className="card daily-status-item">
-    <div className="stack daily-status-info">
-      <div className="row-wrap"><h3>{entry.title}</h3><StatusBadge entry={entry} /></div>
-      <div className="small muted">{entry.projectName} · {submission.memberName} · <time dateTime={submission.date}>{dueLabel.format(new Date(`${submission.date}T00:00:00+05:30`))}</time> · {hours(entry.hours)} h</div>
-      {entry.note && <p className="small daily-task-description">{entry.note}</p>}
-      {entry.incompleteReason && !showReason && <p className="small daily-task-description"><strong>Reason</strong> {entry.incompleteReason}</p>}
-    </div>
-    {mayUpdate && <div className="daily-status-actions">
-      {!showReason ? <div className="row-wrap">
-        {entry.status !== 'complete' &&
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
-          setReason(entry.incompleteReason || '');
-          setShowReason(true);
-        }}>Incomplete</button>
-      </div> : <form className="stack" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
+  const hasDetails = !!(entry.description || entry.note);
+  return <DailyTaskCard entry={entry} expanded={expanded} onToggle={hasDetails ? () => setExpanded((open) => !open) : undefined}
+    context={<> · {submission.memberName} · <time dateTime={submission.date}>{dueLabel.format(new Date(`${submission.date}T00:00:00+05:30`))}</time></>}
+    footer={<div className="daily-status-footer stack">
+      <div className="row-wrap daily-status-toolbar">
+        <StatusBadge entry={entry} />
+        {mayUpdate && !showReason && <div className="row-wrap daily-status-actions">
+          {entry.status !== 'complete' &&
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
+            setReason(entry.incompleteReason || '');
+            setShowReason(true);
+          }}>Incomplete</button>
+        </div>}
+      </div>
+      {entry.incompleteReason && !showReason &&
+        <p className="small daily-task-description"><strong>Reason</strong> {entry.incompleteReason}</p>}
+      {mayUpdate && showReason && <form className="stack daily-status-reason" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
         <label className="field"><span>Why is this incomplete?</span>
           <textarea className="input" autoFocus required rows={2} maxLength={500} disabled={busy}
             value={reason} onChange={(event) => setReason(event.target.value)} /></label>
@@ -491,8 +502,12 @@ function TaskStatusRow({ entry, onSaved }) {
         </div>
       </form>}
       <ErrorBox error={error} />
+    </div>}>
+    {hasDetails && <div className="stack daily-status-details">
+      {entry.description && <p className="small muted daily-task-description">{entry.description}</p>}
+      {entry.note && <p className="small daily-task-description"><strong>Note</strong> {entry.note}</p>}
     </div>}
-  </article>;
+  </DailyTaskCard>;
 }
 
 const reportViews = ['member', 'status', 'summary'];
