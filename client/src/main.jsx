@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import '@fontsource-variable/hanken-grotesk';
 import './styles.css';
 import { AuthProvider, ToastProvider, useAuth } from './lib.jsx';
 import Layout from './Layout.jsx';

@@ -1,8 +1,8 @@
 import GoogleSignIn from '../GoogleSignIn.jsx';
 import { useState } from 'react';
-import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Layers, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
+import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
-import { Avatar, Avatars, Badge, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
+import { Avatar, Avatars, Badge, BrandName, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskForm } from '../tasks.jsx';
 
 /* ---------- Teams ---------- */
@@ -382,7 +382,7 @@ export function Login() {
   return (
     <div className="login">
       <section className="login-hero">
-        <div className="row" style={{ gap: 10 }}><div className="brand-mark" style={{ background: 'rgba(255,255,255,.18)' }}><Layers size={18} /></div><span className="brand-name">Workflow</span></div>
+        <BrandName />
         <div>
           <h1>Every client, task and team — one calm workspace.</h1>
           <p>Built for accounting practices where people work across several teams, and every client’s data stays private.</p>
@@ -395,6 +395,7 @@ export function Login() {
       </section>
       <section className="login-panel">
         <div className="login-card">
+          <div className="login-mobile-brand"><BrandName /></div>
           <div><h1>Sign in</h1><p className="muted" style={{ marginTop: 4 }}>Use your work account.</p></div>
           <form className="stack" style={{ gap: 16 }} onSubmit={go}>
             <ErrorBox error={error || (offline ? new Error('Can’t reach the server. Make sure the API server is running, then reload.') : null)} />

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, CalendarCheck, CheckSquare, Building2, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Layers, Mail as MailIcon,
+  LayoutDashboard, CalendarCheck, CheckSquare, Building2, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Mail as MailIcon,
 } from 'lucide-react';
 import { useAuth, useApi, ROLE_LABEL } from './lib.jsx';
-import { Avatar } from './ui.jsx';
+import { Avatar, BrandName } from './ui.jsx';
 
 function ThemeToggle() {
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem('ka.theme'); } catch { return null; } });
@@ -38,7 +38,7 @@ export default function Layout() {
     <div className="shell">
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
       <nav className={`sidebar ${open ? 'open' : ''}`} aria-label="Main">
-        <div className="brand"><div className="brand-mark"><Layers size={18} /></div><span className="brand-name">Workflow</span></div>
+        <div className="brand"><BrandName /></div>
         {!can.super && item('/', CheckSquare, 'My work')}
         {item('/daily-work', CalendarCheck, 'Daily Work')}
         {can.manage && item('/overview', LayoutDashboard, 'Overview')}
