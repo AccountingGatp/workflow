@@ -106,7 +106,6 @@ async function sendScheduled(models, key, now, compose) {
 export async function runDailyWorkJobs(now = new Date()) {
   if (!slackConfigured()) return;
   const models = await dailyModels();
-  await retrySlack(models);
   const { date, time, weekday } = clock(now);
   const configured = await statusReminders(models);
   await Promise.all(configured.filter((reminder) => {
@@ -116,6 +115,7 @@ export async function runDailyWorkJobs(now = new Date()) {
     const reminderDate = time < reminder.time ? shiftDate(date, -1) : date;
     return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, () => statusReminderText(reminder));
   }));
+  await retrySlack(models);
   const allReports = process.env.DAILY_WORK_SLACK_REPORTS === 'true';
   if (!allReports && process.env.DAILY_WORK_SHIFT_REPORTS !== 'true') return;
   const yesterday = shiftDate(date, -1);

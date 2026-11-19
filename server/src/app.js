@@ -60,7 +60,11 @@ const cronAuth = (req, res, next) => (process.env.CRON_SECRET && req.headers.aut
 app.get('/api/cron/recurring', cronAuth, async (_req, res) => res.json({ created: await generateRecurringTasks() }));
 app.get('/api/cron/mail', cronAuth, async (_req, res) => { await syncAllAccounts(); res.json({ ok: true }); });
 
-app.get('/api/cron/daily-work', cronAuth, async (_req, res) => { await runDailyWorkJobs(); res.json({ ok: true }); });
+app.get('/api/cron/daily-work', cronAuth, async (_req, res) => {
+  await runDailyWorkJobs();
+  console.info('Daily Work cron finished');
+  res.json({ ok: true });
+});
 app.use('/api/daily-work', requireAuth, dailyWorkRoutes);
 
 app.use('/api/auth', authRoutes);
