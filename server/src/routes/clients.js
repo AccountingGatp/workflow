@@ -14,7 +14,7 @@ function cleanEmailMatches(list) {
   return out;
 }
 import {
-  audit, isSuper, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
+  audit, isSuper, canMaintainTasks, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
   canGrantDirectly, activePermissionFilter, teamLeads,
 } from '../services/access.js';
 
@@ -82,7 +82,7 @@ r.get('/clients/:id', ah(async (req, res) => {
     teams: assignments.filter((a) => a.team).map((a) => ({ ...a.team, assignmentId: a._id, lead: leads[String(a.team._id)] || null })),
     admins: assignments.filter((a) => a.admin).map((a) => ({ ...a.admin, assignmentId: a._id })),
     permissions, requests, canManage: manage,
-    canEditMasterList: manage || req.user.role === 'admin',
+    canEditMasterList: manage && canMaintainTasks(req.user),
     isSuper: isSuper(req.user),
   });
 }));

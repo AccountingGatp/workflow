@@ -3,10 +3,10 @@ import { HttpError } from '../middleware/auth.js';
 export const slackConfigured = () => !!(process.env.DAILY_WORK_SLACK_TOKEN && process.env.DAILY_WORK_SLACK_CHANNEL);
 const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-export function submissionText({ memberName, date, entries }, heading = 'Daily project update') {
+export function submissionText({ memberName, date, entries }, heading = 'Daily project update', includeNotes = false) {
   return [
     `*${heading}* · ${escape(memberName)} · ${date}`,
-    ...entries.map((entry) => `• ${escape(entry.projectName)} — ${escape(entry.title)} · ${entry.hours} h · ${entry.priority} priority · ${entry.workflowStatus === 'pending_review' ? 'awaiting TL review' : entry.status}`),
+    ...entries.map((entry) => `• ${escape(entry.projectName)} — ${escape(entry.title)} · ${entry.hours} h · ${entry.priority} priority · ${entry.workflowStatus === 'pending_review' ? 'awaiting TL review' : entry.status}${includeNotes && entry.note ? `\n  Note: ${escape(entry.note)}` : ''}`),
     entries.length ? `Total: ${entries.reduce((sum, row) => sum + row.hours, 0).toFixed(2)} h` : 'All tasks removed for this day.',
   ].join('\n');
 }
@@ -39,7 +39,7 @@ export async function deliverSubmission({ Submission }, id) {
   const filter = { _id: id, __v: sending.__v, delivery: 'sending' };
   let result;
   try {
-    result = await postSlack(submissionText(sending, sending.slackTs ? 'Updated daily project details' : 'Daily project update'), {
+    result = await postSlack(submissionText(sending, sending.slackTs ? 'Updated daily project details' : 'Daily project update', true), {
       channel: sending.slackChannel, thread: sending.slackTs,
     });
   } catch (error) {

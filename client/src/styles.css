@@ -375,15 +375,12 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
 .daily-project-task-info { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .daily-project-task-info strong { font-weight: 600; }
-.daily-editor-bar, .daily-editor-body, .daily-editor-footer { padding: 14px clamp(14px, 2vw, 22px); }
+.daily-editor-bar, .daily-editor-body { padding: 14px clamp(14px, 2vw, 22px); }
 .daily-editor-bar { background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 1px solid var(--border); }
 .daily-editor-bar h2 { margin-bottom: 2px; }
 .daily-editor-totals { gap: 10px; }
 .daily-editor-body { min-height: 146px; }
-.daily-editor-footer { border-top: 1px solid var(--border); }
-.daily-editor-footer .btn { margin-left: auto; }
 .daily-entry { border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; margin: 0; padding: 12px; }
-.daily-entry legend { color: var(--text-2); font-size: 12px; font-weight: 600; padding-inline: 5px; overflow-wrap: anywhere; }
 .daily-task-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-bottom: 12px; }
 .daily-task-search { margin-top: 12px; }
 .daily-task-description { white-space: pre-line; overflow-wrap: anywhere; }
@@ -415,3 +412,29 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-metrics strong { font-size: 1.75rem; }
 .daily-status { text-transform: capitalize; }
 .daily-import { margin-top: 12px; }
+
+.daily-project-combo { position: relative; }
+.daily-project-combo .input { padding-right: 42px; }
+.daily-combo-toggle { position: absolute; top: 50%; right: 4px; translate: 0 -50%; }
+.daily-project-options { position: absolute; z-index: 5; inset: calc(100% + 5px) 0 auto; margin: 0; padding: 4px; list-style: none;
+  max-height: 260px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 16%); }
+.daily-project-options li { padding: 8px 10px; border-radius: var(--r-sm); overflow-wrap: anywhere; }
+.daily-project-options [role="option"] { cursor: pointer; }
+.daily-project-options [aria-selected="true"] { background: var(--primary-soft); color: var(--primary); }
+.daily-entry-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center;
+  text-align: start; gap: 10px; width: 100%; padding: 0; background: none; border: 0; cursor: pointer; color: inherit; font: inherit; }
+.daily-entry-summary strong, .daily-entry-summary small { display: block; overflow-wrap: anywhere; }
+.daily-entry-summary .badge { text-transform: capitalize; }
+.daily-row-project { display: block; margin-bottom: 4px; overflow-wrap: anywhere; }
+.daily-entry-fields { margin: 0; border: 0; padding: 0; min-width: 0; }
+.daily-reveal { display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden;
+  transition: grid-template-rows .2s ease, opacity .18s ease, visibility .2s; }
+.daily-reveal[data-open="true"] { grid-template-rows: 1fr; opacity: 1; visibility: visible; }
+.daily-reveal > div { min-height: 0; overflow: clip; }
+.daily-note { margin-top: 10px; }
+.daily-note textarea { width: 100%; }
+.daily-row-actions { justify-content: flex-end; margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .daily-reveal { transition: none; }
+}

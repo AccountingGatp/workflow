@@ -4,13 +4,14 @@ import { ClientAssignment, ClientPermission, TeamMembership, AuditLog } from '..
  * Central access rules. Every route asks this module; nothing else decides visibility.
  *
  *  super_admin  -> everything
- *  admin        -> clients they are assigned to manage (+ any explicit permission)
+ *  manager/admin -> clients they are assigned to manage (+ any explicit permission)
  *  employee     -> only clients with an active explicit ClientPermission
  *
  * Team membership alone never grants client access.
  */
 
 export const isSuper = (u) => u.role === 'super_admin';
+export const canMaintainTasks = (user) => isSuper(user) || user.role === 'manager';
 
 export const activePermissionFilter = () => ({
   revokedAt: null,
@@ -23,7 +24,7 @@ export const activePermissionFilter = () => ({
  */
 export async function managedClientIds(user) {
   if (isSuper(user)) return null; // null = unrestricted
-  if (user.role !== 'admin') return [];
+  if (!['admin', 'manager'].includes(user.role)) return [];
   const led = await ledTeamIds(user);
   const rows = await ClientAssignment.find({ endedAt: null, $or: [{ admin: user._id }, { team: { $in: led } }] }).select('client');
   return [...new Set(rows.map((r) => String(r.client)))];

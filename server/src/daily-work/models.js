@@ -55,6 +55,7 @@ const entry = new Schema({
   workItemId: String,
   title: text,
   description: String,
+  note: { type: String, maxlength: 500 },
   hours: { ...hours, required: true },
   priority: { type: String, enum: ['low', 'normal', 'high'], required: true },
   status: { type: String, enum: ['incomplete', 'complete'], required: true },
@@ -73,6 +74,7 @@ const submissionSchema = new Schema({
 }, options);
 submissionSchema.index({ date: 1, memberId: 1 });
 submissionSchema.index({ memberId: 1, date: 1 });
+submissionSchema.index({ 'entries.projectId': 1, date: 1 });
 submissionSchema.index({ delivery: 1, deliveryAfter: 1 });
 
 const reportSchema = new Schema({ _id: String, state: text, startedAt: Date, expiresAt: Date });

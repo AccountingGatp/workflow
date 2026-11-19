@@ -32,7 +32,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     server = app.listen(0);
     const base = `http://127.0.0.1:${server.address().port}/api/daily-work`;
     async function request(user, path, method = 'GET', body, status = 200) {
-      const response = await fetch((path.startsWith('/tasks/') ? base.replace(/\/daily-work$/, '') : base) + path, {
+      const response = await fetch((/^\/(tasks|clients|templates|users)\//.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
         method, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(user._id) }, JWT_SECRET) },
         body: body && JSON.stringify(body),
       });
@@ -45,13 +45,13 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     async function person(name, role) {
       return User.create({ name, role, email: `${name}@example.test`, passwordHash: 'fixture-only' });
     }
-    const [owner, lead, employee, other] = await Promise.all([
-      person('owner', 'super_admin'), person('Simran', 'admin'), person('employee', 'employee'), person('other', 'employee'),
+    const [owner, lead, employee, other, manager] = await Promise.all([
+      person('owner', 'super_admin'), person('Simran', 'admin'), person('employee', 'employee'), person('other', 'employee'), person('manager', 'manager'),
     ]);
     const [client, team] = await Promise.all([Client.create({ name: 'Company' }), Team.create({ name: 'Team' })]);
     const project = await ClientProject.create({ client: client._id, name: 'Accounting' });
     await TeamMembership.create([{ user: lead._id, team: team._id, teamRole: 'lead' }, { user: employee._id, team: team._id }]);
-    await ClientAssignment.create({ client: client._id, team: team._id });
+    await ClientAssignment.create([{ client: client._id, team: team._id }, { client: client._id, admin: manager._id }]);
     await ClientPermission.create({ client: client._id, user: employee._id, grantedBy: lead._id });
     const date = clock().date;
     const previousDate = shiftDate(date, -1);
@@ -94,22 +94,43 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal((await request(other, `/missing/${date}`)).expected, 0);
     assert.equal((await request(lead, `/missing/${previousDate}`)).expected, 0);
 
+    await request(lead, `/tasks/${source._id}`, 'PATCH', { title: 'Blocked edit' }, 403);
+    assert.equal((await request(lead, `/tasks/${source._id}`)).canEdit, false);
+    assert.equal((await request(manager, `/tasks/${source._id}`)).canEdit, true);
+    await request(manager, `/tasks/${source._id}`, 'PATCH', { priority: 'low' });
+    const masterPath = `/clients/${client._id}/projects/${project._id}/work-items/${master._id}`;
+    await request(lead, masterPath, 'PATCH', { title: master.title }, 403);
+    await request(manager, masterPath, 'PATCH', { title: master.title, notes: 'Master description' });
+
     const entry = { title: 'Review ledger', projectId: daily._id, workflowTaskId: String(source._id), hours: 2, status: 'incomplete', priority: 'high' };
     await request(other, `/day/${date}`, 'PUT', { entries: [entry] }, 403);
-    const original = await request(employee, `/day/${date}`, 'PUT', { entries: [entry] });
-    assert.equal(original.delivery, 'sent');
+    const put = (user, day, entries, version) => request(user, `/day/${day}`, 'PUT', { entries, version });
+    const send = (user, day, version) => request(user, `/day/${day}/slack`, 'POST', { version });
+    const original = await put(employee, date, [{ ...entry, note: 'Check <this> first' }]);
+    assert.equal(original.delivery, 'skipped');
+    assert.equal(original.entries[0].note, 'Check <this> first');
+    assert.equal(original.entries[0].description, 'Master description');
+    assert.equal(calls.length, 0);
+    const posted = await send(employee, date, original.version);
+    assert.equal(posted.delivery, 'sent');
+    assert.equal(posted.slackPosted, true);
     assert.equal(calls[0].thread_ts, undefined);
-    const changed = await request(employee, `/day/${date}`, 'PUT', {
-      entries: [{ ...original.entries[0], hours: 2.25, status: 'complete', checklistChanges: [{ id: String(source.checklist[0]._id), done: true }] }], version: original.version,
-    });
+    assert.match(calls[0].text, /Note: Check &lt;this&gt; first/);
+    await send(employee, date, posted.version);
+    assert.equal(calls.length, 1);
+    const changed = await put(employee, date, [{ ...original.entries[0], note: '', hours: 2.25, status: 'complete',
+      checklistChanges: [{ id: String(source.checklist[0]._id), done: true }] }], posted.version);
+    assert.equal(changed.entries[0].note, '');
+    assert.equal(changed.entries[0].workflowStatus, 'pending_review');
+    assert.equal(calls.length, 1);
+    const updated = await send(employee, date, changed.version);
     assert.equal(calls[1].thread_ts, '1.000001');
     assert.equal(calls[1].reply_broadcast, false);
     assert.match(calls[1].text, /2.25 h/);
-    assert.equal(changed.entries[0].workflowStatus, 'pending_review');
     assert.match(calls[1].text, /awaiting TL review/);
     assert.equal((await request(employee, `/tasks/${source._id}`)).checklist[0].done, true);
-    const unchanged = await request(employee, `/day/${date}`, 'PUT', { entries: changed.entries, version: changed.version });
-    assert.equal(unchanged.version, changed.version);
+    const unchanged = await request(employee, `/day/${date}`, 'PUT', { entries: updated.entries, version: updated.version });
+    assert.equal(unchanged.version, updated.version);
     assert.equal(calls.length, 2);
     await request(employee, `/day/${date}`, 'PUT', { entries: [], version: original.version }, 409);
     assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 0);
@@ -126,7 +147,9 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(scheduled);
     assert.equal(calls.length, 3);
     assert.match(calls[2].text, /All employees submitted/);
-    await request(employee, `/day/${date}`, 'PUT', { entries: [], version: changed.version });
+    const removed = await put(employee, date, [], updated.version);
+    assert.equal(calls.length, 3);
+    await send(employee, date, removed.version);
     assert.equal(calls[3].thread_ts, '1.000001');
     assert.match(calls[3].text, /All tasks removed/);
 
@@ -152,7 +175,14 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
       request(user, `/day/${day}`, 'PUT', { entries, version }, expected);
     const time = (title, hours, projectId = daily._id) => ({ title, hours, projectId, status: 'complete', priority: 'normal' });
 
-    await log(employee, '2026-10-05', [time('Month end', 1), time('Weekly report', 2), time('Daily bank import', 2)]);
+    await log(employee, '2026-10-05', [time('Month end', 1), time('Weekly report', 2), time('Daily bank import', 2), time('Book payroll', 1)]);
+    const teammateCatalog = (await getDay(lead, '2026-10-05')).catalog;
+    assert.equal(teammateCatalog.find((task) => task.title === 'Book payroll').remainingHours, 0.5);
+    await log(lead, '2026-10-05', [time('Book payroll', 0.51)], 400);
+    const teammateNextDay = (await getDay(lead, '2026-10-06')).catalog;
+    assert.equal(teammateNextDay.find((task) => task.title === 'Book payroll').remainingHours, 1.5);
+    assert.equal(teammateNextDay.find((task) => task.title === 'Weekly report').remainingHours, 1);
+    assert.equal(teammateNextDay.find((task) => task.title === 'Month end').remainingHours, 7);
     const available = (await getDay(employee, '2026-10-06')).catalog;
     assert.equal(available.find((task) => task.title === 'Month end').remainingHours, 7);
     assert.equal(available.find((task) => task.title === 'Weekly report').remainingHours, 1);
@@ -163,12 +193,14 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await log(employee, '2026-10-06', [time(' Review ', 0.25)], 403);
     const results = await Promise.all([
       log(employee, '2026-10-06', [time('Month end', 4)], [200, 400]),
-      log(employee, '2026-10-07', [time('Month end', 4)], [200, 400]),
+      log(lead, '2026-10-07', [time('Month end', 4)], [200, 400]),
     ]);
     assert.deepEqual(results.sort(), [200, 400]);
-    const consumed = (await getDay(employee, '2026-10-06')).submission ? '2026-10-06' : '2026-10-07';
-    const consumedSubmission = (await getDay(employee, consumed)).submission;
-    await log(employee, consumed, [], 200, consumedSubmission.version);
+    const employeeSubmission = (await getDay(employee, '2026-10-06')).submission;
+    const winningUser = employeeSubmission ? employee : lead;
+    const consumed = employeeSubmission ? '2026-10-06' : '2026-10-07';
+    const consumedSubmission = (await getDay(winningUser, consumed)).submission;
+    await log(winningUser, consumed, [], 200, consumedSubmission.version);
     assert.equal((await getDay(employee, '2026-10-08')).catalog.find((task) => task.title === 'Month end').remainingHours, 7);
     assert.equal((await getDay(employee, '2026-10-12')).catalog.find((task) => task.title === 'Weekly report').remainingHours, 3);
     assert.equal((await getDay(employee, '2026-11-01')).catalog.find((task) => task.title === 'Month end').remainingHours, 8);
@@ -204,7 +236,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.41, String(legacyProject))], 400);
     await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.4, String(legacyProject))]);
     await log(lead, '2026-10-06', [time('Review', 1)]);
-    assert.equal((await getDay(lead, '2026-10-05')).catalog.find((task) => task.title === 'Month end').remainingHours, 8);
+    assert.equal((await getDay(lead, '2026-10-05')).catalog.find((task) => task.title === 'Month end').remainingHours, 7);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

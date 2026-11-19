@@ -2,14 +2,11 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { Client, ClientProject, ProjectWorkItem, User } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
-import { canSeeClient, canManageClient, audit } from '../services/access.js';
+import { canSeeClient, canManageClient, canMaintainTasks, audit } from '../services/access.js';
 
 const r = Router();
 async function canEditMasterList(user, clientId) {
-  // Super Admin, assigned client managers / team leads, or an Admin / TL
-  // with explicit access to this client may maintain its task references.
-  if (await canManageClient(user, clientId)) return true;
-  return user.role === 'admin' && await canSeeClient(user, clientId);
+  return canMaintainTasks(user) && await canManageClient(user, clientId);
 }
 async function authorized(req, manager = false) {
   const { clientId, projectId } = req.params;
@@ -56,7 +53,7 @@ async function resolveAssignedEmployee(data) {
 r.get('/clients/:clientId/projects/:projectId/work-items/access', ah(async (req, res) => {
   await authorized(req);
   const canEdit = await canEditMasterList(req.user, req.params.clientId);
-  const canArchive = await canManageClient(req.user, req.params.clientId);
+  const canArchive = canEdit;
   res.json({ canEdit, canArchive, role: req.user.role });
 }));
 r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
@@ -83,8 +80,7 @@ r.patch('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,r
   res.json(doc);
 }));
 r.delete('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,res) => {
-  const project = await authorized(req);
-  if (!(await canManageClient(req.user, req.params.clientId))) throw new HttpError(403, 'Only client managers may archive project work');
+  const project = await authorized(req, true);
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'Work item not found');
   const doc = await ProjectWorkItem.findOneAndUpdate({ _id:req.params.id, project:project._id },
     { $set:{ active:false } }, { new:true });

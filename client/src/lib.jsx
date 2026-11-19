@@ -94,7 +94,8 @@ export function AuthProvider({ children }) {
   const logout = () => { setToken(null); setUser(null); };
   const can = {
     super: user?.role === 'super_admin',
-    manage: user?.role === 'super_admin' || user?.role === 'admin',
+    manage: ['super_admin', 'manager', 'admin'].includes(user?.role),
+    editTasks: ['super_admin', 'manager'].includes(user?.role),
   };
   return <AuthCtx.Provider value={{ user, ready, offline, login, loginGoogle, logout, can }}>{children}</AuthCtx.Provider>;
 }
@@ -109,7 +110,7 @@ export function ToastProvider({ children }) {
 }
 
 /* ---------- Formatting ---------- */
-export const ROLE_LABEL = { super_admin: 'Super Admin', admin: 'Admin / TL', employee: 'Employee' };
+export const ROLE_LABEL = { super_admin: 'Super Admin', manager: 'Admin / Manager', admin: 'Admin / TL', employee: 'Employee' };
 export const STATUS = {
   todo: { label: 'To do', cls: '' },
   in_progress: { label: 'In progress', cls: 'b-info' },

@@ -64,7 +64,7 @@ mailPublic.get('/mail/oauth/callback', ah(async (req, res) => {
 
 r.use(requireAuth);
 
-r.get('/mail/accounts', requireRole('super_admin', 'admin'), ah(async (req, res) => {
+r.get('/mail/accounts', requireRole('super_admin', 'manager', 'admin'), ah(async (req, res) => {
   const led = await ledTeamIds(req.user);
   const filter = led === null ? {} : { team: { $in: led } };
   const accounts = await MailAccount.find(filter).sort({ email: 1 }).populate('team', 'name color').lean();

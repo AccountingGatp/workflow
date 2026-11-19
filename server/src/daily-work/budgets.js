@@ -56,40 +56,42 @@ export function taskBudget(task, date) {
   return { key: String(task._id), start, end, period, hours: task.hours, title: task.title };
 }
 
-function entryKeys(entry, matching) {
-  if (isReview(entry.title)) return [reviewKey];
-  const linked = entry.catalogId;
-  const named = matching.get(`${entry.projectId}:${taskName(entry.title)}`);
-  return [...new Set([linked, entry.workItemId, named].filter(Boolean))];
-}
-
-function entryTotals(entries, names) {
-  const totals = new Map();
-  for (const row of entries) {
-    for (const key of entryKeys(row, names)) totals.set(key, (totals.get(key) || 0) + cents(row.hours));
-  }
-  return totals;
-}
-
 function catalogNames(catalog) {
   return new Map(catalog.filter((task) => !isReview(task.title))
     .map((task) => [`${task.projectId}:${taskName(task.title)}`, String(task._id)]));
 }
 
-async function periodUsage(models, memberId, date, catalog, session) {
+function budgetKeys(catalog) {
+  return { names: catalogNames(catalog), ids: new Set(catalog.map((task) => String(task._id))) };
+}
+
+function entryTotals(entries, { names, ids }, personal = true) {
+  const totals = new Map();
+  for (const row of entries) {
+    const key = isReview(row.title) ? (personal && reviewKey) :
+      [row.catalogId, row.workItemId].find((id) => ids.has(id)) ||
+      names.get(`${row.projectId}:${taskName(row.title)}`);
+    if (key) totals.set(key, (totals.get(key) || 0) + cents(row.hours));
+  }
+  return totals;
+}
+
+async function periodUsage(models, memberId, date, catalog, keys, session) {
   const budgets = new Map(catalog.map((task) => {
     const budget = taskBudget(task, date);
     return [budget.key, { ...budget, spent: 0 }];
   }));
-  const ranged = [...budgets.values()].filter(({ period }) => period !== 'daily');
-  if (!ranged.length) return budgets;
-  const start = ranged.map((budget) => budget.start).sort()[0];
-  const end = ranged.map((budget) => budget.end).sort().at(-1);
-  const rows = await models.Submission.find({ memberId, date: { $gte: start, $lte: end, $ne: date } })
-    .select('date entries').session(session || null).lean();
-  const names = catalogNames(catalog);
+  const projectIds = [...new Set(catalog.filter((task) => !isReview(task.title)).map((task) => task.projectId))];
+  if (!projectIds.length) return budgets;
+  const start = [...budgets.values()].map((budget) => budget.start).sort()[0];
+  const end = [...budgets.values()].map((budget) => budget.end).sort().at(-1);
+  const rows = await models.Submission.find({
+    date: { $gte: start, $lte: end },
+    $nor: [{ memberId, date }],
+    'entries.projectId': { $in: projectIds },
+  }).select('date entries').session(session || null).lean();
   for (const row of rows) {
-    for (const [key, hours] of entryTotals(row.entries, names)) {
+    for (const [key, hours] of entryTotals(row.entries, keys, false)) {
       const budget = budgets.get(key);
       if (budget && row.date >= budget.start && row.date <= budget.end) budget.spent += hours;
     }
@@ -106,7 +108,7 @@ export function withClientBudgets(catalog, workItems) {
 }
 
 export async function catalogAvailability(models, memberId, date, catalog) {
-  const budgets = await periodUsage(models, memberId, date, catalog);
+  const budgets = await periodUsage(models, memberId, date, catalog, budgetKeys(catalog));
   return catalog.map((task) => {
     const { period, hours, spent, start, end } = budgets.get(taskBudget(task, date).key);
     return { ...task, period, hours, remainingHours: Math.max(0, cents(hours) - spent) / 100,
@@ -115,11 +117,11 @@ export async function catalogAvailability(models, memberId, date, catalog) {
 }
 
 export async function validateBudgets(models, memberId, date, catalog, saved, prior, session) {
-  const names = catalogNames(catalog);
-  const before = entryTotals(prior, names);
-  const totals = entryTotals(saved, names);
+  const keys = budgetKeys(catalog);
+  const before = entryTotals(prior, keys);
+  const totals = entryTotals(saved, keys);
   const touched = catalog.filter((task) => totals.has(taskBudget(task, date).key));
-  const budgets = await periodUsage(models, memberId, date, touched, session);
+  const budgets = await periodUsage(models, memberId, date, touched, keys, session);
   for (const [key, budget] of budgets) {
     const available = Math.max(0, cents(budget.hours) - budget.spent);
     const logged = totals.get(key);
