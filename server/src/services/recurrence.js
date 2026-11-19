@@ -18,7 +18,7 @@ export function materializeOccurrence(tpl, due, session) {
     { template: tpl._id, $or: [{ dueDate: due }, { scheduledDate: due }] },
     { $setOnInsert: {
       scheduledDate: due, dueDate: due, template: tpl._id, title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees: tpl.assignees,
-      reviewer: tpl.reviewer, owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
+      owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
       checklist: tpl.checklist.map((text) => ({ text })), createdBy: tpl.createdBy,
     } },
     { upsert: true, session },

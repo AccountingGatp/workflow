@@ -31,7 +31,7 @@ export async function seedLoanReminders() {
     for (const loan of loans) {
       const key = `${MIGRATION_ID}-${loan.key}`;
       const assignees = loan.assigned ? [sathya._id] : [];
-      const instructions = `Monthly loan payment reminder on day ${loan.day}. Screenshot last paid: ${loan.paid} (historical reference, not payment verification). Verify payment status, follow up if required, and record confirmation before submitting for TL review.${loan.assigned ? '' : ' Assignee pending manager confirmation.'}`;
+      const instructions = `Monthly loan payment reminder on day ${loan.day}. Screenshot last paid: ${loan.paid} (historical reference, not payment verification). Verify payment status, follow up if required, and record confirmation before marking the task complete.${loan.assigned ? '' : ' Assignee pending manager confirmation.'}`;
       const master = await ProjectWorkItem.findOneAndUpdate({ project: project._id, sourceKey: key }, { $setOnInsert: {
         project: project._id, client: client._id, title: loan.title, category: 'Loans', frequency: 'Monthly', executionDay: String(loan.day), responsible: loan.assigned ? sathya.name : 'Unassigned — awaiting confirmation', responsibleUser: assignees[0], notes: instructions, active: true,
       } }, { upsert: true, returnDocument: 'after' });

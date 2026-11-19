@@ -160,7 +160,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const changed = await put(employee, date, [{ ...original.entries[0], note: '', hours: 1.75, status: 'complete',
       checklistChanges: [{ id: String(source.checklist[0]._id), done: true }] }], posted.version);
     assert.equal(changed.entries[0].note, '');
-    assert.equal(changed.entries[0].workflowStatus, 'pending_review');
+    assert.equal(changed.entries[0].workflowStatus, 'done');
     assert.equal(calls.length, 1);
     const updated = await send(employee, date, changed.version);
     assert.equal(calls[1].thread_ts, '1.000001');
@@ -173,24 +173,22 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(unchanged.version, updated.version);
     assert.equal(calls.length, 2);
     await request(employee, `/day/${date}`, 'PUT', { entries: [], version: original.version }, 409);
-    assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 0);
+    assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 1);
     const statusPath = `/day/${date}/members/${employee._id}/entries/${updated.entries[0]._id}/status`;
     const setStatus = (actor, status, version, reason, code = 200) => request(actor, statusPath, 'PATCH', { status, version, reason }, code);
     const leadReport = await request(lead, `/reports?from=${date}`);
-    assert.equal(leadReport.submissions[0].entries[0].canReview, true);
+    assert.equal(leadReport.submissions[0].entries[0].canUpdateStatus, false);
     await setStatus(other, 'complete', updated.version, undefined, 403);
     await setStatus(lead, 'incomplete', updated.version, ' ', 400);
     const returned = await setStatus(lead, 'incomplete', updated.version, 'Awaiting client approval');
     assert.equal(returned.entry.incompleteReason, 'Awaiting client approval');
     assert.equal(returned.entry.workflowStatus, 'in_progress');
     assert.equal(returned.entry.hours, 1.75);
-    await setStatus(lead, 'complete', returned.version, undefined, 403);
     await setStatus(employee, 'complete', updated.version, undefined, 409);
-    const resubmitted = await setStatus(employee, 'complete', returned.version);
-    assert.equal(resubmitted.entry.workflowStatus, 'pending_review');
-    assert.equal(resubmitted.entry.incompleteReason, undefined);
-    const approved = await setStatus(lead, 'complete', resubmitted.version);
-    assert.equal(approved.entry.status, 'complete');
+    const completed = await setStatus(employee, 'complete', returned.version);
+    assert.equal(completed.entry.workflowStatus, 'done');
+    assert.equal(completed.entry.incompleteReason, undefined);
+    assert.equal(completed.entry.status, 'complete');
     assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 1);
     assert.equal((await request(employee, `/day/${date}`)).submission.entries[0].status, 'complete');
     assert.equal((await request(other, `/reports?from=${date}`)).submissions.length, 0);
@@ -203,7 +201,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(scheduled);
     assert.equal(calls.length, 3);
     assert.match(calls[2].text, /All employees submitted/);
-    const removed = await put(employee, date, [], approved.version);
+    const removed = await put(employee, date, [], completed.version);
     assert.equal(calls.length, 3);
     await send(employee, date, removed.version);
     assert.equal(calls[3].thread_ts, '1.000001');
@@ -265,7 +263,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const linked = await log(employee, '2026-10-09', [{ ...time(shared.title, 1), workItemId: String(shared._id) }]);
     const linkedTask = await request(employee, `/tasks/${linked.entries[0].workflowTaskId}`);
     assert.equal(linkedTask.masterItem._id, String(shared._id));
-    assert.equal(linkedTask.status, 'pending_review');
+    assert.equal(linkedTask.status, 'done');
+    assert.deepEqual(linkedTask.activity.map((row) => row.action), ['task.create']);
     await log(employee, '2026-10-09', linked.entries, 200, linked.version);
     assert.equal(await Task.countDocuments({ masterItem: shared._id }), 1);
 

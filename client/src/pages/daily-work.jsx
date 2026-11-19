@@ -390,14 +390,14 @@ function EntryEditor({ date, data }) {
                         <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
                       </select></div>
                       <div className="field"><label htmlFor={`status-${row.key}`}>Status</label>
-                        <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
-                        <option value="incomplete">{row.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
+                        <select id={`status-${row.key}`} className="select" value={row.status} disabled={['done', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
+                        <option value="incomplete">Incomplete</option><option value="complete">Complete</option>
                       </select></div>
                     </div>
                     {!!row.checklist?.length && <div className="stack daily-entry-checklist">
                       {row.checklist.map((step) => <label key={step._id} className="row">
                         <input type="checkbox" checked={row.checklistChanges?.find((change) => change.id === step._id)?.done ?? step.done}
-                          disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)}
+                          disabled={['done', 'unavailable'].includes(row.workflowStatus)}
                           onChange={(event) => update(row.key, { checklistChanges: [
                             ...(row.checklistChanges || []).filter((change) => change.id !== step._id),
                             ...(event.target.checked === step.done ? [] : [{ id: step._id, done: event.target.checked }]),
@@ -438,14 +438,13 @@ function EntryEditor({ date, data }) {
 }
 
 function StatusBadge({ entry }) {
-  const label = entry.status === 'complete' ? 'Completed' : entry.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete';
+  const label = entry.status === 'complete' ? 'Completed' : 'Incomplete';
   return <Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{label}</Badge>;
 }
 
-function TaskStatusRow({ entry, me, onSaved }) {
+function TaskStatusRow({ entry, onSaved }) {
   const { submission } = entry;
-  const own = submission.memberId === me;
-  const mayUpdate = entry.canReview || (own && !['done', 'unavailable'].includes(entry.workflowStatus));
+  const mayUpdate = entry.canUpdateStatus;
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState(entry.incompleteReason || '');
   const [busy, setBusy] = useState(false);
@@ -456,11 +455,11 @@ function TaskStatusRow({ entry, me, onSaved }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await api(`${root}/day/${submission.date}/members/${submission.memberId}/entries/${entry._id}/status`, {
+      await api(`${root}/day/${submission.date}/members/${submission.memberId}/entries/${entry._id}/status`, {
         method: 'PATCH', body: { status, reason, version: submission.version },
       });
       setShowReason(false);
-      toast(result.entry.workflowStatus === 'pending_review' ? 'Submitted for TL review.' : 'Task status saved.');
+      toast('Task status saved.');
       onSaved();
     } catch (error) {
       setError(error);
@@ -476,7 +475,7 @@ function TaskStatusRow({ entry, me, onSaved }) {
     </div>
     {mayUpdate && <div className="daily-status-actions">
       {!showReason ? <div className="row-wrap">
-        {entry.status !== 'complete' && (!own || entry.workflowStatus !== 'pending_review') &&
+        {entry.status !== 'complete' &&
           <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
         <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
           setReason(entry.incompleteReason || '');
@@ -547,7 +546,7 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
     </div>
     {loading ? <Skeleton /> : !error && (!entries.length ? <div className="card"><Empty title="No daily work matches these filters" /></div> :
       tab === 'status' ? <div className="stack" aria-label="Task statuses">
-        {entries.map((entry) => <TaskStatusRow key={entry._id} entry={entry} me={me} onSaved={reload} />)}
+        {entries.map((entry) => <TaskStatusRow key={entry._id} entry={entry} onSaved={reload} />)}
       </div> : tab === 'summary' ? <>
         <div className="daily-metrics">
           <div className="card daily-card"><span>Logged hours</span><strong>{totalHours(entries)}</strong></div>

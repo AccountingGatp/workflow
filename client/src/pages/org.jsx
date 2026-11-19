@@ -303,13 +303,12 @@ export function Recurring() {
           <div className="card" style={{ overflow: 'hidden' }}>
             {loading && !data ? <Skeleton /> : templates.length === 0 ? <Empty icon={Repeat} title="No recurring tasks for this client yet" /> : (
               <div className="table-wrap"><table>
-                <thead><tr><th>Task</th><th>Schedule</th><th>Assigned</th><th>Reviewer</th><th>Status</th><th /></tr></thead>
+                <thead><tr><th>Task</th><th>Schedule</th><th>Assigned</th><th>Status</th><th /></tr></thead>
                 <tbody>{templates.map((t) => (
                   <tr key={t._id} style={!t.active ? { opacity: .55 } : undefined}>
                     <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
                     <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
                     <td><Avatars people={t.assignees} /></td>
-                    <td>{t.assignees.length > 0 && t.assignees.every(a => a.role !== 'employee') ? 'Not required' : t.reviewer?.name || 'Client TL'}</td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
                     <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>{t.canEdit && <>
                       <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>
@@ -367,20 +366,22 @@ export function Access() {
 
 /* ---------- Activity log ---------- */
 
+const addedTaskActions = new Set(['task.create', 'project.work.create', 'template.create']);
+
 export function Audit() {
-  const { data, loading } = useApi('/audit');
+  const { data, error, loading } = useApi('/audit');
   return (
     <>
-      <PageHead title="Activity log" subtitle="Recent activity is kept for 7 days, then automatically deleted to reduce database storage." />
+      <PageHead title="Activity log" subtitle="Tasks added or edited in the last 7 days." />
       <div className="card" style={{ overflow: 'hidden' }}>
-        {loading && !data ? <Skeleton /> : data.length === 0 ? <Empty icon={History} title="No activity yet" /> : (
+        {error ? <ErrorBox error={error} /> : loading && !data ? <Skeleton /> : !data?.length ? <Empty icon={History} title="No activity yet" /> : (
           <div className="table-wrap"><table>
             <thead><tr><th>When</th><th>Who</th><th>What</th><th>Client</th></tr></thead>
             <tbody>{data.map((a) => (
               <tr key={a._id}>
                 <td className="small muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(a.createdAt)}</td>
                 <td><span className="row"><Avatar name={a.actor?.name || 'System'} size="sm" />{a.actor?.name || 'System'}</span></td>
-                <td><Badge>{a.action}</Badge> <span style={{ marginLeft: 6 }}>{a.summary}</span></td>
+                <td><Badge>{addedTaskActions.has(a.action) ? 'Task added' : 'Task edited'}</Badge> <span style={{ marginLeft: 6 }}>{a.summary}</span></td>
                 <td>{a.client?.name || '—'}</td>
               </tr>
             ))}</tbody>

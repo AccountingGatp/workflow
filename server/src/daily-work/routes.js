@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
 import { Task, User } from '../models/index.js';
-import { applyTaskTransition, mayReview } from '../services/task-review.js';
+import { applyTaskTransition } from '../services/task-review.js';
 import { isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
@@ -228,11 +228,6 @@ function markUnsent(submission) {
   submission.deliveryAt = undefined;
 }
 
-function reviewerCanUpdate(task, entry, user, scope) {
-  return task.status === 'pending_review' && String(task.submittedBy) !== scope.own &&
-    mayReview(task, { manager: includes(scope.managed, entry.clientId), actorId: user._id, actorRole: user.role });
-}
-
 r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
   const memberId = idValue(req.params.memberId);
@@ -257,20 +252,13 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
       if (!task || !task.assignees.some((id) => String(id) === memberId)) {
         throw new HttpError(409, 'The linked Workflow task is no longer available');
       }
-      const reviewer = !own && reviewerCanUpdate(task, entry, req.user, scope);
-      enforce(own || reviewer);
-      if (task.status === 'done') throw new HttpError(409, 'This task is already completed');
-      if (!(task.status === 'pending_review' && own && status === 'complete')) {
-        applyTaskTransition(task, reviewer && status === 'complete' ? { confirmCompletion: true } :
-          { status: status === 'complete' ? 'done' : 'in_progress' }, {
-          manager: reviewer, isAssignee: own, actorId: req.user._id, actorRole: req.user.role,
-        });
-      }
+      applyTaskTransition(task, { status: status === 'complete' ? 'done' : 'in_progress' }, {
+        manager: includes(scope.managed, entry.clientId), isAssignee: own, actorId: req.user._id,
+      });
       if (task.isModified()) await task.save({ session });
       entry.workflowStatus = task.status;
       entry.status = task.status === 'done' ? 'complete' : 'incomplete';
     } else {
-      enforce(own);
       entry.status = status;
     }
     entry.incompleteReason = reason;
@@ -294,14 +282,16 @@ async function reportRows(req, models, scope) {
     enforce(includes(scope.members, memberId));
     filter.memberId = memberId;
   } else if (scope.members !== null) filter.memberId = { $in: scope.members };
-  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean(),
-    (task, entry) => reviewerCanUpdate(task, entry, req.user, scope));
+  const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean());
   return documents.flatMap((doc) => {
     const scopeIds = doc.memberId === scope.own ? scope.visible : scope.managed;
     const entries = doc.entries.filter((entry) => includes(scopeIds, entry.clientId) &&
       (!req.query.projectId || entry.projectId === req.query.projectId) &&
       (!req.query.status || entry.status === req.query.status));
-    return entries.length ? [publicSubmission(doc, entries)] : [];
+    return entries.length ? [publicSubmission(doc, entries.map((entry) => ({
+      ...entry, canUpdateStatus: !['done', 'unavailable'].includes(entry.workflowStatus) &&
+        (doc.memberId === scope.own || includes(scope.managed, entry.clientId)),
+    })))] : [];
   });
 }
 

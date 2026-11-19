@@ -97,21 +97,15 @@ Emails are stored as plain text, and attachments are listed by name only for now
 **Try it without Google:** run `node scripts/fake-gmail.js` from `server/` (settings are at the top of that file).
 With a fresh database, `bash scripts/test-mail.sh` runs the full access and review test against it.
 
-## Scheduling and completion review
+## Scheduling and task completion
 
-Super Admins can edit client/company details from **Edit client / company**, edit project names from **Edit project**, and delete individual task occurrences from the task drawer. Deleting an occurrence leaves a cancellation record so the scheduler will not recreate it. Cancel a recurring schedule from **Recurring work** to stop future occurrences.
+Team Leads and managers can edit client details, projects, tasks, assignments, and recurring schedules for clients they manage. Super Admins can delete task occurrences. Weekly schedules use a weekday. Monthly schedules use a calendar date. Twice-monthly schedules use two dates. If a month has fewer days, the occurrence runs on its last day.
 
-Client managers and team leaders can create tasks, edit a task's title and due date in its drawer, and maintain recurring schedules. Weekly schedules select a weekday; monthly schedules select day 1–31; **Twice monthly (two dates)** selects two different dates each month, rather than every 14 days. Dates beyond the end of a month run on that month's last day. Existing server calendar/timezone behavior is retained.
+Assignees can mark tasks complete after finishing the checklist. Older tasks pending confirmation can be completed from the same task controls. The Activity Log shows task additions and detail edits.
 
-Assigned employees complete the checklist and submit work for review. It stays open as **Awaiting TL confirmation** until the team leader ticks the confirmation checkbox and confirms completion. The employee, reviewer and timestamps are recorded. A user cannot approve their own submission. Managers can return work to the employee. Changing approved work reopens it for review. Existing completed history is preserved.
+The Bluntd loan reminders assign the Auto Loan Mercedes task on the 12th and three additional loan tasks on the 20th to Sathya Priya.
 
-A one-time, resumable import adds four Bluntd loan reminders from the November 13 screenshots: Auto Loan Mercedes on the 12th (Sathya Priya; reviewer Krupali), and First insurance funding, Ford van, and TD Auto finance on the 20th (Sathya Priya; reviewer Krupali). Screenshot last-paid dates are historical references only. The import uses existing accounts/project, never creates people or changes existing schedules, and does not recreate reminders after they are cancelled.
-
-Validation: `npm test --prefix server` (temporary MongoDB for API tests), `npm run build --prefix client`, and `npm run lint --prefix client`. If your environment cannot run the default bundled MongoDB binary, set `MONGOMS_VERSION` to a supported MongoDB version.
-
-Loan reminders now have a designated reviewer (Krupali). They appear in the reviewer’s My Work as well as the employee’s. Only the designated team leader may confirm these employee tasks. A follow-up import updates the existing loan schedules and open occurrences without changing completed history.
-
-Employee completion review: employee work is submitted to its team leader; Sathya Priya’s current and newly assigned work routes to Krupali. Team leaders and admins complete their own assigned tasks directly with no reviewer or further approval. Super Admins manage tasks but do not confirm employee reviews. Existing completed history is kept.
+Validation: `npm test --prefix server` and `npm run build --prefix client`. If the bundled MongoDB binary cannot run in your environment, set `MONGOMS_VERSION` to a supported version.
 
 ## Daily Work
 
