@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2, ExternalLink, Link2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
 import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, ErrorBox } from './ui.jsx';
@@ -51,6 +51,31 @@ export function useTaskToggle(reload) {
 }
 
 /* ---------- Detail drawer ---------- */
+
+function EditAssignees({ task, busy, onSave }) {
+  const { data, error } = useApi(`/clients/${task.client._id}/assignees`);
+  const [selected, setSelected] = useState(() => task.assignees.map((person) => person._id));
+  const people = [...(data || [])];
+  for (const person of task.assignees) {
+    if (!people.some(({ _id }) => _id === person._id)) people.push(person);
+  }
+  const changed = selected.length !== task.assignees.length ||
+    task.assignees.some((person) => !selected.includes(person._id));
+
+  return <Field label="Assign to">
+    <ErrorBox error={error} />
+    <div className="chips">
+      {people.map((person) => <label key={person._id} className={`chip ${selected.includes(person._id) ? 'on' : ''}`}>
+        <input type="checkbox" checked={selected.includes(person._id)} disabled={busy}
+          onChange={(event) => setSelected(event.target.checked
+            ? [...selected, person._id] : selected.filter((id) => id !== person._id))} />
+        {person.name}
+      </label>)}
+    </div>
+    <button type="button" className="btn btn-tonal btn-sm" disabled={busy || !changed}
+      onClick={() => onSave({ assignees: selected })}>Save assignments</button>
+  </Field>;
+}
 
 export function TaskDrawer({ id, onClose, onChanged }) {
   const { data: task, loading, error, reload } = useApi(`/tasks/${id}`, [id]);
@@ -112,6 +137,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
               </div>
 
               {task.canEdit && <div className="stack" style={{ marginTop: 16 }}>
+                <EditAssignees key={task.assignees.map((person) => person._id).join(',')} task={task} busy={busy} onSave={patch} />
                 <Field label="Task name"><input key={task.title} className="input" defaultValue={task.title} onBlur={e => { if (e.target.value.trim() && e.target.value !== task.title) patch({ title: e.target.value.trim() }); }} /></Field>
                 <Field label="Due date"><input type="date" className="input" value={toInputDate(task.dueDate)} disabled={busy} onChange={e => { if (e.target.value) patch({ dueDate: new Date(`${e.target.value}T17:00:00`).toISOString() }); }} /></Field>
               </div>}
@@ -198,7 +224,6 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 
 export function TaskForm({ recurring = false, presetClient, presetProject, template = null, onClose, onSaved }) {
   const clients = useApi('/clients');
-  const users = useApi('/users');
   const toast = useToast();
   const [f, setF] = useState({
     title: template?.title || '', client: presetClient || template?.client?._id || '', project: presetProject || template?.project?._id || '', assignees: template?.assignees?.map(a => a._id || a) || [], owner: template?.owner?._id || template?.owner || '', dueDate: toInputDate(new Date()),
@@ -211,7 +236,8 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e?.target ? e.target.value : e }));
 
   const manageable = (clients.data || []).filter((c) => c.canManage);
-  const people = useMemo(() => (users.data || []).filter((u) => u.active && u.role !== 'super_admin'), [users.data]);
+  const assignees = useApi(f.client ? `/clients/${f.client}/assignees` : null);
+  const people = (assignees.loading ? [] : assignees.data || []).filter((person) => person.role !== 'super_admin');
 
   const toggleAssignee = (id) => setF((s) => {
     const assignees = s.assignees.includes(id) ? s.assignees.filter((x) => x !== id) : [...s.assignees, id];
@@ -243,7 +269,7 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
         <ErrorBox error={error} />
         {template && <div className="form-note">Saving changes replaces unstarted future occurrences with the updated schedule. Completed, in-progress, and past tasks are preserved.</div>}
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
-        <Field label="Client"><select className="select" value={f.client} onChange={e => setF(v => ({ ...v, client: e.target.value, project: '' }))} required disabled={!!template || !!presetProject}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
+        <Field label="Client"><select className="select" value={f.client} onChange={e => setF(v => ({ ...v, client: e.target.value, project: '', assignees: [], owner: '' }))} required disabled={!!template || !!presetProject}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
         {projects.length > 0 && <Field label="Project" hint="Tasks are organized separately under each project."><select className="select" required value={f.project} onChange={set('project')} disabled={!!presetProject}>
           <option value="">Select project…</option>{projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
         </select></Field>}
@@ -270,6 +296,7 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
             <Field label="Priority"><select className="select" value={f.priority} onChange={set('priority')}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option></select></Field>
           </div>
         )}
+        <ErrorBox error={assignees.error} />
         <Field label="Assign to" hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'They get access to this client automatically.'}>
           <div className="chips">
             {people.map((p) => {

@@ -21,8 +21,8 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
-  const people = useApi('/users');
-  const activePeople = (people.data || []).filter(u => u.active && !u.deletedAt);
+  const people = useApi(`/clients/${clientId}/assignees`);
+  const activePeople = people.data || [];
   const set = (key, value) => setF(v => ({ ...v, [key]: value }));
   const setLink = (index, key, value) => setF(v => ({
     ...v, links: v.links.map((l, i) => i === index ? { ...l, [key]: value } : l),
@@ -48,7 +48,7 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
   return <Modal wide title={editing ? 'Edit project task' : 'Add important project task'} onClose={onClose}
     footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="project-work-editor" disabled={saving || !f.title.trim()}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Add task'}</button></>}>
     <form id="project-work-editor" className="stack" style={{ gap: 16 }} onSubmit={save}>
-      <ErrorBox error={error}/>
+      <ErrorBox error={error || people.error}/>
       <div className="form-note">This task register documents scope, responsibilities and reference links. To assign dated work to employees, use New task or Recurring task on the project page.</div>
       {field('title','Task name','e.g. Weekly AP / AR review')}
       <div className="grid grid-2">
@@ -57,6 +57,8 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
           <strong className="small">Assigned employee (existing Workflow account)</strong>
           <select className="select" value={f.responsibleUser || ''} onChange={e => set('responsibleUser', e.target.value)}>
             <option value="">Not assigned / source only</option>
+            {f.responsibleUser && !activePeople.some((person) => person._id === f.responsibleUser) &&
+              <option value={f.responsibleUser}>{f.responsible || 'Current assignee'}</option>}
             {activePeople.map(person => <option key={person._id} value={person._id}>{person.name} · {person.email}</option>)}
           </select>
           <span className="small muted">Source owner: {f.responsible || 'Not specified'}. Changing this register does not change an existing recurring schedule; edit the schedule separately.</span>

@@ -94,12 +94,14 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal((await request(other, `/missing/${date}`)).expected, 0);
     assert.equal((await request(lead, `/missing/${previousDate}`)).expected, 0);
 
-    await request(lead, `/tasks/${source._id}`, 'PATCH', { title: 'Blocked edit' }, 403);
-    assert.equal((await request(lead, `/tasks/${source._id}`)).canEdit, false);
+    await request(employee, `/tasks/${source._id}`, 'PATCH', { title: 'Blocked employee edit' }, 403);
+    assert.equal((await request(lead, `/tasks/${source._id}`)).canEdit, true);
     assert.equal((await request(manager, `/tasks/${source._id}`)).canEdit, true);
     await request(manager, `/tasks/${source._id}`, 'PATCH', { priority: 'low' });
     const masterPath = `/clients/${client._id}/projects/${project._id}/work-items/${master._id}`;
-    await request(lead, masterPath, 'PATCH', { title: master.title }, 403);
+    await request(employee, masterPath, 'PATCH', { title: master.title }, 403);
+    await request(lead, masterPath, 'PATCH', { title: master.title, responsibleUser: String(employee._id) });
+    await request(lead, masterPath, 'DELETE', undefined, 403);
     await request(manager, masterPath, 'PATCH', { title: master.title, notes: 'Master description' });
 
     const entry = { title: 'Review ledger', projectId: daily._id, workflowTaskId: String(source._id), hours: 2, status: 'incomplete', priority: 'high' };

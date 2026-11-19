@@ -1,4 +1,5 @@
-import { ClientAssignment, ClientPermission, TeamMembership, AuditLog } from '../models/index.js';
+import { Client, ClientAssignment, ClientPermission, TeamMembership, User, AuditLog } from '../models/index.js';
+import { HttpError } from '../middleware/auth.js';
 
 /**
  * Central access rules. Every route asks this module; nothing else decides visibility.
@@ -12,6 +13,7 @@ import { ClientAssignment, ClientPermission, TeamMembership, AuditLog } from '..
 
 export const isSuper = (u) => u.role === 'super_admin';
 export const canMaintainTasks = (user) => isSuper(user) || user.role === 'manager';
+export const canEditTask = (user, project) => canMaintainTasks(user) || (user.role === 'admin' && Boolean(project));
 
 export const activePermissionFilter = () => ({
   revokedAt: null,
@@ -78,6 +80,40 @@ export async function canGrantDirectly(actor, clientId, targetUserId) {
   const led = await ledTeamIds(actor);
   const theirs = await userTeamIds(targetUserId);
   return theirs.some((t) => led.includes(t));
+}
+
+/** People the actor can assign to this client, including team members who get access on assignment. */
+export async function clientAssignees(actor, clientId) {
+  const filter = { active: true, deletedAt: null };
+  if (!isSuper(actor)) {
+    const [assignments, grants, led] = await Promise.all([
+      ClientAssignment.find({ client: clientId, endedAt: null }).select('team admin').lean(),
+      ClientPermission.distinct('user', { client: clientId, ...activePermissionFilter() }),
+      ledTeamIds(actor),
+    ]);
+    const teams = assignments.map((row) => row.team).filter(Boolean);
+    const memberships = await TeamMembership.distinct('user', { removedAt: null, $or: [
+      { team: { $in: led } },
+      { team: { $in: teams }, teamRole: 'lead' },
+    ] });
+    filter.$or = [
+      { _id: { $in: [...grants, ...memberships] } },
+      { _id: { $in: assignments.map((row) => row.admin).filter(Boolean) }, role: { $in: ['manager', 'admin'] } },
+      { role: 'super_admin' },
+    ];
+  }
+  return User.find(filter).select('name email role').sort('name').lean();
+}
+
+export async function ensureAssigneeAccess(actor, clientId, person) {
+  if (await canSeeClient(person, clientId)) return;
+  if (!(await canGrantDirectly(actor, clientId, person._id))) {
+    throw new HttpError(400, `${person.name} is outside your team and needs access to this client before you can assign work.`);
+  }
+  const permission = await ClientPermission.create({ client: clientId, user: person._id, grantedBy: actor._id });
+  const client = await Client.findById(clientId).select('name');
+  audit(actor, 'access.grant', { entity: 'ClientPermission', entityId: permission._id, client: clientId,
+    summary: `Gave ${person.name} access to ${client?.name} (assigned work)` });
 }
 
 /** Mongo filter for tasks the user can see. */

@@ -1,19 +1,16 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Client, ClientProject, ProjectWorkItem, User } from '../models/index.js';
+import { ClientProject, ProjectWorkItem, User } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
-import { canSeeClient, canManageClient, canMaintainTasks, audit } from '../services/access.js';
+import { canSeeClient, canManageClient, canMaintainTasks, ensureAssigneeAccess, audit } from '../services/access.js';
 
 const r = Router();
-async function canEditMasterList(user, clientId) {
-  return canMaintainTasks(user) && await canManageClient(user, clientId);
-}
 async function authorized(req, manager = false) {
   const { clientId, projectId } = req.params;
   if (!mongoose.isValidObjectId(clientId) || !mongoose.isValidObjectId(projectId)) throw new HttpError(404, 'Project not found');
   const project = await ClientProject.findOne({ _id: projectId, client: clientId }).select('_id client');
   if (!project) throw new HttpError(404, 'Project not found');
-  if (!(await (manager ? canEditMasterList : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Project access denied');
+  if (!(await (manager ? canManageClient : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Project access denied');
   return project;
 }
 function safeLinks(links) {
@@ -42,18 +39,19 @@ function payload(body) {
   }
   return result;
 }
-async function resolveAssignedEmployee(data) {
+async function resolveAssignedEmployee(actor, clientId, data, existing) {
   if (data.responsibleUser) {
-    const person = await User.findOne({ _id: data.responsibleUser, active: true, deletedAt: null }).select('name');
+    const person = await User.findOne({ _id: data.responsibleUser, active: true, deletedAt: null }).select('name role');
     if (!person) throw new HttpError(400, 'Select an active employee');
+    if (String(existing?.responsibleUser) !== data.responsibleUser) await ensureAssigneeAccess(actor, clientId, person);
     data.responsible = person.name;
   }
   return data;
 }
 r.get('/clients/:clientId/projects/:projectId/work-items/access', ah(async (req, res) => {
   await authorized(req);
-  const canEdit = await canEditMasterList(req.user, req.params.clientId);
-  const canArchive = canEdit;
+  const canEdit = await canManageClient(req.user, req.params.clientId);
+  const canArchive = canEdit && canMaintainTasks(req.user);
   res.json({ canEdit, canArchive, role: req.user.role });
 }));
 r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
@@ -65,7 +63,7 @@ r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) =>
 r.post('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
   const project = await authorized(req, true);
   const doc = await ProjectWorkItem.create({
-    ...await resolveAssignedEmployee(payload(req.body)), client: project.client, project: project._id,
+    ...await resolveAssignedEmployee(req.user, project.client, payload(req.body)), client: project.client, project: project._id,
   });
   audit(req.user, 'project.work.create', { entity:'ProjectWorkItem', entityId:doc._id, client:project.client, summary:'Added project work item ' + doc.title });
   res.status(201).json(doc);
@@ -73,13 +71,17 @@ r.post('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) =
 r.patch('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,res) => {
   const project = await authorized(req, true);
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'Work item not found');
-  const doc = await ProjectWorkItem.findOneAndUpdate({ _id: req.params.id, project:project._id },
-    { $set: await resolveAssignedEmployee(payload(req.body)) }, { new:true, runValidators:true });
+  const filter = { _id: req.params.id, project: project._id };
+  const existing = await ProjectWorkItem.findOne(filter).select('responsibleUser');
+  if (!existing) throw new HttpError(404, 'Work item not found');
+  const doc = await ProjectWorkItem.findOneAndUpdate(filter,
+    { $set: await resolveAssignedEmployee(req.user, project.client, payload(req.body), existing) }, { returnDocument: 'after', runValidators: true });
   if (!doc) throw new HttpError(404, 'Work item not found');
   audit(req.user, 'project.work.update', { entity:'ProjectWorkItem', entityId:doc._id, client:project.client, summary:'Updated project work item ' + doc.title });
   res.json(doc);
 }));
 r.delete('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,res) => {
+  if (!canMaintainTasks(req.user)) throw new HttpError(403, 'You do not have permission to archive this task');
   const project = await authorized(req, true);
   if (!mongoose.isValidObjectId(req.params.id)) throw new HttpError(404, 'Work item not found');
   const doc = await ProjectWorkItem.findOneAndUpdate({ _id:req.params.id, project:project._id },
