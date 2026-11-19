@@ -55,7 +55,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     server = app.listen(0);
     const base = `http://127.0.0.1:${server.address().port}/api/daily-work`;
     async function request(user, path, method = 'GET', body, status = 200) {
-      const response = await fetch((/^\/(tasks|clients|templates|users)(?:\/|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
+      const response = await fetch((/^\/(tasks|clients|templates|users)(?:[/?]|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
         method, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(user._id) }, JWT_SECRET) },
         body: body && JSON.stringify(body),
       });
@@ -326,6 +326,67 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await log(lead, '2026-10-05', [time('Review', 0.6), time('Review', 0.4, String(legacyProject))]);
     await log(lead, '2026-10-06', [time('Review', 1)]);
     assert.equal((await getDay(lead, '2026-10-05')).catalog.find((task) => task.title === 'Month end').remainingHours, 7);
+
+    const reportDate = '2026-11-06';
+    const nextDate = '2026-11-07';
+    const [earlyMissing, lateMissing, onLeave] = await Promise.all([
+      person('Morning member', 'employee'), person('Late member', 'employee'), person('On leave', 'employee'),
+    ]);
+    const configure = (member, slackUserId, shiftStart, reminderAt, expected = 200) =>
+      request(owner, `/users/${member._id}`, 'PATCH', {
+        slackUserId, dailyReport: { enabled: true, shiftStart, reminderAt },
+      }, expected);
+    const savedSettings = await configure(lateMissing, 'U123LATE', '15:00', '15:45');
+    assert.deepEqual(savedSettings.dailyReport, { enabled: true, shiftStart: '15:00', reminderAt: '15:45' });
+    await configure(lateMissing, 'U123LATE', '15:00', '10:00', 400);
+    await configure(earlyMissing, 'U123EARLY', '09:00', '10:00');
+    await configure(onLeave, 'U123LEAVE', '09:00', '10:00');
+    await request(owner, `/members/${onLeave._id}/leave/${reportDate}`, 'PUT', {});
+    const settings = await request(owner, '/users?dailyReport=1');
+    assert.equal(settings.find((row) => row._id === String(lateMissing._id)).dailyReport.reminderAt, '15:45');
+    assert.equal(settings.find((row) => row._id === String(employee._id)).dailyReport.reminderAt, '15:30');
+    await configure(employee, 'U123TEST', '09:00', '10:00');
+
+    const reportModels = await dailyModels();
+    const baseRow = { projectId: daily._id, clientId: String(client._id), projectName: 'Accounting', status: 'incomplete', priority: 'high', hours: 1 };
+    await reportModels.Submission.create([
+      { _id: `${earlyMissing._id}:${nextDate}`, memberId: String(earlyMissing._id), memberName: earlyMissing.name, date: nextDate,
+        entries: [{ ...baseRow, title: 'Next day task' }] },
+      { _id: `${employee._id}:${reportDate}`, memberId: String(employee._id), memberName: employee.name, date: reportDate,
+        entries: [
+          { ...baseRow, title: 'Incomplete closing task', incompleteReason: 'Waiting for bank statement' },
+          { ...baseRow, title: 'Task pending TL review', workflowStatus: 'pending_review' },
+          { ...baseRow, title: 'Completed closing task', status: 'complete' },
+        ] },
+    ]);
+    await reportModels.Member.updateOne({ _id: String(employee._id) }, { $set: { reportFrom: reportDate } });
+    process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
+    process.env.DAILY_WORK_REPORT_DAYS = '1,2,3,4,5';
+    delete process.env.DAILY_WORK_SLACK_REPORTS;
+    process.env.DAILY_WORK_SHIFT_REPORTS = 'true';
+    const callsBeforeSchedule = calls.length;
+    const at = (day, time) => new Date(`${day}T${time}:00+05:30`);
+    await runDailyWorkJobs(at(reportDate, '09:55'));
+    assert.equal(calls.length, callsBeforeSchedule);
+    await runDailyWorkJobs(at(reportDate, '10:00'));
+    await runDailyWorkJobs(at(reportDate, '10:05'));
+    assert.equal(calls.length, callsBeforeSchedule + 1);
+    assert.match(calls.at(-1).text, /U123EARLY/);
+    assert.match(calls.at(-1).text, /Submitted: 1\/2/);
+    assert.doesNotMatch(calls.at(-1).text, /U123LATE|U123LEAVE/);
+    await runDailyWorkJobs(at(reportDate, '15:45'));
+    assert.match(calls.at(-1).text, /U123LATE/);
+    assert.doesNotMatch(calls.at(-1).text, /U123EARLY/);
+    await runDailyWorkJobs(at(nextDate, '00:00'));
+    await runDailyWorkJobs(at(nextDate, '00:15'));
+    assert.equal(calls.length, callsBeforeSchedule + 3);
+    assert.match(calls.at(-1).text, /Incomplete Tasks Report/);
+    assert.match(calls.at(-1).text, /Date: 2026-11-06/);
+    assert.match(calls.at(-1).text, /Employee: <@U123TEST>/);
+    assert.match(calls.at(-1).text, /Reason: Waiting for bank statement/);
+    assert.doesNotMatch(calls.at(-1).text, /Next day task|Task pending TL review|Completed closing task/);
+    await runDailyWorkJobs(at(nextDate, '01:00'));
+    assert.equal(calls.length, callsBeforeSchedule + 3);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

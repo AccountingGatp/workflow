@@ -113,7 +113,7 @@ function TeamForm({ team, users, onClose, onSaved }) {
 
 export function People() {
   const { user: me } = useAuth();
-  const { data, loading, reload } = useApi('/users');
+  const { data, loading, reload } = useApi('/users?dailyReport=1');
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [editingPerson, setEditingPerson] = useState(null);
@@ -133,7 +133,9 @@ export function People() {
             <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Status</th><th /></tr></thead>
             <tbody>{data.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
-                <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div></div></div></td>
+                <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
+                  {u.dailyReport?.enabled && <div className="small muted">Shift {u.dailyReport.shiftStart} · Reminder {u.dailyReport.reminderAt} IST</div>}
+                </div></div></td>
                 <td><select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
                   {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
                 <td><div className="row-wrap">{u.teams.map((t) => <span key={t.team._id} className="badge"><span className="team-dot" style={{ background: t.team.color }} />{t.team.name}{t.teamRole === 'lead' && <><Crown size={12} />TL</>}</span>)}</div></td>
@@ -161,8 +163,26 @@ function SlackUserIdField({ value, onChange }) {
   </div>;
 }
 
+const defaultDailyReport = { enabled: false, shiftStart: '09:00', reminderAt: '10:00' };
+
+function DailyReportFields({ value, onChange }) {
+  const set = (key, val) => onChange({ ...value, [key]: val });
+  return <div className="stack" style={{ gap: 8 }}>
+    <label className="row"><input type="checkbox" checked={value.enabled} onChange={(event) => set('enabled', event.target.checked)} />Include in Daily Work Slack reports</label>
+    <div className="grid grid-2">
+      <label className="field"><span>Shift starts (IST)</span>
+        <input className="input" type="time" required value={value.shiftStart} onChange={(event) => set('shiftStart', event.target.value)} />
+      </label>
+      <label className="field"><span>Submission reminder (IST)</span>
+        <input className="input" type="time" required min={value.enabled ? value.shiftStart : undefined} value={value.reminderAt}
+          onChange={(event) => set('reminderAt', event.target.value)} />
+      </label>
+    </div>
+  </div>;
+}
+
 function EditPerson({ person, isSelf, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role, slackUserId: person.slackUserId || '' });
+  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role, slackUserId: person.slackUserId || '', dailyReport: person.dailyReport || defaultDailyReport });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -184,6 +204,7 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
       <Field label="Job title"><input className="input" value={form.title} onChange={set('title')} maxLength={150} /></Field>
       <Field label="Work email"><input className="input" type="email" value={form.email} onChange={set('email')} required maxLength={254} /></Field>
       <SlackUserIdField value={form.slackUserId} onChange={set('slackUserId')} />
+      <DailyReportFields value={form.dailyReport} onChange={(dailyReport) => setForm((previous) => ({ ...previous, dailyReport }))} />
       <Field label="Role" hint={isSelf ? 'You cannot change your own Super Admin role.' : 'Changing roles updates this person’s permissions.'}>
         <select className="select" value={form.role} onChange={set('role')} disabled={isSelf}>
           {Object.entries(ROLE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -195,7 +216,7 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
 }
 
 function NewPerson({ onClose, onSaved }) {
-  const [f, setF] = useState({ name: '', email: '', password: '', role: 'employee', title: '', slackUserId: '' });
+  const [f, setF] = useState({ name: '', email: '', password: '', role: 'employee', title: '', slackUserId: '', dailyReport: defaultDailyReport });
   const [error, setError] = useState(null);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const submit = async (e) => { e.preventDefault(); try { await api('/users', { method: 'POST', body: f }); onSaved(); onClose(); } catch (err) { setError(err); } };
@@ -209,6 +230,7 @@ function NewPerson({ onClose, onSaved }) {
         </div>
         <Field label="Work email"><input className="input" type="email" value={f.email} onChange={set('email')} required /></Field>
         <SlackUserIdField value={f.slackUserId} onChange={set('slackUserId')} />
+        <DailyReportFields value={f.dailyReport} onChange={(dailyReport) => setF((previous) => ({ ...previous, dailyReport }))} />
         <div className="grid grid-2">
           <Field label="Temporary password" hint="At least 8 characters"><input className="input" type="password" minLength={8} value={f.password} onChange={set('password')} required autoComplete="new-password" /></Field>
           <Field label="Role"><select className="select" value={f.role} onChange={set('role')}>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>

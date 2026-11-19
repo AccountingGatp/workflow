@@ -4,6 +4,9 @@ import { User, Team, TeamMembership, ClientPermission, ClientAssignment, slackUs
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { audit, isSuper, ledTeamIds } from '../services/access.js';
 
+import { dailyModels } from '../daily-work/models.js';
+import { dailyReportSettings, parseDailyReport } from '../daily-work/settings.js';
+
 const r = Router();
 
 /* ---------- Users ---------- */
@@ -19,28 +22,35 @@ function parseSlackUserId(value) {
 r.get('/users', ah(async (req, res) => {
   // Everyone signed in may look up colleagues by name (needed for assigning work);
   // memberships are attached so the UI can show which teams each person is in.
+  const includeReport = isSuper(req.user) && req.query.dailyReport === '1';
   const users = await User.find({ deletedAt: null })
-    .select(isSuper(req.user) ? '+slackUserId' : '').sort({ name: 1 }).lean();
+    .select(includeReport ? '+slackUserId +dailyReport' : isSuper(req.user) ? '+slackUserId' : '').sort({ name: 1 }).lean();
   const memberships = await TeamMembership.find({ removedAt: null }).populate('team', 'name color').lean();
   const byUser = {};
   for (const m of memberships) (byUser[m.user] ||= []).push({ team: m.team, teamRole: m.teamRole });
+  if (includeReport) {
+    const legacyIds = users.filter((user) => !user.dailyReport).map((user) => String(user._id));
+    const legacy = legacyIds.length ? await (await dailyModels()).Member.find({ _id: { $in: legacyIds } }).lean() : [];
+    const legacyById = new Map(legacy.map((member) => [member._id, member]));
+    for (const user of users) user.dailyReport = dailyReportSettings(user.dailyReport, legacyById.get(String(user._id)));
+  }
   res.json(users.map((u) => ({ ...u, teams: byUser[u._id] || [] })));
 }));
 
 r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
-  const { name, email, password, role = 'employee', title, slackUserId } = req.body || {};
+  const { name, email, password, role = 'employee', title, slackUserId, dailyReport } = req.body || {};
   if (!name || !email || !password) throw new HttpError(400, 'Name, email and password are required');
   if (!userRoles.includes(role)) throw new HttpError(400, 'Invalid role');
   if (await User.exists({ email: email.toLowerCase() })) throw new HttpError(409, 'That email is already in use');
-  const user = await User.create({ name, email, role, title, slackUserId: parseSlackUserId(slackUserId), passwordHash: await bcrypt.hash(password, 10) });
+  const user = await User.create({ name, email, role, title, slackUserId: parseSlackUserId(slackUserId), dailyReport: dailyReport === undefined ? undefined : parseDailyReport(dailyReport), passwordHash: await bcrypt.hash(password, 10) });
   audit(req.user, 'user.create', { entity: 'User', entityId: user._id, summary: `Created ${role.replace('_', ' ')} ${name}` });
   res.status(201).json(user);
 }));
 
 r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
-  const allowed = ['name', 'email', 'role', 'title', 'active', 'slackUserId'];
+  const allowed = ['name', 'email', 'role', 'title', 'active', 'slackUserId', 'dailyReport'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
-  const user = await User.findOne({ _id: req.params.id, deletedAt: null }).select('+slackUserId');
+  const user = await User.findOne({ _id: req.params.id, deletedAt: null }).select('+slackUserId +dailyReport');
   if (!user) throw new HttpError(404, 'User not found');
   if (String(user._id) === String(req.user._id) && (update.role && update.role !== 'super_admin' || update.active === false)) {
     throw new HttpError(400, 'You cannot demote or deactivate yourself');
@@ -59,14 +69,15 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   }
   if (update.role !== undefined && !userRoles.includes(update.role)) throw new HttpError(400, 'Invalid role');
   if (update.slackUserId !== undefined) update.slackUserId = parseSlackUserId(update.slackUserId);
+  if (update.dailyReport !== undefined) update.dailyReport = parseDailyReport(update.dailyReport);
   const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '',
-    active: user.active, slackUserId: user.slackUserId || null };
+    active: user.active, slackUserId: user.slackUserId || null, dailyReport: user.dailyReport?.toObject() };
   Object.assign(user, update);
   try { await user.save(); } catch (err) {
     if (err.code === 11000) throw new HttpError(409, 'That email address is already used by another person');
     throw err;
   }
-  const changed = allowed.filter(k => update[k] !== undefined && previous[k] !== update[k]);
+  const changed = allowed.filter(k => update[k] !== undefined && JSON.stringify(previous[k]) !== JSON.stringify(update[k]));
   audit(req.user, 'user.update', { entity: 'User', entityId: user._id, summary: `Updated ${user.name}: ${changed.join(', ') || 'no changes'}` });
   res.json(user);
 }));
