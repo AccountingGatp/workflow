@@ -91,26 +91,20 @@ const entryPayload = ({ _id, projectId, title, description, note, hours, status,
   _id, projectId, title, description, note, hours, status, priority, catalogId, workItemId, workflowTaskId, checklistChanges,
 });
 
-function DailyTaskCard({ entry, expanded, showSummary = true, onToggle, context, footer, children }) {
+function DailyTaskCard({ entry, onOpen, children }) {
   const detailsId = useId();
-  const summary = <>
-    <span><strong>{entry.title}</strong><small className="muted">{entry.projectName}{context}</small></span>
-    <span className="mono">{hours(entry.hours)} h</span>
-    <Badge cls={entry.priority === 'high' ? 'b-danger' : 'b-primary'}>{entry.priority}</Badge>
-  </>;
 
   return <article className="daily-entry" data-entry-key={entry.key}>
-    {showSummary && (onToggle
-      ? <button className="daily-entry-summary" type="button" data-focus-summary
-        aria-label={`${expanded ? 'Close' : 'Open'} ${entry.title} details`}
-        aria-expanded={expanded} aria-controls={detailsId} onClick={onToggle}>
-        {summary}<ChevronDown size={16} aria-hidden="true" />
-      </button>
-      : <div className="daily-entry-summary">{summary}</div>)}
-    {children && <div id={detailsId} className="daily-reveal" data-open={expanded}>
-      <div inert={!expanded}>{children}</div>
-    </div>}
-    {footer}
+    {entry.collapsed && <button className="daily-entry-summary" type="button" data-focus-summary
+      aria-label={`Open ${entry.title} details`} aria-expanded="false" aria-controls={detailsId} onClick={onOpen}>
+      <span><strong>{entry.title}</strong><small className="muted">{entry.projectName}</small></span>
+      <span className="mono">{hours(entry.hours)} h</span>
+      <Badge cls={entry.priority === 'high' ? 'b-danger' : 'b-primary'}>{entry.priority}</Badge>
+      <ChevronDown size={16} aria-hidden="true" />
+    </button>}
+    <div id={detailsId} className="daily-reveal" data-open={!entry.collapsed}>
+      <div inert={!!entry.collapsed}>{children}</div>
+    </div>
   </article>;
 }
 
@@ -356,7 +350,7 @@ function EntryEditor({ date, data }) {
             !data.workItems.some((item) => item.projectId === row.projectId && nameKey(item.title) === nameKey(row.title));
           const maxHours = original && !customEdit ? original.hours : task ? Math.min(24, remaining) : 24;
           const hintId = `hours-limit-${row.key}`;
-          return <DailyTaskCard key={row.key} entry={row} expanded={!row.collapsed} showSummary={!!row.collapsed} onToggle={() => {
+          return <DailyTaskCard key={row.key} entry={row} onOpen={() => {
             newEntry.current = row.key;
             update(row.key, { collapsed: false, noteOpen: !!row.note });
           }}>
@@ -450,10 +444,8 @@ function StatusBadge({ entry }) {
   return <Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{label}</Badge>;
 }
 
-function TaskStatusRow({ entry, onSaved }) {
+function TaskStatusActions({ entry, onSaved }) {
   const { submission } = entry;
-  const mayUpdate = entry.canUpdateStatus;
-  const [expanded, setExpanded] = useState(false);
   const [showReason, setShowReason] = useState(false);
   const [reason, setReason] = useState(entry.incompleteReason || '');
   const [busy, setBusy] = useState(false);
@@ -475,24 +467,9 @@ function TaskStatusRow({ entry, onSaved }) {
     } finally { setBusy(false); }
   }
 
-  const hasDetails = !!(entry.description || entry.note);
-  return <DailyTaskCard entry={entry} expanded={expanded} onToggle={hasDetails ? () => setExpanded((open) => !open) : undefined}
-    context={<> · {submission.memberName} · <time dateTime={submission.date}>{dueLabel.format(new Date(`${submission.date}T00:00:00+05:30`))}</time></>}
-    footer={<div className="daily-status-footer stack">
-      <div className="row-wrap daily-status-toolbar">
-        <StatusBadge entry={entry} />
-        {mayUpdate && !showReason && <div className="row-wrap daily-status-actions">
-          {entry.status !== 'complete' &&
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
-          <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
-            setReason(entry.incompleteReason || '');
-            setShowReason(true);
-          }}>Incomplete</button>
-        </div>}
-      </div>
-      {entry.incompleteReason && !showReason &&
-        <p className="small daily-task-description"><strong>Reason</strong> {entry.incompleteReason}</p>}
-      {mayUpdate && showReason && <form className="stack daily-status-reason" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
+  return <div className="stack daily-status-actions">
+    {showReason
+      ? <form className="stack daily-status-reason" onSubmit={(event) => { event.preventDefault(); if (reason.trim()) save('incomplete'); }}>
         <label className="field"><span>Why is this incomplete?</span>
           <textarea className="input" autoFocus required rows={2} maxLength={500} disabled={busy}
             value={reason} onChange={(event) => setReason(event.target.value)} /></label>
@@ -500,17 +477,48 @@ function TaskStatusRow({ entry, onSaved }) {
           <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !reason.trim()}>Save status</button>
           <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => { setShowReason(false); setError(null); }}>Cancel</button>
         </div>
-      </form>}
-      <ErrorBox error={error} />
-    </div>}>
-    {hasDetails && <div className="stack daily-status-details">
-      {entry.description && <p className="small muted daily-task-description">{entry.description}</p>}
-      {entry.note && <p className="small daily-task-description"><strong>Note</strong> {entry.note}</p>}
-    </div>}
-  </DailyTaskCard>;
+      </form>
+      : <div className="row-wrap">
+        {entry.status !== 'complete' &&
+          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>Mark completed</button>}
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
+          setReason(entry.incompleteReason || '');
+          setShowReason(true);
+        }}>Incomplete</button>
+      </div>}
+    <ErrorBox error={error} />
+  </div>;
 }
 
-const reportViews = ['member', 'status', 'summary'];
+function TaskStatusTable({ entries, reload }) {
+  return <div className="card table-wrap" role="region" aria-label="Daily task completion" tabIndex={0}>
+    <table className="table daily-status-table">
+      <thead><tr><th scope="col">Task</th><th scope="col">Project</th><th scope="col">Member</th><th scope="col">Date</th>
+        <th scope="col">Hours</th><th scope="col">Priority</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+      <tbody>{entries.map((entry) => {
+        const { date, memberId, memberName } = entry.submission;
+        return <tr key={`${memberId}:${date}:${entry._id}`}>
+          <td><strong>{entry.title}</strong>
+            {entry.description && <p className="small muted daily-task-description">{entry.description}</p>}
+            {entry.note && <p className="small daily-task-description"><strong>Note</strong> {entry.note}</p>}
+            {entry.incompleteReason && <p className="small daily-task-description"><strong>Reason</strong> {entry.incompleteReason}</p>}
+          </td>
+          <td>{entry.projectName}</td><td>{memberName}</td>
+          <td><time dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></td>
+          <td className="mono">{hours(entry.hours)}</td><td className="daily-status">{entry.priority}</td>
+          <td><StatusBadge entry={entry} /></td>
+          <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} onSaved={reload} />}</td>
+        </tr>;
+      })}</tbody>
+    </table>
+  </div>;
+}
+
+export function DailyTaskStatus({ date = today() }) {
+  return <DailyReports tab="status" date={date} />;
+}
+
+const reportViews = ['member', 'summary'];
 function DailyReports({ tab, date, setDate, openEntry, me }) {
   const [from, setFrom] = useState(date);
   const [to, setTo] = useState(date);
@@ -550,7 +558,7 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
         <label className="field"><span>Project</span><select className="select" value={projectId} onChange={(event) => setProject(event.target.value)}>
           <option value="">All projects</option>{data?.projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}
         </select></label>
-        {tab === 'status' && <label className="field"><span>Status</span><select className="select" value={status} onChange={(event) => setStatus(event.target.value)}>
+        {tab === 'status' && <label className="field"><span>Status</span><select className="select" aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="">All statuses</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option>
         </select></label>}
         {tab === 'member' && data?.slackEnabled && <button className="btn" type="button" onClick={send} disabled={sending || loading || !entries.length}>
@@ -560,9 +568,7 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
       <ErrorBox error={error || slackError} />
     </div>
     {loading ? <Skeleton /> : !error && (!entries.length ? <div className="card"><Empty title="No daily work matches these filters" /></div> :
-      tab === 'status' ? <div className="stack" aria-label="Task statuses">
-        {entries.map((entry) => <TaskStatusRow key={entry._id} entry={entry} onSaved={reload} />)}
-      </div> : tab === 'summary' ? <>
+      tab === 'status' ? <TaskStatusTable entries={entries} reload={reload} /> : tab === 'summary' ? <>
         <div className="daily-metrics">
           <div className="card daily-card"><span>Logged hours</span><strong>{totalHours(entries)}</strong></div>
           <div className="card daily-card"><span>Tasks</span><strong>{entries.length}</strong></div>
@@ -619,6 +625,7 @@ export default function DailyWork() {
     </nav>
     {tab === 'entry' && (day.error ? <ErrorBox error={day.error} /> : day.loading || day.data?.date !== date ? <Skeleton /> :
       <EntryEditor key={date} date={date} data={day.data} />)}
+    {tab === 'status' && <DailyTaskStatus date={date} />}
     {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
     {tab === 'missing' && <Missing date={date} />}
   </div>;
