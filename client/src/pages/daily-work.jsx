@@ -328,7 +328,10 @@ function EntryEditor({ date, data }) {
           const task = taskFor(row);
           const remaining = task && available(task, row.key);
           const original = submission?.entries.find((entry) => entry._id === row._id);
-          const maxHours = original?.hours ?? (task ? Math.min(24, remaining) : 24);
+          const customEdit = original && !original.catalogId && !original.workItemId && !task &&
+            nameKey(original.title) !== 'review' && nameKey(row.title) !== 'review' &&
+            !data.workItems.some((item) => item.projectId === row.projectId && nameKey(item.title) === nameKey(row.title));
+          const maxHours = original && !customEdit ? original.hours : task ? Math.min(24, remaining) : 24;
           const hintId = `hours-limit-${row.key}`;
           return <article className="daily-entry" key={row.key} data-entry-key={row.key}>
             {row.collapsed && <button className="daily-entry-summary" type="button" data-focus-summary
@@ -378,7 +381,7 @@ function EntryEditor({ date, data }) {
                           }} />
                         {(original || task || row.hoursAdjusted) && <span id={hintId} className="hint" aria-live="polite">
                           {row.hoursAdjusted ? `Adjusted to ${hours(maxHours)} h.` : original
-                            ? `Up to ${hours(maxHours)} h · Saved time can only be reduced`
+                            ? `Up to ${hours(maxHours)} h${customEdit ? '' : ' · Saved time can only be reduced'}`
                             : `Up to ${hours(maxHours)} h · ${task.period}${task.review ? ' · across projects' : ''}`}
                         </span>}
                       </div>

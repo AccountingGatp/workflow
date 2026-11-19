@@ -310,10 +310,14 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(custom.entries[0].title, 'Prepare one-off report');
     assert.equal(custom.entries[0].hours, 1);
     assert.ok(custom.entries[0].workflowTaskId);
-    await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.01 }], 400, custom.version);
+    const increased = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.5 }], 200, custom.version);
+    assert.equal(increased.entries[0].hours, 1.5);
+    await log(employee, emptyDate, [{ ...increased.entries[0], hours: 24.01 }], 400, increased.version);
     await request(owner, `/projects/${emptyProjectId}/catalog`, 'POST', { title: 'New predefined task', hours: 1 }, 201);
-    const revised = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 0.75 }], 200, custom.version);
+    const revised = await log(employee, emptyDate, [{ ...increased.entries[0], hours: 0.75 }], 200, increased.version);
     assert.equal(revised.entries[0].hours, 0.75);
+    const corrected = await log(employee, emptyDate, [{ ...revised.entries[0], hours: 1.25 }], 200, revised.version);
+    assert.equal(corrected.entries[0].hours, 1.25);
 
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
     assert.equal(leadCatalog.filter((task) => task.review).length, 3);
