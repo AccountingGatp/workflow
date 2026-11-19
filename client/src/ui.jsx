@@ -2,6 +2,10 @@ import { useEffect } from 'react';
 import { X, Inbox } from 'lucide-react';
 import { colorFor, initials, STATUS } from './lib.jsx';
 
+export function BrandName() {
+  return <span className="brand-name"><strong>GATP</strong> Solutions</span>;
+}
+
 export const Avatar = ({ name, size = '' }) => (
   <span className={`avatar ${size && `avatar-${size}`}`} style={{ background: colorFor(name) }} title={name} aria-hidden="true">
     {initials(name)}
