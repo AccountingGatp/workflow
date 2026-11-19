@@ -155,7 +155,6 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
 
     const enteredTitle = textValue(input.title, 230);
     const hours = hoursValue(input.hours);
-    if (existing && hours > existing.hours) fail('Saved task hours can only be reduced');
     const { priority, status } = input;
     if (!['low', 'normal', 'high'].includes(priority) || !['incomplete', 'complete'].includes(status)) fail('Choose a valid status and priority');
     const projectCatalog = catalog.filter((item) => item.projectId === projectId);
@@ -178,6 +177,9 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     const projectWork = workItems.filter((item) => item.projectId === projectId);
     const master = projectWork.find((item) => item.id === (input.workItemId || existing?.workItemId)) ||
       projectWork.find((item) => taskName(item.title) === taskName(title));
+    const customEdit = sameProject && !existing.catalogId && !existing.workItemId && !isReview(existing.title) &&
+      !catalogTask && !master && !isReview(title);
+    if (existing && hours > existing.hours && !customEdit) fail('Saved assigned task hours can only be reduced');
     if (!sameProject && !catalogTask && !master &&
       (projectWork.length || projectCatalog.some((item) => !item.archived && !isReview(item.title)))) {
       fail('Select a task from this project’s task list');
