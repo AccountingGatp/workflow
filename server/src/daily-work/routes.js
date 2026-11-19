@@ -246,12 +246,17 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
     if (doc.__v !== version) throw new HttpError(409, 'This task changed. Refresh before saving again.');
     if (doc.delivery === 'sending') throw new HttpError(409, 'Slack delivery is in progress. Try again in a moment.');
 
+    let task;
     if (entry.workflowTaskId) {
       if (Task.db.getClient() !== models.Submission.db.getClient()) throw new HttpError(503, 'The linked Workflow task is unavailable');
-      const task = await Task.findOne({ _id: entry.workflowTaskId, client: entry.clientId, deletedAt: null }).session(session);
-      if (!task || !task.assignees.some((id) => String(id) === memberId)) {
+      task = await Task.findOne({ _id: entry.workflowTaskId, client: entry.clientId, deletedAt: null }).session(session);
+      if (task && !task.assignees.some((id) => String(id) === memberId)) {
         throw new HttpError(409, 'The linked Workflow task is no longer available');
       }
+      // Keep the saved Daily Work entry editable when its linked occurrence was removed.
+      if (!task) entry.workflowStatus = 'unavailable';
+    }
+    if (task) {
       applyTaskTransition(task, { status: status === 'complete' ? 'done' : 'in_progress' }, {
         manager: includes(scope.managed, entry.clientId), isAssignee: own, actorId: req.user._id,
       });
@@ -289,7 +294,7 @@ async function reportRows(req, models, scope) {
       (!req.query.projectId || entry.projectId === req.query.projectId) &&
       (!req.query.status || entry.status === req.query.status));
     return entries.length ? [publicSubmission(doc, entries.map((entry) => ({
-      ...entry, canUpdateStatus: !['done', 'unavailable'].includes(entry.workflowStatus) &&
+      ...entry, canUpdateStatus: entry.workflowStatus !== 'done' &&
         (doc.memberId === scope.own || includes(scope.managed, entry.clientId)),
     })))] : [];
   });

@@ -46,7 +46,7 @@ const dailyWorkApi = createApi({
               }
               Object.assign(entry, data.entry, {
                 incompleteReason: data.entry.incompleteReason,
-                canUpdateStatus: entry.canUpdateStatus && !['done', 'unavailable'].includes(data.entry.workflowStatus),
+                canUpdateStatus: entry.canUpdateStatus && data.entry.workflowStatus !== 'done',
               });
             }));
           }

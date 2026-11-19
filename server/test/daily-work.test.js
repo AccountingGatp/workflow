@@ -318,6 +318,28 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const corrected = await log(employee, emptyDate, [{ ...revised.entries[0], hours: 1.25 }], 200, revised.version);
     assert.equal(corrected.entries[0].hours, 1.25);
 
+    const archivedId = corrected.entries[0].workflowTaskId;
+    const archivedStatusPath = `/day/${emptyDate}/members/${employee._id}/entries/${corrected.entries[0]._id}/status`;
+    const markedIncomplete = await request(employee, archivedStatusPath, 'PATCH', {
+      status: 'incomplete', version: corrected.version, reason: 'Waiting for a statement',
+    });
+    await request(owner, `/tasks/${archivedId}`, 'DELETE');
+    const archivedReport = await request(employee, `/reports?from=${emptyDate}&status=incomplete`);
+    assert.equal(archivedReport.submissions[0].entries[0].workflowStatus, 'unavailable');
+    assert.equal(archivedReport.submissions[0].entries[0].canUpdateStatus, true);
+    const finishArchived = { status: 'complete', version: markedIncomplete.version };
+    await request(other, archivedStatusPath, 'PATCH', finishArchived, 403);
+    const finished = await request(employee, archivedStatusPath, 'PATCH', finishArchived);
+    assert.equal(finished.entry.status, 'complete');
+    assert.equal(finished.entry.incompleteReason, undefined);
+    assert.equal(finished.entry.hours, 1.25);
+    assert.equal(finished.entry.workflowTaskId, archivedId);
+    const archived = await Task.findById(archivedId);
+    assert.equal(archived.status, 'cancelled');
+    assert.ok(archived.deletedAt);
+    assert.equal(await Task.countDocuments({ client: client._id, title: corrected.entries[0].title }), 1);
+    assert.equal((await request(lead, `/reports?from=${emptyDate}&status=complete`)).submissions[0].entries[0].status, 'complete');
+
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
     assert.equal(leadCatalog.filter((task) => task.review).length, 3);
     await log(owner, '2026-10-05', [time('Review', 1)], 403);
