@@ -32,7 +32,8 @@ function EntryEditor({ date, data, onSaved }) {
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
-  const filtered = data.projects.filter((item) => item.name.toLowerCase().includes(search.trim().toLowerCase()));
+  const projectLabel = (item) => item.clientName && item.clientName !== item.name ? `${item.clientName} / ${item.name}` : item.name;
+  const filtered = data.projects.filter((item) => nameKey(projectLabel(item)).includes(nameKey(search)));
   const selected = data.projects.find((item) => item._id === project);
   const visibleSuggestions = data.suggestions.filter((suggestion) =>
     !rows.some((row) => row.workflowTaskId === suggestion.id));
@@ -58,17 +59,22 @@ function EntryEditor({ date, data, onSaved }) {
     const task = suggestion && taskFor({ projectId: item._id, title: suggestion.title });
     setRows((old) => [...old, {
       key: crypto.randomUUID(), projectId: item._id, projectName: item.name, title: task?.title || suggestion?.title || '',
-      catalogId: task?._id, workflowTaskId: suggestion?.id,
+      catalogId: task?._id, workflowTaskId: suggestion?.id, workItemId: suggestion?.workItemId,
+      checklist: suggestion?.checklist, workflowStatus: suggestion?.workflowStatus,
       hours: task ? Math.min(assignment?.hours ?? task.hours, available(task), 24) : assignment?.hours ?? '',
       priority: suggestion?.priority || 'normal', status: 'incomplete',
     }]);
   }
 
   function chooseTask(row, id) {
-    const task = data.catalog.find((item) => item._id === id);
-    update(row.key, task
-      ? { catalogId: id, title: task.title, hours: Math.min(task.hours, available(task, row.key), 24), workflowTaskId: undefined }
-      : { catalogId: undefined, title: row.title });
+    const master = data.workItems.find((item) => item.id === id && item.projectId === row.projectId);
+    const task = master ? taskFor({ projectId: row.projectId, title: master.title }) : data.catalog.find((item) => item._id === id);
+    const occurrence = master && data.suggestions.find((item) => item.workItemId === id && item.projectId === row.projectId);
+    update(row.key, {
+      catalogId: task?._id, workItemId: master?.id, workflowTaskId: occurrence?.id,
+      title: master?.title || task?.title || '', hours: task ? Math.min(task.hours, available(task, row.key), 24) : master?.hours ?? '',
+      checklist: occurrence?.checklist, workflowStatus: occurrence?.workflowStatus, checklistChanges: undefined, status: 'incomplete',
+    });
   }
 
   async function submit(event) {
@@ -99,11 +105,11 @@ function EntryEditor({ date, data, onSaved }) {
           onChange={(event) => { setSearch(event.target.value); setProject(''); }} /></label>
         <label className="field"><span>Project</span><select className="select" value={project} onChange={(event) => setProject(event.target.value)}>
           <option value="">Select a project</option>
-          {filtered.map((item) => <option key={item._id} value={item._id}>{item.name}</option>)}
+          {filtered.map((item) => <option key={item._id} value={item._id}>{projectLabel(item)}</option>)}
         </select></label>
         <button type="button" className="btn" onClick={() => add(selected)} disabled={!selected || busy || rows.length >= 40}><Plus size={16} /> Add task</button>
       </div>
-      {!data.projects.length && <p className="muted">Daily Work projects appear here when a manager sets them up for your clients.</p>}
+      {!data.projects.length && <p className="muted">Client projects you have access to appear here automatically.</p>}
     </div>
     {!!visibleSuggestions.length && <div className="card daily-card">
       <h2>Workflow suggestions</h2>
@@ -124,7 +130,10 @@ function EntryEditor({ date, data, onSaved }) {
       <ErrorBox error={error} />
       {!rows.length && <Empty title="No tasks entered">Choose a project or add a Workflow suggestion.</Empty>}
       {rows.map((row) => {
-        const catalog = data.catalog.filter((item) => item.projectId === row.projectId);
+        const shared = data.workItems.filter((item) => item.projectId === row.projectId);
+        const linked = !!row._id && !!row.workflowTaskId;
+        const catalog = data.catalog.filter((item) => item.projectId === row.projectId &&
+          !shared.some((reference) => nameKey(reference.title) === nameKey(item.title)));
         const task = taskFor(row);
         const remaining = task && available(task, row.key);
         const original = submission?.entries.find((entry) => entry._id === row._id);
@@ -134,13 +143,15 @@ function EntryEditor({ date, data, onSaved }) {
         return <fieldset className="daily-entry" key={row.key} disabled={busy}>
           <legend>{row.projectName}</legend>
           <div className="daily-entry-grid">
-            {!!catalog.length && <label className="field daily-entry-title"><span>Saved task</span><select className="select" value={catalog.some((item) => item._id === row.catalogId) ? row.catalogId : ''}
+            {!linked && !!(catalog.length || shared.length) && <label className="field daily-entry-title"><span>Project task</span><select className="select"
+              value={row.workItemId || (catalog.some((item) => item._id === row.catalogId) ? row.catalogId : '')}
               onChange={(event) => chooseTask(row, event.target.value)}>
               <option value="">Custom task</option>
+              {shared.map((item) => <option key={item.id} value={item.id} disabled={!item.canLog}>{item.title}</option>)}
               {catalog.map((item) => <option key={item._id} value={item._id}>{item.title} · {item.hours} h {item.period}</option>)}
             </select>{catalog.find((item) => item._id === row.catalogId)?.description &&
               <span className="hint">{catalog.find((item) => item._id === row.catalogId).description}</span>}</label>}
-            <label className="field daily-entry-title"><span>Task</span><input className="input" maxLength={230} required readOnly={!!row.catalogId && !!task} value={row.title}
+            <label className="field daily-entry-title"><span>Task</span><input className="input" maxLength={230} required readOnly={linked || !!row.workItemId || (!!row.catalogId && !!task)} value={row.title}
               onChange={(event) => update(row.key, { title: event.target.value, catalogId: undefined, workflowTaskId: undefined })} /></label>
             <div className="field">
               <label htmlFor={`hours-${row.key}`}>Hours</label>
@@ -154,12 +165,22 @@ function EntryEditor({ date, data, onSaved }) {
             <label className="field"><span>Priority</span><select className="select" value={row.priority} onChange={(event) => update(row.key, { priority: event.target.value })}>
               <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
             </select></label>
-            <label className="field"><span>Status</span><select className="select" value={row.status} onChange={(event) => update(row.key, { status: event.target.value })}>
-              <option value="incomplete">Incomplete</option><option value="complete">Complete</option>
+            <label className="field"><span>Status</span><select className="select" value={row.status} disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)} onChange={(event) => update(row.key, { status: event.target.value })}>
+              <option value="incomplete">{row.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</option><option value="complete">Complete</option>
             </select></label>
             <button type="button" className="btn btn-ghost icon-btn" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
               onClick={() => setRows((old) => old.filter((item) => item.key !== row.key))}><Trash2 size={17} /></button>
           </div>
+          {!!row.checklist?.length && <div className="stack">
+            {row.checklist.map((step) => <label key={step._id} className="row">
+              <input type="checkbox" checked={row.checklistChanges?.find((change) => change.id === step._id)?.done ?? step.done}
+                disabled={['done', 'pending_review', 'unavailable'].includes(row.workflowStatus)}
+                onChange={(event) => update(row.key, { checklistChanges: [
+                  ...(row.checklistChanges || []).filter((change) => change.id !== step._id),
+                  ...(event.target.checked === step.done ? [] : [{ id: step._id, done: event.target.checked }]),
+                ] })} />{step.text}
+            </label>)}
+          </div>}
         </fieldset>;
       })}
       <div className="row-wrap daily-header">
@@ -234,7 +255,7 @@ function DailyReports({ tab, setDate, openEntry, me }) {
         <thead><tr><th>Member</th><th>Date</th><th>Project</th><th>Task</th><th>Hours</th><th>Priority</th><th>Status</th><th aria-label="Actions" /></tr></thead>
         <tbody>{entries.map((entry) => <tr key={entry._id}><td>{entry.submission.memberName}</td><td>{entry.submission.date}</td><td>{entry.projectName}</td>
           <td>{entry.title}</td><td>{hours(entry.hours)}</td><td className="daily-status">{entry.priority}</td>
-          <td><Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{entry.status === 'complete' ? 'Complete' : 'Incomplete'}</Badge></td>
+          <td><Badge cls={entry.status === 'complete' ? 'b-success' : 'b-warning'}>{entry.status === 'complete' ? 'Complete' : entry.workflowStatus === 'pending_review' ? 'Awaiting TL review' : 'Incomplete'}</Badge></td>
           <td>{entry.submission.memberId === me && <button className="btn btn-sm" onClick={() => { setDate(entry.submission.date); openEntry(); }}>Edit day</button>}</td>
         </tr>)}</tbody>
       </table></div>)}

@@ -33,14 +33,15 @@ export async function workflowSuggestions(scope, memberId, date, projects) {
     client: { $in: clientIds }, assignees: memberId,
     status: { $in: ['todo', 'in_progress', 'waiting', 'pending_review'] },
     deletedAt: null, dueDate: { $lt: dayEnd },
-  }).sort({ dueDate: -1 }).select('client project title dueDate priority').limit(150).lean();
+  }).sort({ dueDate: -1 }).select('client project title dueDate priority masterItem checklist status').limit(150).lean();
   return tasks.flatMap((task) => {
     const clientId = String(task.client);
     if (!includes(scope.visible, clientId)) return [];
     const project = projects.find((item) => item.clientId === clientId && task.project && item.workflowProjectId === String(task.project))
       || projects.find((item) => item.clientId === clientId && !item.workflowProjectId);
     return project ? [{
-      id: task._id, projectId: project._id, title: task.title, dueDate: task.dueDate, priority: task.priority,
+      id: task._id, projectId: project._id, title: task.title, dueDate: task.dueDate, priority: task.priority, workItemId: task.masterItem,
+      checklist: task.checklist, workflowStatus: task.status,
     }] : [];
   });
 }

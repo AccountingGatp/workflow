@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import app, { handleErrors } from '../src/app.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
-import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, Task } from '../src/models/index.js';
+import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, ProjectWorkItem, Task } from '../src/models/index.js';
 import { dailyModels } from '../src/daily-work/models.js';
 import { clock, shiftDate } from '../src/daily-work/dates.js';
 import { runDailyWorkJobs } from '../src/daily-work/jobs.js';
@@ -32,7 +32,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     server = app.listen(0);
     const base = `http://127.0.0.1:${server.address().port}/api/daily-work`;
     async function request(user, path, method = 'GET', body, status = 200) {
-      const response = await fetch(base + path, {
+      const response = await fetch((path.startsWith('/tasks/') ? base.replace(/\/daily-work$/, '') : base) + path, {
         method, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(user._id) }, JWT_SECRET) },
         body: body && JSON.stringify(body),
       });
@@ -55,7 +55,10 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await ClientPermission.create({ client: client._id, user: employee._id, grantedBy: lead._id });
     const date = clock().date;
     const previousDate = shiftDate(date, -1);
-    const source = await Task.create({ client: client._id, project: project._id, title: 'Review ledger', assignees: [employee._id], dueDate: new Date(date) });
+    const master = await ProjectWorkItem.create({ client: client._id, project: project._id,
+      title: 'Review ledger', responsibleUser: employee._id, weeklyHours: '20 min monthly' });
+    const source = await Task.create({ client: client._id, project: project._id, masterItem: master._id, title: master.title,
+      assignees: [employee._id], dueDate: new Date(date), checklist: [{ text: 'Check totals' }] });
     const legacyProject = new mongoose.Types.ObjectId();
     const legacyDatabase = mongoose.connection.useDb('daily_test', { useCache: true }).db;
     await legacyDatabase.collection('projects').insertOne({ _id: legacyProject, clientId: String(client._id), name: 'Legacy', archived: false });
@@ -65,7 +68,11 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await request(lead, '/projects', 'POST', draft, 403);
     await request(lead, '/manage', 'GET', undefined, 403);
     await request(employee, '/manage', 'GET', undefined, 403);
-    const daily = await request(owner, '/projects', 'POST', draft, 201);
+    const synced = await request(employee, `/day/${date}`);
+    const daily = synced.projects.find((row) => row.workflowProjectId === String(project._id));
+    assert.equal(daily.clientName, 'Company');
+    assert.equal(synced.workItems.find((row) => row.id === String(master._id)).hours, 0.33);
+    assert.equal((await request(employee, `/day/${date}`)).projects.filter((row) => row.workflowProjectId === String(project._id)).length, 1);
     await request(lead, `/projects/${daily._id}/catalog`, 'POST', { title: 'Blocked', hours: 1 }, 403);
     await request(lead, `/projects/${daily._id}/members/${employee._id}`, 'PUT', { hours: 2 }, 403);
     await request(lead, '/projects/import', 'POST', { text: 'Blocked' }, 403);
@@ -93,16 +100,22 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(original.delivery, 'sent');
     assert.equal(calls[0].thread_ts, undefined);
     const changed = await request(employee, `/day/${date}`, 'PUT', {
-      entries: [{ ...original.entries[0], hours: 2.25, status: 'complete' }], version: original.version,
+      entries: [{ ...original.entries[0], hours: 2.25, status: 'complete', checklistChanges: [{ id: String(source.checklist[0]._id), done: true }] }], version: original.version,
     });
     assert.equal(calls[1].thread_ts, '1.000001');
     assert.equal(calls[1].reply_broadcast, false);
     assert.match(calls[1].text, /2.25 h/);
+    assert.equal(changed.entries[0].workflowStatus, 'pending_review');
+    assert.match(calls[1].text, /awaiting TL review/);
+    assert.equal((await request(employee, `/tasks/${source._id}`)).checklist[0].done, true);
     const unchanged = await request(employee, `/day/${date}`, 'PUT', { entries: changed.entries, version: changed.version });
     assert.equal(unchanged.version, changed.version);
     assert.equal(calls.length, 2);
     await request(employee, `/day/${date}`, 'PUT', { entries: [], version: original.version }, 409);
+    assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 0);
+    await request(lead, `/tasks/${source._id}`, 'PATCH', { confirmCompletion: true });
     assert.equal((await request(lead, `/reports?from=${date}&status=complete`)).submissions.length, 1);
+    assert.equal((await request(employee, `/day/${date}`)).submission.entries[0].status, 'complete');
     assert.equal((await request(other, `/reports?from=${date}`)).submissions.length, 0);
     assert.equal((await request(owner, `/reports?from=${date}`)).submissions.length, 1);
 
@@ -126,7 +139,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal((await request(owner, `/missing/${date}`)).expected, 0);
     assert.equal((await dailyModels()).Submission.db.name, 'daily_test');
     assert.equal(mongoose.connection.name, 'workflow_test');
-    assert.equal((await Task.findById(source._id)).status, 'todo');
+    assert.equal((await Task.findById(source._id)).status, 'done');
 
     delete process.env.DAILY_WORK_SLACK_TOKEN;
     await request(owner, `/projects/${daily._id}/catalog`, 'POST', { items: [
@@ -159,6 +172,14 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal((await getDay(employee, '2026-10-08')).catalog.find((task) => task.title === 'Month end').remainingHours, 7);
     assert.equal((await getDay(employee, '2026-10-12')).catalog.find((task) => task.title === 'Weekly report').remainingHours, 3);
     assert.equal((await getDay(employee, '2026-11-01')).catalog.find((task) => task.title === 'Month end').remainingHours, 8);
+
+    const shared = await ProjectWorkItem.create({ client: client._id, project: project._id, title: 'New client work' });
+    const linked = await log(employee, '2026-10-09', [{ ...time(shared.title, 1), workItemId: String(shared._id) }]);
+    const linkedTask = await request(employee, `/tasks/${linked.entries[0].workflowTaskId}`);
+    assert.equal(linkedTask.masterItem._id, String(shared._id));
+    assert.equal(linkedTask.status, 'pending_review');
+    await log(employee, '2026-10-09', linked.entries, 200, linked.version);
+    assert.equal(await Task.countDocuments({ masterItem: shared._id }), 1);
 
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;
     assert.equal(leadCatalog.filter((task) => task.review).length, 2);
