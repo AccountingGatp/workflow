@@ -134,9 +134,9 @@ export function ClientDetail() {
           </div>
           {c.canManage && (
             <div className="card">
-              <div className="card-head"><div><h3>People with access</h3><p className="small muted">People get access automatically when their TL assigns them work here.</p></div>
+              <div className="card-head"><div><h3>People with access</h3><p className="small muted">{c.isSuper ? 'Grant access to employees and team leads, or let work assignments grant it automatically.' : 'People get access automatically when their TL assigns them work here.'}</p></div>
                 <button className="btn btn-tonal btn-sm" onClick={() => setGranting(true)}><UserPlus size={16} />Grant</button></div>
-              {c.permissions.length === 0 ? <p className="small muted" style={{ padding: 20 }}>No employees have access yet.</p> : (
+              {c.permissions.length === 0 ? <p className="small muted" style={{ padding: 20 }}>No direct access grants yet.</p> : (
                 <div className="list">{c.permissions.map((p) => (
                   <div key={p._id} className="list-item" style={{ cursor: 'default' }}>
                     <Avatar name={p.user.name} size="sm" />
@@ -211,7 +211,8 @@ function GrantAccess({ client, onClose, onSaved }) {
   const [reason, setReason] = useState('');
   const [error, setError] = useState(null);
   const has = new Set(client.permissions.map((p) => p.user._id));
-  const options = (users.data || []).filter((u) => u.role === 'employee' && u.active && !has.has(u._id));
+  const options = (users.data || []).filter((u) =>
+    u.active && !has.has(u._id) && (u.role === 'employee' || (can.super && u.role === 'admin')));
   const submit = async (e) => {
     e.preventDefault();
     try {
@@ -223,10 +224,13 @@ function GrantAccess({ client, onClose, onSaved }) {
     <Modal title={`Grant access to ${client.name}`} onClose={onClose} footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="grant-form" disabled={!userId}>Grant access</button></>}>
       <form id="grant-form" className="stack" style={{ gap: 16 }} onSubmit={submit}>
         <ErrorBox error={error} />
-        <Field label="Employee">
+        <Field label={can.super ? "Employee or team lead" : "Employee"}>
           <select className="select" value={userId} onChange={(e) => setUserId(e.target.value)} required>
             <option value="">Select…</option>
-            {options.map((u) => <option key={u._id} value={u._id}>{u.name} — {u.teams.map((t) => t.team.name).join(', ') || 'no team'}</option>)}
+            {options.map((u) => {
+              const teams = u.teams?.map((membership) => membership.team?.name).filter(Boolean).join(', ');
+              return <option key={u._id} value={u._id}>{[u.name, can.super && ROLE_LABEL[u.role], teams].filter(Boolean).join(' · ')}</option>;
+            })}
           </select>
         </Field>
         <label className="row" style={{ cursor: 'pointer' }}><input type="checkbox" checked={temporary} onChange={(e) => setTemporary(e.target.checked)} />Temporary access</label>
