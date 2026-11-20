@@ -1,10 +1,10 @@
-import { StrictMode, Suspense, lazy, useState } from 'react';
+import { StrictMode, Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import '@fontsource-variable/hanken-grotesk';
 import './styles.css';
-import { AuthProvider, ToastProvider, useAuth } from './lib.jsx';
+import { AuthProvider, ToastProvider, api, useApi, useAuth } from './lib.jsx';
 import { createWorkflowStore } from './daily-work-data.js';
 import Layout from './Layout.jsx';
 import DailyWork from './pages/daily-work.jsx';
@@ -29,11 +29,22 @@ function App() {
 
 function WorkflowRoutes({ can }) {
   const [store] = useState(createWorkflowStore);
+  const mail = useApi('/settings/mail');
+  const mailEnabled = mail.data?.enabled === true;
+  const { reload } = mail;
+  useEffect(() => {
+    window.addEventListener('focus', reload);
+    return () => window.removeEventListener('focus', reload);
+  }, [reload]);
+  async function saveMail(enabled) {
+    await api('/settings/mail', { method: 'PUT', body: { enabled } });
+    reload();
+  }
   const guard = (ok, el) => (ok ? el : <Navigate to="/" replace />);
   return (
     <Provider store={store}>
       <Routes>
-        <Route element={<Layout />}>
+        <Route element={<Layout mailEnabled={mailEnabled} />}>
           <Route index element={can.super ? <Navigate to="/overview" replace /> : <MyWork />} />
           <Route path="daily-work" element={<DailyWork />} />
           <Route path="overview" element={guard(can.manage, <Overview />)} />
@@ -41,12 +52,12 @@ function WorkflowRoutes({ can }) {
           <Route path="clients/:id" element={<ClientDetail />} />
           <Route path="clients/:id/projects" element={<ClientProjects />} />
           <Route path="clients/:id/projects/:projectId" element={<ClientProjects />} />
-          <Route path="mail" element={<Suspense fallback={<Skeleton />}><Mail /></Suspense>} />
-          <Route path="mail/inboxes" element={guard(can.manage, <Suspense fallback={<Skeleton />}><MailInboxes /></Suspense>)} />
+          <Route path="mail" element={mail.loading ? <Skeleton /> : guard(mailEnabled, <Suspense fallback={<Skeleton />}><Mail /></Suspense>)} />
+          <Route path="mail/inboxes" element={mail.loading ? <Skeleton /> : guard(can.manage && mailEnabled, <Suspense fallback={<Skeleton />}><MailInboxes /></Suspense>)} />
           <Route path="teams" element={<Navigate to="/clients" replace />} />
           <Route path="recurring" element={guard(can.manage, <Recurring />)} />
           <Route path="people" element={guard(can.super, <People />)} />
-          <Route path="settings" element={guard(can.super, <Settings />)} />
+          <Route path="settings" element={guard(can.super, <Settings mail={mail} saveMail={saveMail} />)} />
           <Route path="access" element={guard(can.manage, <Access />)} />
           <Route path="audit" element={guard(can.manage, <Audit />)} />
           <Route path="*" element={<Navigate to="/" replace />} />

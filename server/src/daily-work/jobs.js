@@ -2,6 +2,7 @@ import { dailyModels } from './models.js';
 import { projectWorkflowStatuses } from './workflow-links.js';
 import { roster } from './access.js';
 import { clock, shiftDate } from './dates.js';
+import { leaveDates } from './leave.js';
 import { dailySubmissionText, postSlack, retrySlack, slackConfigured, slackPerson, statusReminderText } from './slack.js';
 import { statusReminders, validTime } from './settings.js';
 
@@ -25,9 +26,9 @@ async function attendance(models, from, to = from) {
   const [members, entries, leave] = await Promise.all([
     reportingRoster(models),
     models.Submission.find({ date: range, 'entries.0': { $exists: true } }).lean(),
-    models.Leave.find({ date: range }).lean(),
+    leaveDates(models.Leave, from, to),
   ]);
-  return { members, entries, leave: new Set(leave.map((row) => row._id)) };
+  return { members, entries, leave };
 }
 
 async function missingText(models, date, shift, at) {

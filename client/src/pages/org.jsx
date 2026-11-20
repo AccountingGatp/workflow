@@ -113,10 +113,24 @@ function TeamForm({ team, users, onClose, onSaved }) {
 
 export function People() {
   const { user: me } = useAuth();
-  const { data, loading, reload } = useApi('/users?dailyReport=1');
+  const { data, error, loading, reload } = useApi('/users?dailyReport=1');
   const toast = useToast();
   const [creating, setCreating] = useState(false);
   const [editingPerson, setEditingPerson] = useState(null);
+  const [changingLeave, setChangingLeave] = useState(null);
+  async function changeLeave(person) {
+    const onLeave = !person.onLeave;
+    setChangingLeave(person._id);
+    try {
+      await api(`/users/${person._id}/leave`, { method: 'PUT', body: { onLeave } });
+      toast(onLeave ? `${person.name} is on leave.` : `${person.name} is back at work.`);
+      reload();
+    } catch (error) {
+      toast(error.message);
+    } finally {
+      setChangingLeave(null);
+    }
+  }
   const update = async (u, body) => { try { await api(`/users/${u._id}`, { method: 'PATCH', body }); toast('Saved'); reload(); } catch (e) { toast(e.message); } };
   const remove = async (u) => {
     if (!confirm(`Remove ${u.name}? They can no longer sign in and lose all team and client access. Their name stays on past tasks.`)) return;
@@ -128,9 +142,10 @@ export function People() {
         <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Add person</button>
       </PageHead>
       <div className="card" style={{ overflow: 'hidden' }}>
-        {loading && !data ? <Skeleton /> : (
+        <ErrorBox error={error} />
+        {loading && !data ? <Skeleton /> : data && (
           <div className="table-wrap"><table>
-            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Status</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Availability</th><th>Account</th><th /></tr></thead>
             <tbody>{data.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
@@ -139,6 +154,12 @@ export function People() {
                 <td><select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
                   {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
                 <td><div className="row-wrap">{u.teams.map((t) => <span key={t.team._id} className="badge"><span className="team-dot" style={{ background: t.team.color }} />{t.team.name}{t.teamRole === 'lead' && <><Crown size={12} />TL</>}</span>)}</div></td>
+                <td>{u.active && <div className="row-wrap">
+                  <Badge cls={u.onLeave ? 'b-warning' : 'b-success'}>{u.onLeave ? 'On leave' : 'Active'}</Badge>
+                  <button type="button" className="btn btn-outline btn-sm" disabled={changingLeave !== null}
+                    aria-label={`${u.onLeave ? 'Mark active' : 'Mark on leave'} for ${u.name}`}
+                    onClick={() => changeLeave(u)}>{u.onLeave ? 'Mark active' : 'Mark on leave'}</button>
+                </div>}</td>
                 <td>{u._id === me._id ? <Badge cls="b-primary">You</Badge> : (
                   <button className={`btn btn-sm ${u.active ? 'btn-outline' : 'btn-tonal'}`} onClick={() => update(u, { active: !u.active })}>{u.active ? 'Deactivate' : 'Reactivate'}</button>
                 )}</td>

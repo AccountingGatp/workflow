@@ -7,6 +7,7 @@ import app, { handleErrors } from '../src/app.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, ProjectWorkItem, Task, TaskTemplate } from '../src/models/index.js';
 import { dailyModels } from '../src/daily-work/models.js';
+import { setCurrentLeave } from '../src/daily-work/leave.js';
 import { clock, shiftDate } from '../src/daily-work/dates.js';
 import { runDailyWorkJobs } from '../src/daily-work/jobs.js';
 import { dailySubmissionText } from '../src/daily-work/slack.js';
@@ -55,7 +56,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     server = app.listen(0);
     const base = `http://127.0.0.1:${server.address().port}/api/daily-work`;
     async function request(user, path, method = 'GET', body, status = 200) {
-      const response = await fetch((/^\/(tasks|clients|templates|users)(?:[/?]|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
+      const response = await fetch((/^\/(tasks|clients|templates|users|settings\/mail|mail)(?:[/?]|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
         method, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(user._id) }, JWT_SECRET) },
         body: body && JSON.stringify(body),
       });
@@ -71,6 +72,17 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const [owner, lead, employee, other, manager] = await Promise.all([
       person('owner', 'super_admin'), person('Simran', 'admin'), person('employee', 'employee'), person('other', 'employee'), person('manager', 'manager'),
     ]);
+    assert.deepEqual(await request(employee, '/settings/mail'), { enabled: true });
+    await request(employee, '/settings/mail', 'PUT', { enabled: false }, 403);
+    await request(owner, '/settings/mail', 'PUT', { enabled: 'false' }, 400);
+    assert.deepEqual(await request(owner, '/settings/mail', 'PUT', { enabled: false }), { enabled: false });
+    assert.deepEqual(await request(employee, '/settings/mail'), { enabled: false });
+    await request(employee, '/mail/threads', 'GET', undefined, 403);
+    await request(owner, '/mail/accounts', 'GET', undefined, 403);
+    await request(owner, '/mail/oauth/callback', 'GET', undefined, 403);
+    await request(owner, '/settings/mail', 'PUT', { enabled: true });
+    assert.deepEqual(await request(employee, '/mail/threads'), []);
+
     const [client, team] = await Promise.all([Client.create({ name: 'Company' }), Team.create({ name: 'Team' })]);
     const project = await ClientProject.create({ client: client._id, name: 'Accounting' });
     await TeamMembership.create([{ user: lead._id, team: team._id, teamRole: 'lead' }, { user: employee._id, team: team._id }]);
@@ -245,6 +257,18 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     }
     await request(owner, `/members/${employee._id}/leave/${date}`, 'PUT', {});
     assert.equal((await request(owner, `/missing/${date}`)).expected, 0);
+    const leavePath = `/users/${employee._id}/leave`;
+    await request(lead, leavePath, 'PUT', { onLeave: true }, 403);
+    await request(owner, leavePath, 'PUT', { onLeave: false });
+    const availability = async () => (await request(owner, '/users?dailyReport=1'))
+      .find((person) => person._id === String(employee._id)).onLeave;
+    assert.equal(await availability(), false);
+    await request(owner, leavePath, 'PUT', { onLeave: true });
+    assert.equal(await availability(), true);
+    assert.equal((await request(owner, `/missing/${shiftDate(date, 1)}`)).expected, 0);
+    assert.equal((await request(employee, `/day/${date}`)).date, date);
+    await request(owner, leavePath, 'PUT', { onLeave: false });
+    assert.equal(await availability(), false);
     assert.equal((await dailyModels()).Submission.db.name, 'daily_test');
     assert.equal(mongoose.connection.name, 'workflow_test');
     assert.equal((await Task.findById(source._id)).status, 'done');
@@ -393,7 +417,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await configure(lateMissing, 'U123LATE', '15:00', '10:00', 400);
     await configure(earlyMissing, 'U123EARLY', '09:00', '10:00');
     await configure(onLeave, 'U123LEAVE', '09:00', '10:00');
-    await request(owner, `/members/${onLeave._id}/leave/${reportDate}`, 'PUT', {});
+    await setCurrentLeave((await dailyModels()).Leave, String(onLeave._id), shiftDate(reportDate, -1), true);
     const settings = await request(owner, '/users?dailyReport=1');
     assert.equal(settings.find((row) => row._id === String(lateMissing._id)).dailyReport.reminderAt, '15:45');
     assert.equal(settings.find((row) => row._id === String(employee._id)).dailyReport.reminderAt, '15:30');
@@ -405,6 +429,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const reportModels = await dailyModels();
     const baseRow = { projectId: daily._id, clientId: String(client._id), projectName: 'Accounting', status: 'incomplete', priority: 'high', hours: 1 };
     await reportModels.Submission.create([
+      { _id: `${onLeave._id}:${reportDate}`, memberId: String(onLeave._id), memberName: onLeave.name, date: reportDate,
+        entries: [{ ...baseRow, title: 'Incomplete task while on leave' }] },
       { _id: `${manager._id}:${reportDate}`, memberId: String(manager._id), memberName: manager.name, date: reportDate,
         entries: [{ ...baseRow, title: 'Manager-only incomplete task' }] },
       { _id: `${earlyMissing._id}:${nextDate}`, memberId: String(earlyMissing._id), memberName: earlyMissing.name, date: nextDate,
@@ -445,7 +471,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(reportDate, '17:30'));
     assert.equal(calls.length, callsBeforeSchedule + 4);
     assert.match(calls.at(-1).text, /Weekly Submission Report.*2026-11-02 to 2026-11-06/);
-    assert.doesNotMatch(calls.at(-1).text, /manager \(morning\)/);
+    assert.doesNotMatch(calls.at(-1).text, /manager \(morning\)|On leave/);
     await Promise.all([runDailyWorkJobs(at(reportDate, '18:00')), runDailyWorkJobs(at(reportDate, '18:00'))]);
     await runDailyWorkJobs(at(reportDate, '18:05'));
     await runDailyWorkJobs(at(reportDate, '19:00'));
@@ -457,7 +483,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(nextDate, '00:15'));
     assert.equal(calls.length, callsBeforeSchedule + 6);
     assert.match(calls.at(-1).text, /Incomplete Tasks Report/);
-    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123MANAGER|Manager-only incomplete task/);
+    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123MANAGER|Manager-only incomplete task|U123LEAVE|Incomplete task while on leave/);
     assert.match(calls.at(-1).text, /Date: 2026-11-06/);
     assert.match(calls.at(-1).text, /Employee: <@U123TEST>/);
     assert.match(calls.at(-1).text, /Reason: Waiting for bank statement/);

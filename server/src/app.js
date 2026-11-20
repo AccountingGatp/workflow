@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
-import { requireAuth } from './middleware/auth.js';
+import { ah, requireAuth, requireRole } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
 import peopleRoutes from './routes/people.js';
 import clientRoutes from './routes/clients.js';
@@ -12,6 +12,7 @@ import workRoutes from './routes/work.js';
 import projectRoutes from './routes/projects.js';
 import projectWorkRoutes from './routes/project-work.js';
 import mailRoutes, { mailPublic } from './routes/mail.js';
+import { mailEnabled, setMailEnabled, requireMailEnabled } from './services/mail-settings.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
 import { assignLoanTasks } from './assign-loan-reviewers.js';
@@ -69,6 +70,11 @@ app.get('/api/cron/daily-work', cronAuth, async (_req, res) => {
 app.use('/api/daily-work', requireAuth, dailyWorkRoutes);
 
 app.use('/api/auth', authRoutes);
+app.get('/api/settings/mail', requireAuth, ah(async (_req, res) => res.json({ enabled: await mailEnabled() })));
+app.put('/api/settings/mail', requireAuth, requireRole('super_admin'), ah(async (req, res) => {
+  res.json({ enabled: await setMailEnabled(req.body?.enabled) });
+}));
+app.use('/api/mail', requireMailEnabled);
 app.use('/api', mailPublic);
 app.use('/api', requireAuth, peopleRoutes, clientRoutes, projectRoutes, projectWorkRoutes, workRoutes, mailRoutes);
 
