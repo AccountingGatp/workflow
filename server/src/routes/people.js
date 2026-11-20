@@ -148,7 +148,7 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
  */
 r.delete('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   if (String(req.params.id) === String(req.user._id)) throw new HttpError(400, 'You cannot remove yourself');
-  const user = await User.findOne({ _id: req.params.id, deletedAt: null });
+  const user = await User.findOne({ _id: req.params.id, deletedAt: null }).select('+googleSubject');
   if (!user) throw new HttpError(404, 'User not found');
   const leads = await TeamMembership.find({ user: user._id, teamRole: 'lead', removedAt: null }).populate('team', 'name archived');
   const ledActive = leads.filter((l) => l.team && !l.team.archived);
@@ -159,6 +159,7 @@ r.delete('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   await ClientAssignment.updateMany({ admin: user._id, endedAt: null }, { endedAt: now });
   user.active = false; user.deletedAt = now;
   user.email = `removed-${user._id}-${user.email}`; // frees the email so it can be used again
+  user.googleSubject = undefined;
   await user.save();
   await AuthSession.deleteMany({ user: user._id });
   audit(req.user, 'user.remove', { entity: 'User', entityId: user._id, summary: `Removed ${user.name}` });
