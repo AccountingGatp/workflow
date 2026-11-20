@@ -330,8 +330,10 @@ function EntryEditor({ date, data }) {
               aria-describedby={data.slackEnabled ? undefined : 'daily-slack-setup'}
               disabled={!data.slackEnabled || !!busy || rows.some((row) => !row.collapsed) ||
                 (!submission?.entries.length && !submission?.slackPosted) ||
-                ['sent', 'sending', 'pending', 'uncertain'].includes(submission?.delivery)}>
-              <Send size={16} />{busy === 'slack' ? 'Sending…' : 'Send to Slack'}
+                ['sending', 'pending', 'uncertain'].includes(submission?.delivery) ||
+                (submission?.delivery === 'sent' && !submission.canSendToNewSlackChannel)}>
+              <Send size={16} />{busy === 'slack' ? 'Sending…' :
+                submission?.canSendToNewSlackChannel ? 'Send to new Slack channel' : 'Send to Slack'}
             </button>
             {!data.slackEnabled && <span id="daily-slack-setup" className="small muted">Slack setup required</span>}
           </div>
