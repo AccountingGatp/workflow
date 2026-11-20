@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Client, ClientProject } from '../models/index.js';
+import { Client, ClientProject, Task } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
-import { canSeeClient, canManageClient, audit } from '../services/access.js';
+import { canSeeClient, canManageClient, visibleClientIds, audit } from '../services/access.js';
 
 const r = Router();
 const valid = (id) => mongoose.isValidObjectId(id);
@@ -14,6 +14,33 @@ async function check(req, clientId, manage = false) {
   if (!valid(clientId) || !(await Client.exists({ _id: clientId }))) throw new HttpError(404, 'Client not found');
   if (!(await (manage ? canManageClient : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Client access denied');
 }
+r.get('/projects', ah(async (req, res) => {
+  const ids = await visibleClientIds(req.user);
+  const clients = await Client.find(ids === null ? {} : { _id: { $in: ids } }).select('name').lean();
+  const clientNames = new Map(clients.map((client) => [String(client._id), client.name]));
+  const clientIds = clients.map(({ _id }) => _id);
+  const projects = await ClientProject.find({ client: { $in: clientIds } })
+    .select('name client').sort({ name: 1, _id: 1 }).lean();
+  if (!projects.length) return res.json([]);
+  const now = new Date();
+  const counts = await Task.aggregate([
+    { $match: { client: { $in: clientIds }, project: { $in: projects.map(({ _id }) => _id) }, deletedAt: null, status: { $ne: 'done' } } },
+    { $group: { _id: '$project', open: { $sum: 1 }, overdue: {
+      $sum: { $cond: [{ $and: [{ $ne: [{ $ifNull: ['$dueDate', null] }, null] }, { $lt: ['$dueDate', now] }] }, 1, 0] },
+    } } },
+  ]);
+  const byProject = new Map(counts.map((row) => [String(row._id), row]));
+  res.json(projects.map((project) => {
+    const tasks = byProject.get(String(project._id));
+    return {
+      ...project,
+      clientName: clientNames.get(String(project.client)),
+      openTasks: tasks?.open || 0,
+      overdueTasks: tasks?.overdue || 0,
+    };
+  }));
+}));
+
 r.get('/clients/:clientId/projects', ah(async (req, res) => {
   await check(req, req.params.clientId);
   const manager = await canManageClient(req.user, req.params.clientId);

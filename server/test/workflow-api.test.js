@@ -39,10 +39,19 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     }
     const clientPath = `/clients/${client._id}`;
     await request(outsider, clientPath, 'GET', undefined, 403);
+    assert.deepEqual(await request(outsider, '/projects'), []);
+    await request(outsider, `${clientPath}/projects`, 'POST', { name: 'Unauthorized' }, 403);
+    const managedProjects = await request(manager, '/projects');
+    assert.deepEqual(managedProjects.map(({ name, clientName, openTasks }) => ({ name, clientName, openTasks })),
+      [{ name: 'Bluntd', clientName: client.name, openTasks: 0 }]);
+    const addedProject = await request(manager, `${clientPath}/projects`, 'POST', { name: 'Project directory fixture' }, 201);
+    assert.ok((await request(admin, '/projects')).some((row) => row._id === addedProject._id && row.client === String(client._id)));
     const grant = await request(admin, `${clientPath}/permissions`, 'POST', { userId: String(outsider._id) }, 201);
     const permissionList = (await request(admin, clientPath)).permissions;
     assert.ok(permissionList.some((permission) => permission.user._id === String(outsider._id) && permission.user.role === 'admin'));
     assert.equal((await request(outsider, clientPath)).canManage, false);
+    assert.ok((await request(outsider, '/projects')).some((row) => row._id === addedProject._id));
+    await request(outsider, `${clientPath}/projects`, 'POST', { name: 'Read-only client' }, 403);
     await request(admin, `${clientPath}/permissions/${grant._id}`, 'DELETE');
     await request(outsider, clientPath, 'GET', undefined, 403);
 
@@ -50,6 +59,10 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     await request(sathya,'/tasks','POST',draft,403);
     await request(outsider,'/tasks','POST',draft,403);
     const task=await request(tl,'/tasks','POST',draft,201);
+    await Task.updateOne({ _id: task._id }, { $set: { dueDate: new Date(Date.now() - 60000) } });
+    const openProject = (await request(tl, '/projects')).find((row) => row._id === String(project._id));
+    assert.equal(openProject.openTasks, 1);
+    assert.equal(openProject.overdueTasks, 1);
     await request(sathya,`/tasks/${task._id}`,'PATCH',{status:'done'},400);
     await request(sathya,`/tasks/${task._id}`,'PATCH',{checklistItem:{ id:task.checklist[0]._id,done:true }});
     const completed = await request(sathya, `/tasks/${task._id}`, 'PATCH', { status: 'done' });

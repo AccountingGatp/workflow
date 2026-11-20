@@ -1,49 +1,88 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Building2, Plus, Search, ArrowLeft, ShieldCheck, Trash2, Mail, Phone, Hash, UserPlus, Clock, X } from 'lucide-react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Building2, FolderKanban, Plus, Search, ArrowLeft, ShieldCheck, Trash2, Mail, Phone, Hash, UserPlus, Clock, X } from 'lucide-react';
 import { api, useApi, usePaginatedTasks, useAuth, useToast, fmtDate, toInputDate, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import { NewProjectForm } from './projects.jsx';
 
 const STATUS_CLS = { active: 'b-success', onboarding: 'b-info', inactive: '' };
 
 export function Clients() {
   const { can } = useAuth();
   const nav = useNavigate();
-  const { data, loading, reload } = useApi('/clients');
-  const [q, setQ] = useState('');
-  const [creating, setCreating] = useState(false);
-  const rows = (data || []).filter((c) => `${c.name} ${c.accountingId}`.toLowerCase().includes(q.toLowerCase()));
+  const [params, setParams] = useSearchParams();
+  const clientView = params.get('view') === 'clients';
+  const clients = useApi('/clients');
+  const projects = useApi(clientView ? null : '/projects');
+  const [projectQuery, setProjectQuery] = useState('');
+  const [clientQuery, setClientQuery] = useState('');
+  const [creating, setCreating] = useState(null);
+  const source = clientView ? clients : projects;
+  const query = clientView ? clientQuery : projectQuery;
+  const setQuery = clientView ? setClientQuery : setProjectQuery;
+  const search = query.trim().toLowerCase();
+  const rows = (source.data || []).filter((row) => {
+    const context = clientView ? row.accountingId : row.clientName;
+    return `${row.name} ${context || ''}`.toLowerCase().includes(search);
+  });
+  const manageableClients = (clients.data || []).filter((client) => client.canManage);
+  const label = clientView ? 'clients' : 'projects';
 
-  return (
-    <>
-      <PageHead title="Clients" subtitle={can.super ? 'All clients in the practice.' : 'Only clients you have been given access to are shown.'}>
-        <div className="search" style={{ width: 240 }}><Search size={16} /><input className="input" placeholder="Search clients" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search clients" /></div>
-        {can.super && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New client</button>}
-      </PageHead>
-      <div className="card" style={{ overflow: 'hidden' }}>
-        {loading && !data ? <Skeleton /> : rows.length === 0 ? <Empty icon={Building2} title="No clients" >Ask your admin for access to a client.</Empty> : (
-          <div className="table-wrap"><table>
-            <thead><tr><th>Client</th><th>Managers</th><th>Open work</th><th>Status</th></tr></thead>
-            <tbody>
-              {rows.map((c) => (
-                <tr key={c._id} className="clickable" onClick={() => nav(`/clients/${c._id}`)}>
-                  <td><div className="row" style={{ gap: 12 }}>
-                    <span className="stat-icon" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}><Building2 size={18} /></span>
-                    <div><Link to={`/clients/${c._id}`} style={{ color: 'var(--text)', fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>{c.name}</Link><div className="small muted">{c.accountingId}</div></div>
-                  </div></td>
-                                    <td><Avatars people={c.admins} /></td>
-                  <td><span className="row"><span className="mono">{c.openTasks}</span>{c.overdueTasks > 0 && <Badge cls="b-danger">{c.overdueTasks} overdue</Badge>}</span></td>
-                  <td><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></td>
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
-        )}
+  return <>
+    <PageHead title={clientView ? 'Clients' : 'Projects'} subtitle={clientView ? 'Manage client details and access.' : undefined}>
+      {(can.super || manageableClients.length > 0) && <button type="button" className="btn btn-primary"
+        disabled={!manageableClients.length} onClick={() => setCreating('project')}><Plus size={18} />New project</button>}
+      {can.super && <button type="button" className="btn btn-outline" onClick={() => setCreating('client')}><Plus size={16} />New client</button>}
+    </PageHead>
+
+    <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 14 }}>
+      <nav className="chips" aria-label="Workspace view">
+        <button type="button" className={`chip ${clientView ? '' : 'on'}`} aria-pressed={!clientView}
+          onClick={() => setParams({})}>Projects</button>
+        <button type="button" className={`chip ${clientView ? 'on' : ''}`} aria-pressed={clientView}
+          onClick={() => setParams({ view: 'clients' })}>Clients</button>
+      </nav>
+      <div className="search" style={{ width: 260 }}><Search size={16} aria-hidden="true" />
+        <input className="input" placeholder={`Search ${label}`} value={query} onChange={(event) => setQuery(event.target.value)}
+          aria-label={`Search ${label}`} />
       </div>
-      {creating && <ClientForm onClose={() => setCreating(false)} onSaved={reload} />}
-    </>
-  );
+    </div>
+
+    {!clientView && <ErrorBox error={clients.error} />}
+    <div className="card" style={{ overflow: 'hidden' }}>
+      {source.error ? <ErrorBox error={source.error} /> : source.loading && !source.data ? <Skeleton />
+        : rows.length === 0 ? <Empty icon={clientView ? Building2 : FolderKanban} title={search ? `No matching ${label}` : `No ${label} yet`}>
+          {!search && !clientView && manageableClients.length > 0 ? 'Create a project to start organizing work.'
+            : !search && !clientView && can.super ? 'Add a client to set permissions for your first project.' : undefined}
+        </Empty> : <div className="table-wrap"><table>
+          <thead>{clientView ? <tr><th>Client</th><th>Managers</th><th>Status</th></tr>
+            : <tr><th>Project</th><th>Client</th><th>Open work</th></tr>}</thead>
+          <tbody>{rows.map((row) => {
+            const destination = clientView ? `/clients/${row._id}` : `/clients/${row.client}/projects/${row._id}`;
+            const Icon = clientView ? Building2 : FolderKanban;
+            return <tr key={row._id}>
+              <td><div className="row" style={{ gap: 12 }}>
+                <span className="stat-icon" style={{ background: 'var(--surface-2)', color: 'var(--text-2)' }}><Icon size={18} aria-hidden="true" /></span>
+                <div><Link to={destination} style={{ color: 'var(--text)', fontWeight: 600 }}>{row.name}</Link>
+                  {clientView && row.accountingId && <div className="small muted">{row.accountingId}</div>}</div>
+              </div></td>
+              {clientView ? <>
+                <td><Avatars people={row.admins} /></td>
+                <td><Badge cls={STATUS_CLS[row.status]} dot>{row.status}</Badge></td>
+              </> : <>
+                <td className="small muted"><Link to={`/clients/${row.client}`}>{row.clientName}</Link></td>
+                <td><span className="row-wrap"><span className="mono">{row.openTasks}</span>
+                  {row.overdueTasks > 0 && <Badge cls="b-danger">{row.overdueTasks} overdue</Badge>}</span></td>
+              </>}
+            </tr>;
+          })}</tbody>
+        </table></div>}
+    </div>
+    {creating === 'project' && <NewProjectForm clients={manageableClients} onClose={() => setCreating(null)}
+      onSaved={(project) => nav(`/clients/${project.client}/projects/${project._id}`)} />}
+    {creating === 'client' && <ClientForm onClose={() => setCreating(null)} onSaved={clients.reload} />}
+  </>;
 }
 
 function ClientForm({ onClose, onSaved }) {
@@ -91,7 +130,7 @@ export function ClientDetail() {
   const toast = useToast();
   const toggle = useTaskToggle(tasks.reload);
 
-  if (error) return <div className="card"><Empty icon={ShieldCheck} title={error.status === 403 ? 'You don’t have access to this client' : 'Client not found'}><Link to="/clients">Back to clients</Link></Empty></div>;
+  if (error) return <div className="card"><Empty icon={ShieldCheck} title={error.status === 403 ? 'You don’t have access to this client' : 'Client not found'}><Link to="/clients?view=clients">Back to clients</Link></Empty></div>;
   if (!c) return <div className="card"><Skeleton rows={6} /></div>;
 
   const revoke = async (p) => {
@@ -105,7 +144,7 @@ export function ClientDetail() {
 
   return (
     <>
-      <Link to="/clients" className="row small" style={{ color: 'var(--text-3)', marginBottom: 8 }}><ArrowLeft size={16} />Clients</Link>
+      <Link to="/clients?view=clients" className="row small" style={{ color: 'var(--text-3)', marginBottom: 8 }}><ArrowLeft size={16} />Clients</Link>
       <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></span>}>
         {c.canManage && <button className="btn btn-outline" onClick={() => setEditingClient(true)}>Edit client / company</button>}
         {c.canManage && !hasProjects && <button className="btn btn-outline" onClick={() => setRecurring(true)}>Recurring task</button>}
