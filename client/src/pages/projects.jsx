@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck } from 'lucide-react';
-import { api, useApi, usePaginatedTasks, useToast } from '../lib.jsx';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
+import { api, useApi, usePaginatedTasks, useAuth, useToast } from '../lib.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
 import ProjectWorkRegister from './project-work-register.jsx';
 import { Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
@@ -187,13 +187,49 @@ function ProjectEditor({ project, onClose, onSaved }) {
     </form>
   </Modal>;
 }
+function DeleteProjectDialog({ project, onClose, onDeleted }) {
+  const toast = useToast();
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState(null);
+  const close = () => { if (!deleting) onClose(); };
+
+  async function remove() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await api(`/clients/${project.client}/projects/${project._id}`, { method: 'DELETE' });
+      toast('Project deleted');
+      onDeleted();
+    } catch (error) {
+      setError(error);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return <Modal title="Delete project?" onClose={close} footer={<>
+    <button type="button" className="btn btn-outline" autoFocus onClick={close} disabled={deleting}>Cancel</button>
+    <button type="button" className="btn btn-danger" onClick={remove} disabled={deleting}>
+      {deleting ? 'Deleting…' : 'Delete project'}
+    </button>
+  </>}>
+    <div className="stack">
+      <p><strong>{project.name}</strong> will be removed from Projects and Daily Work. Recurring schedules will stop creating tasks. Existing tasks and submissions will be kept.</p>
+      <ErrorBox error={error} />
+    </div>
+  </Modal>;
+}
+
 export function ClientProjects() {
   const { id, projectId } = useParams();
+  const { can } = useAuth();
+  const navigate = useNavigate();
   const client = useApi(`/clients/${id}`, [id]);
   const projects = useApi(`/clients/${id}/projects`, [id]);
   const detail = useApi(projectId ? `/clients/${id}/projects/${projectId}` : null, [id, projectId]);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [editingClient, setEditingClient] = useState(false);
   const [creatingTask, setCreatingTask] = useState(null);
   const [workView, setWorkView] = useState('due');
@@ -220,6 +256,9 @@ export function ClientProjects() {
         <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>
         <button className="btn btn-primary" onClick={() => setCreatingTask('once')}><Plus size={16}/>New task</button>
         <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>
+        {can.super && <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}>
+          <Trash2 size={16} />Delete project
+        </button>}
       </>}
     </PageHead>
     {!projectId ? (
@@ -294,6 +333,8 @@ export function ClientProjects() {
       onSaved={() => { setAdding(false); projects.reload(); }} />}
     {editingClient && p && <ProjectClientForm project={p} onClose={() => setEditingClient(false)}
       onSaved={() => { setEditingClient(false); detail.reload(); }} />}
+    {deleting && p && <DeleteProjectDialog project={p} onClose={() => setDeleting(false)}
+      onDeleted={() => navigate('/clients', { replace: true })} />}
     {editing && p && <ProjectEditor project={p} onClose={() => setEditing(false)} onSaved={() => { detail.reload(); projects.reload(); setEditing(false); }} />}
   </>;
 }

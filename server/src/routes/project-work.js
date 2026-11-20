@@ -8,7 +8,7 @@ const r = Router();
 async function authorized(req, manager = false) {
   const { clientId, projectId } = req.params;
   if (!mongoose.isValidObjectId(clientId) || !mongoose.isValidObjectId(projectId)) throw new HttpError(404, 'Project not found');
-  const project = await ClientProject.findOne({ _id: projectId, client: clientId }).select('_id client');
+  const project = await ClientProject.findOne({ _id: projectId, client: clientId, deletedAt: null }).select('_id client');
   if (!project) throw new HttpError(404, 'Project not found');
   if (!(await (manager ? canManageClient : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Project access denied');
   return project;

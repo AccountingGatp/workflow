@@ -1,4 +1,4 @@
-import { Task, TaskTemplate } from '../models/index.js';
+import { ClientProject, Task, TaskTemplate } from '../models/index.js';
 
 const LOOKAHEAD_DAYS = 14;
 
@@ -34,9 +34,14 @@ export async function generateRecurringTasks(templateId) {
   const filter = { active: true };
   if (templateId) filter._id = templateId;
   const templates = await TaskTemplate.find(filter);
+  const projectIds = templates.map((template) => template.project).filter(Boolean);
+  const removedProjects = new Set((await ClientProject.distinct('_id', {
+    _id: { $in: projectIds }, deletedAt: { $ne: null },
+  })).map(String));
   const today = startOfDay(new Date());
   let created = 0;
   for (const tpl of templates) {
+    if (removedProjects.has(String(tpl.project))) continue;
     const from = startOfDay(tpl.startsOn > today ? tpl.startsOn : today);
     for (let i = 0; i <= LOOKAHEAD_DAYS; i++) {
       const day = new Date(from); day.setDate(from.getDate() + i);

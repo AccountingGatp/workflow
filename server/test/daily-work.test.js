@@ -548,6 +548,19 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '18:35'));
     await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '19:00'));
     assert.equal(calls.length, callsBeforeCustom + 2);
+
+    const dailyBeforeDelete = await request(employee, `/day/${reportDate}`);
+    assert.ok(dailyBeforeDelete.projects.some((row) => row._id === daily._id));
+    await request(owner, `/clients/${client._id}/projects/${project._id}`, 'DELETE');
+    const entryAfterDelete = await request(employee, `/day/${reportDate}`);
+    assert.ok(!entryAfterDelete.projects.some((row) => row._id === daily._id));
+    assert.deepEqual(entryAfterDelete.submission.entries.map((row) => row._id),
+      dailyBeforeDelete.submission.entries.map((row) => row._id));
+    await request(owner, `/projects/${daily._id}`, 'PATCH', { archived: false }, 400);
+    await request(employee, `/day/${reportDate}`, 'PUT', {
+      version: entryAfterDelete.submission.version,
+      entries: [{ projectId: daily._id, title: 'New entry after removal', status: 'incomplete', priority: 'normal', hours: 1 }],
+    }, 400);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

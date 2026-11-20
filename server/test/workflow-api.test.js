@@ -77,7 +77,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     assert.ok(!people.some((person) => person._id === String(outsider._id)));
     await request(outsider, projectPath, 'PATCH', { description: 'Outside project' }, 403);
     await request(tl, projectPath, 'PATCH', { description: 'Updated by the team lead' });
-    await request(tl, projectPath, 'DELETE', undefined, 404);
+    await request(tl, projectPath, 'DELETE', undefined, 403);
     await request(tl,`/tasks/${task._id}`,'PATCH',{assignees:[String(outsider._id)]},400);
     const reopened=await request(tl,`/tasks/${task._id}`,'PATCH',{title:'Updated by TL',assignees:[String(teammate._id)]});
     assert.deepEqual(reopened.assignees,[String(teammate._id)]);
@@ -162,6 +162,22 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     await request(outsider, `${standalonePath}/client-reference`, 'PATCH', { clientId: null }, 403);
     await request(tl, `${standalonePath}/client-reference`, 'PATCH', { clientId: null });
     assert.equal((await request(tl, standalonePath)).clientReference, null);
+
+    const template = await TaskTemplate.create({
+      title: 'Standalone recurring work', client: standalone.client, project: standalone._id, frequency: 'daily',
+    });
+    await request(admin, standalonePath, 'DELETE');
+    await request(admin, standalonePath, 'DELETE');
+    await request(admin, standalonePath, 'GET', undefined, 404);
+    assert.ok(!(await request(admin, '/projects')).some((row) => row._id === standalone._id));
+    assert.deepEqual(await request(admin, `${workspacePath}/projects`), []);
+    assert.equal((await TaskTemplate.findById(template._id)).active, false);
+    assert.equal(await generateRecurringTasks(template._id), 0);
+    await request(admin, `/templates/${template._id}`, 'PATCH', { active: true }, 400);
+    assert.equal((await request(tl, `/tasks/${taskInStandalone._id}`)).project._id, standalone._id);
+    await request(admin, '/tasks', 'POST', {
+      title: 'New task after removal', client: standalone.client, project: standalone._id, dueDate: new Date().toISOString(),
+    }, 400);
   } finally {
     if (server) await new Promise(resolve=>server.close(resolve));
     await mongoose.disconnect();await db.stop();

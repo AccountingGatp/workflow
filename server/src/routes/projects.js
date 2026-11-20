@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Client, ClientAssignment, ClientProject, Task } from '../models/index.js';
+import { Client, ClientAssignment, ClientProject, Task, TaskTemplate } from '../models/index.js';
 import { ah, HttpError, requireRole } from '../middleware/auth.js';
 import { canSeeClient, canManageClient, visibleClientIds, audit } from '../services/access.js';
 
@@ -30,7 +30,7 @@ r.get('/projects', ah(async (req, res) => {
   const clients = await Client.find(ids === null ? {} : { _id: { $in: ids } }).select('name standaloneProject').lean();
   const clientInfo = new Map(clients.map((client) => [String(client._id), client]));
   const clientIds = clients.map(({ _id }) => _id);
-  const projects = await ClientProject.find({ client: { $in: clientIds } })
+  const projects = await ClientProject.find({ client: { $in: clientIds }, deletedAt: null })
     .select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
   if (!projects.length) return res.json([]);
   const now = new Date();
@@ -73,13 +73,13 @@ r.post('/projects', requireRole('super_admin', 'manager', 'admin'), ah(async (re
 r.get('/clients/:clientId/projects', ah(async (req, res) => {
   await check(req, req.params.clientId);
   const manager = await canManageClient(req.user, req.params.clientId);
-  const projects = await ClientProject.find({ client: req.params.clientId }).sort({ name: 1 }).lean();
+  const projects = await ClientProject.find({ client: req.params.clientId, deletedAt: null }).sort({ name: 1 }).lean();
   res.json(projects.map(p => safeProject(p, manager)));
 }));
 r.get('/clients/:clientId/projects/:id', ah(async (req, res) => {
   await check(req, req.params.clientId);
   if (!valid(req.params.id)) throw new HttpError(404, 'Project not found');
-  const project = await ClientProject.findOne({ _id: req.params.id, client: req.params.clientId }).lean();
+  const project = await ClientProject.findOne({ _id: req.params.id, client: req.params.clientId, deletedAt: null }).lean();
   if (!project) throw new HttpError(404, 'Project not found');
   const [manager, clientReference] = await Promise.all([
     canManageClient(req.user, req.params.clientId),
@@ -113,7 +113,7 @@ r.patch('/clients/:clientId/projects/:id/client-reference', ah(async (req, res) 
   const clientReference = referenceId ? await visibleReference(req.user, referenceId) : null;
   if (referenceId && !clientReference) throw new HttpError(404, 'Client not found or unavailable');
   const update = clientReference ? { $set: { referenceClient: clientReference._id } } : { $unset: { referenceClient: '' } };
-  const project = await ClientProject.findOneAndUpdate({ _id: id, client: clientId }, update);
+  const project = await ClientProject.findOneAndUpdate({ _id: id, client: clientId, deletedAt: null }, update);
   if (!project) throw new HttpError(404, 'Project not found');
   audit(req.user, 'project.update', { entity: 'ClientProject', entityId: project._id, client: project.client, summary: 'Updated client information for ' + project.name });
   res.json({ clientReference });
@@ -128,9 +128,29 @@ r.patch('/clients/:clientId/projects/:id', ah(async (req, res) => {
   for (const key of ['contacts','team','scope','excluded','links','tools','automations','quality','guarantees']) {
     if (key in update && !Array.isArray(update[key])) throw new HttpError(400, key + ' must be a list');
   }
-  const project = await ClientProject.findOneAndUpdate({ _id: req.params.id, client: req.params.clientId }, { $set: update }, { new: true, runValidators: true });
+  const project = await ClientProject.findOneAndUpdate({ _id: req.params.id, client: req.params.clientId, deletedAt: null }, { $set: update }, { new: true, runValidators: true });
   if (!project) throw new HttpError(404, 'Project not found');
   audit(req.user, 'project.update', { entity: 'ClientProject', entityId: project._id, client: project.client, summary: 'Updated project ' + project.name });
   res.json(safeProject(project.toObject(), true));
+}));
+r.delete('/clients/:clientId/projects/:id', requireRole('super_admin'), ah(async (req, res) => {
+  const { clientId, id } = req.params;
+  await check(req, clientId, true);
+  if (!valid(id)) throw new HttpError(404, 'Project not found');
+  const project = await ClientProject.db.transaction(async (session) => {
+    const removed = await ClientProject.findOneAndUpdate(
+      { _id: id, client: clientId, deletedAt: null }, { $set: { deletedAt: new Date() } }, { session },
+    );
+    if (!removed) {
+      if (await ClientProject.exists({ _id: id, client: clientId, deletedAt: { $ne: null } }).session(session)) return null;
+      throw new HttpError(404, 'Project not found');
+    }
+    await TaskTemplate.updateMany({ project: id, active: true }, { $set: { active: false } }, { session });
+    return removed;
+  });
+  if (project) audit(req.user, 'project.delete', {
+    entity: 'ClientProject', entityId: project._id, client: project.client, summary: 'Deleted project ' + project.name,
+  });
+  res.json({ ok: true });
 }));
 export default r;
