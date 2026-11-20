@@ -6,6 +6,53 @@ import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } fro
 import ProjectWorkRegister from './project-work-register.jsx';
 import { Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
+export function NewProjectForm({ clientId, clients = [], onClose, onSaved }) {
+  const [selectedClient, setSelectedClient] = useState(clientId || '');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const toast = useToast();
+  const close = () => { if (!saving) onClose(); };
+
+  async function create(event) {
+    event.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      const project = await api(`/clients/${selectedClient}/projects`, {
+        method: 'POST', body: { name: name.trim(), description: description.trim() },
+      });
+      toast('Project created');
+      onSaved(project);
+    } catch (error) {
+      setError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Modal title="New project" onClose={close} footer={<>
+    <button type="button" className="btn btn-ghost" onClick={close} disabled={saving}>Cancel</button>
+    <button type="submit" className="btn btn-primary" form="new-project" disabled={!name.trim() || !selectedClient || saving}>
+      {saving ? 'Creating…' : 'Create project'}
+    </button>
+  </>}>
+    <form id="new-project" className="stack" onSubmit={create}>
+      <ErrorBox error={error} />
+      <label className="field">Project name<input className="input" autoFocus required maxLength={120}
+        value={name} onChange={(event) => setName(event.target.value)} /></label>
+      {!clientId && <label className="field">Client<select className="select" required
+        value={selectedClient} onChange={(event) => setSelectedClient(event.target.value)}>
+        <option value="">Select a client</option>
+        {clients.map((client) => <option key={client._id} value={client._id}>{client.name}</option>)}
+      </select><span className="hint">The project uses this client’s access permissions.</span></label>}
+      <label className="field">Summary (optional)<textarea className="textarea" rows={3} maxLength={3000}
+        value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+    </form>
+  </Modal>;
+}
+
 const lines = text => text.split('\n').map(s => s.trim()).filter(Boolean);
 const rows = text => lines(text).map(s => s.split(' | ').map(v => v.trim()));
 const linkLabel = l => l.restricted ? l.label + ' · managers only' : l.label;
@@ -101,7 +148,6 @@ export function ClientProjects() {
   const client = useApi(`/clients/${id}`, [id]);
   const projects = useApi(`/clients/${id}/projects`, [id]);
   const detail = useApi(projectId ? `/clients/${id}/projects/${projectId}` : null, [id, projectId]);
-  const toast = useToast();
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
   const [creatingTask, setCreatingTask] = useState(null);
@@ -109,22 +155,12 @@ export function ClientProjects() {
   const [openTask, setOpenTask] = useState(null);
   const tasks = usePaginatedTasks(`scope=all&client=${id}&project=${projectId || 'unassigned'}&view=${workView}`);
   const toggleTask = useTaskToggle(tasks.reload);
-  const [newName, setNewName] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [error, setError] = useState(null);
-  const create = async e => {
-    e.preventDefault(); setError(null);
-    try {
-      await api(`/clients/${id}/projects`, { method: 'POST', body: { name: newName, description: newDesc } });
-      toast('Project added'); setAdding(false); setNewName(''); setNewDesc(''); projects.reload();
-    } catch (err) { setError(err); }
-  };
   if (client.error) return <div className="card card-pad"><ErrorBox error={client.error}/></div>;
   const p = detail.data;
   const parent = client.data?.name || 'Client';
   return <>
     <div className="row-wrap small" style={{ marginBottom: 12 }}>
-      <Link to="/clients">Clients</Link><span className="muted">/</span>
+      <Link to="/clients">Projects</Link><span className="muted">/</span>
       <Link to={`/clients/${id}`}>{parent}</Link>
       <span className="muted">/</span>
       {projectId ? <Link to={`/clients/${id}/projects`}>Projects</Link> : <strong>Projects</strong>}
@@ -196,13 +232,8 @@ export function ClientProjects() {
     </section>}
     {openTask && <TaskDrawer id={openTask} onClose={() => setOpenTask(null)} onChanged={tasks.reload} />}
     {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId} recurring={creatingTask === 'recurring'} onClose={() => setCreatingTask(null)} onSaved={() => { tasks.reload(); setCreatingTask(null); }} />}
-    {adding && <Modal title="New client project" onClose={() => setAdding(false)} footer={<>
-      <button className="btn btn-ghost" onClick={() => setAdding(false)}>Cancel</button><button className="btn btn-primary" form="new-project" disabled={!newName.trim()}>Create project</button>
-    </>}><form id="new-project" className="stack" onSubmit={create}>
-      <ErrorBox error={error}/>
-      <label>Project name<input className="input" required maxLength={120} value={newName} onChange={e => setNewName(e.target.value)}/></label>
-      <label>Summary<textarea className="textarea" rows={3} value={newDesc} onChange={e => setNewDesc(e.target.value)}/></label>
-    </form></Modal>}
+    {adding && <NewProjectForm clientId={id} onClose={() => setAdding(false)}
+      onSaved={() => { setAdding(false); projects.reload(); }} />}
     {editing && p && <ProjectEditor project={p} onClose={() => setEditing(false)} onSaved={() => { detail.reload(); projects.reload(); setEditing(false); }} />}
   </>;
 }
