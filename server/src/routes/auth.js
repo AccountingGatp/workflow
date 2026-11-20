@@ -47,8 +47,19 @@ r.post('/google', ah(async (req, res) => {
   const linked = await User.findOne({ googleSubject: payload.sub, active: true, deletedAt: null }).select('+googleSubject');
   let user = linked?.email === email ? linked : null;
   if (!linked && email && (email.endsWith('@gmail.com') || payload.hd)) {
-    user = await User.findOneAndUpdate({ email, active: true, deletedAt: null, googleSubject: { $exists: false } },
-      { $set: { googleSubject: payload.sub } }, { returnDocument: 'after' });
+    const activeAccount = { email, active: true, deletedAt: null };
+    const unlinked = { ...activeAccount, googleSubject: { $exists: false } };
+    if (await User.exists(unlinked)) {
+      // Accounts removed before Google IDs were released can still hold this unique ID.
+      await User.updateOne({ googleSubject: payload.sub, active: false, deletedAt: { $type: 'date' } },
+        { $unset: { googleSubject: '' } });
+      try {
+        user = await User.findOneAndUpdate(unlinked, { $set: { googleSubject: payload.sub } }, { returnDocument: 'after' });
+      } catch (error) {
+        if (error.code !== 11000 || !error.keyPattern?.googleSubject) throw error;
+      }
+      user ??= await User.findOne({ ...activeAccount, googleSubject: payload.sub });
+    }
   }
   if (!linked && !user && payload.hd === 'gatpsolutions.com') {
     const requestStatus = await requestCompanyAccess(email, payload.name);

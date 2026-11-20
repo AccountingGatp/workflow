@@ -20,5 +20,17 @@ export async function requestCompanyAccess(email, name) {
   const request = await SignInRequest.findOneAndUpdate({ _id: email }, {
     $setOnInsert: { name: suggested, status: 'pending' },
   }, { upsert: true, returnDocument: 'after' });
-  return request.status;
+  if (request.status !== 'approved') return request.status;
+
+  // A removed account releases its email. A new verified sign-in needs fresh approval.
+  return User.db.transaction(async (session) => {
+    if (await User.exists({ email }).session(session)) return null;
+    const current = await SignInRequest.findById(email).session(session);
+    if (current?.status !== 'approved') return current?.status || null;
+    const reopened = await SignInRequest.findOneAndUpdate({ _id: email, status: 'approved' }, {
+      $set: { name: suggested, status: 'pending', createdAt: new Date(), updatedAt: new Date() },
+      $unset: { decidedAt: '', decidedBy: '' },
+    }, { session, timestamps: false, overwriteImmutable: true, returnDocument: 'after' });
+    return reopened?.status || null;
+  });
 }

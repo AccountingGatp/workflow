@@ -73,8 +73,8 @@ test('email verification, persistent cookie, and revocable sign-out', async () =
     const newEmail = 'new.person@gatpsolutions.com';
     const admin = await User.create({ name: 'Owner', email: 'owner@example.test', role: 'super_admin' });
     const employee = await User.findOne({ email });
-    const workspaceApi = (path, actor, body) => fetch(base.replace(/\/auth$/, '') + path, {
-      method: body ? 'POST' : 'GET',
+    const workspaceApi = (path, actor, body, method = body ? 'POST' : 'GET') => fetch(base.replace(/\/auth$/, '') + path, {
+      method,
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(actor._id) }, JWT_SECRET) },
       body: body && JSON.stringify(body),
     });
@@ -125,7 +125,31 @@ test('email verification, persistent cookie, and revocable sign-out', async () =
     const signedIn = await googleSignIn();
     assert.equal(signedIn.status, 200);
     assert.equal((await signedIn.json()).user.email, newEmail);
-    assert.equal((await me(signedIn.headers.get('set-cookie').split(', ').find((value) => value.startsWith('workflow_session')).split(';')[0])).status, 200);
+    const googleCookie = signedIn.headers.get('set-cookie').split(', ').find((value) => value.startsWith('workflow_session')).split(';')[0];
+    assert.equal((await me(googleCookie)).status, 200);
+
+    const oldAccount = `/users/${newUser._id}`;
+    assert.equal((await workspaceApi(oldAccount, admin, undefined, 'DELETE')).status, 200);
+    const archived = await User.findById(newUser._id).select('+googleSubject');
+    assert.ok(archived.deletedAt);
+    assert.equal(archived.googleSubject, undefined);
+    assert.equal((await me(googleCookie)).status, 401);
+
+    // Reproduce a removal made before the Google ID was released.
+    await User.updateOne({ _id: archived._id }, { $set: { googleSubject: claims.sub } });
+    const requestedAgain = await googleSignIn();
+    assert.equal(requestedAgain.status, 202);
+    assert.deepEqual(await requestedAgain.json(), { requestStatus: 'pending' });
+    assert.equal(requestedAgain.headers.get('set-cookie'), null);
+    assert.equal((await workspaceApi(action(newEmail, 'approve'), admin, {})).status, 200);
+    const returned = await googleSignIn();
+    assert.equal(returned.status, 200);
+    const returnedUser = (await returned.json()).user;
+    assert.equal(returnedUser.email, newEmail);
+    assert.notEqual(returnedUser._id, String(archived._id));
+    assert.equal((await User.findById(archived._id).select('+googleSubject')).googleSubject, undefined);
+    assert.equal((await User.findById(returnedUser._id).select('+googleSubject')).googleSubject, claims.sub);
+    assert.equal((await me(googleCookie)).status, 401);
 
     const disabledEmail = 'disabled@gatpsolutions.com';
     await User.create({ name: 'Disabled', email: disabledEmail, active: false });
