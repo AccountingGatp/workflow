@@ -92,7 +92,6 @@ const statusReminderSchema = new Schema({
   name: { ...text, maxlength: 80 },
   time: text,
   enabled: { type: Boolean, required: true },
-  notifyChannel: { type: Boolean, required: true },
   message: { ...text, maxlength: 1000 },
   deletedAt: Date,
   scheduleRevision: Number,

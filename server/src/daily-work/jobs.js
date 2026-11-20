@@ -35,10 +35,9 @@ async function missingText(models, date, shift, at) {
   const data = await attendance(models, date);
   const expected = data.members.filter((member) => activeDate(member, date) &&
     member.shift === shift && member.shiftStart <= at && !data.leave.has(`${member.id}:${date}`));
-  if (!expected.length) return `:clipboard: *${shift === 'morning' ? 'Morning' : 'Afternoon'} submissions report*\n:date: Date: ${date}\nNo employees were expected to submit at this check.`;
   const submitted = new Set(data.entries.map((entry) => entry.memberId));
   const missing = expected.filter((member) => !submitted.has(member.id));
-  if (!missing.length) return `:confetti_ball: All employees submitted their work details.\n:white_check_mark: Total submissions: ${expected.length}/${expected.length}`;
+  if (!missing.length) return ':confetti_ball: *Excellent!* All employees have submitted their work details.';
   const count = expected.length - missing.length;
   return [
     ':clipboard: *Missing Daily Work submissions*',
@@ -100,7 +99,7 @@ async function sendScheduled(models, key, now, compose) {
   }
   let state = 'sent';
   try {
-    if (message) await postSlack(message);
+    if (message) await postSlack(`<!channel> ${message}`);
   } catch (error) {
     state = error.definite ? 'failed' : 'uncertain';
     console.error(`Daily Work Slack report ${key}: ${error.message}`);

@@ -4,7 +4,7 @@ import { api, useApi, useToast } from '../lib.jsx';
 import { Badge, Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
 const path = '/daily-work/settings/reminders';
-const newReminder = { name: '', time: '18:00', message: '', enabled: true, notifyChannel: false };
+const newReminder = { name: '', time: '18:00', message: '', enabled: true };
 const displayTime = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit' });
 const schedule = (time) => time ? `Weekdays at ${displayTime.format(new Date(`2000-01-01T${time}Z`))} IST` : 'Choose a reminder time';
 const deliveryTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit' });
@@ -17,7 +17,7 @@ function reminderDelivery(delivery) {
 
 function ReminderMessage({ reminder }) {
   return <div className="reminder-message">
-    {reminder.notifyChannel && <span className="reminder-mention">@channel</span>}
+    <span className="reminder-mention">@channel</span>
     {reminder.message || 'Your reminder message will appear here.'}
   </div>;
 }
@@ -62,8 +62,6 @@ function ReminderEditor({ reminder, onClose, onSaved }) {
           value={draft.message} onChange={(event) => set('message', event.target.value)} /></label>
         <label className="row"><input type="checkbox" checked={draft.enabled}
           onChange={(event) => set('enabled', event.target.checked)} /> Enable reminder</label>
-        <label className="row"><input type="checkbox" checked={draft.notifyChannel}
-          onChange={(event) => set('notifyChannel', event.target.checked)} /> Notify everyone with @channel</label>
       </fieldset>
       <section className="reminder-preview stack" aria-label="Slack message preview">
         <div className="row-wrap reminder-preview-head"><strong>Slack preview</strong><span className="small muted">{schedule(draft.time)}</span></div>
