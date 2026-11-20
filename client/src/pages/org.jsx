@@ -1,5 +1,5 @@
 import GoogleSignIn from '../GoogleSignIn.jsx';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, BrandName, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
@@ -202,7 +202,7 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
       <ErrorBox error={error} />
       <Field label="Full name"><input className="input" value={form.name} onChange={set('name')} required maxLength={150} autoFocus /></Field>
       <Field label="Job title"><input className="input" value={form.title} onChange={set('title')} maxLength={150} /></Field>
-      <Field label="Work email"><input className="input" type="email" value={form.email} onChange={set('email')} required maxLength={254} /></Field>
+      <Field label="Sign-in email"><input className="input" type="email" value={form.email} onChange={set('email')} required maxLength={254} /></Field>
       <SlackUserIdField value={form.slackUserId} onChange={set('slackUserId')} />
       <DailyReportFields value={form.dailyReport} onChange={(dailyReport) => setForm((previous) => ({ ...previous, dailyReport }))} />
       <Field label="Role" hint={isSelf ? 'You cannot change your own Super Admin role.' : 'Changing roles updates this person’s permissions.'}>
@@ -216,7 +216,7 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
 }
 
 function NewPerson({ onClose, onSaved }) {
-  const [f, setF] = useState({ name: '', email: '', password: '', role: 'employee', title: '', slackUserId: '', dailyReport: defaultDailyReport });
+  const [f, setF] = useState({ name: '', email: '', role: 'employee', title: '', slackUserId: '', dailyReport: defaultDailyReport });
   const [error, setError] = useState(null);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const submit = async (e) => { e.preventDefault(); try { await api('/users', { method: 'POST', body: f }); onSaved(); onClose(); } catch (err) { setError(err); } };
@@ -228,13 +228,10 @@ function NewPerson({ onClose, onSaved }) {
           <Field label="Full name"><input className="input" value={f.name} onChange={set('name')} required autoFocus /></Field>
           <Field label="Job title"><input className="input" value={f.title} onChange={set('title')} /></Field>
         </div>
-        <Field label="Work email"><input className="input" type="email" value={f.email} onChange={set('email')} required /></Field>
+        <Field label="Sign-in email" hint="Use the personal email address this person will verify."><input className="input" type="email" value={f.email} onChange={set('email')} required /></Field>
         <SlackUserIdField value={f.slackUserId} onChange={set('slackUserId')} />
         <DailyReportFields value={f.dailyReport} onChange={(dailyReport) => setF((previous) => ({ ...previous, dailyReport }))} />
-        <div className="grid grid-2">
-          <Field label="Temporary password" hint="At least 8 characters"><input className="input" type="password" minLength={8} value={f.password} onChange={set('password')} required autoComplete="new-password" /></Field>
-          <Field label="Role"><select className="select" value={f.role} onChange={set('role')}>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
-        </div>
+        <Field label="Role"><select className="select" value={f.role} onChange={set('role')}>{Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
       </form>
     </Modal>
   );
@@ -404,16 +401,36 @@ const DEMO = [
 ];
 
 export function Login() {
-  const { login, offline } = useAuth();
+  const { signIn, offline } = useAuth();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [challenge, setChallenge] = useState('');
+  const [code, setCode] = useState('');
+  const [resendAt, setResendAt] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const config = useApi('/config');
-  const go = async (e, p = password, em = email) => {
-    e?.preventDefault(); setBusy(true); setError(null);
-    try { await login(em, p); } catch (err) { setError(err); setBusy(false); }
-  };
+  const googleClientId = config.data?.googleSignInClientId;
+  const emailEnabled = config.data?.emailLoginConfigured;
+  useEffect(() => {
+    if (!resendAt) return;
+    const timer = setTimeout(() => setResendAt(null), Math.max(0, resendAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [resendAt]);
+
+  async function run(action) {
+    setBusy(true);
+    setError(null);
+    try { await action(); } catch (error) { setError(error); } finally { setBusy(false); }
+  }
+
+  function sendCode() {
+    return run(async () => {
+      const result = await api('/auth/email/request', { method: 'POST', body: { email } });
+      setChallenge(result.challenge);
+      setCode('');
+      setResendAt(Date.now() + 60000);
+    });
+  }
   return (
     <div className="login">
       <section className="login-hero">
@@ -431,19 +448,37 @@ export function Login() {
       <section className="login-panel">
         <div className="login-card">
           <div className="login-mobile-brand"><BrandName /></div>
-          <div><h1>Sign in</h1><p className="muted" style={{ marginTop: 4 }}>Use your work account.</p></div>
-          <form className="stack" style={{ gap: 16 }} onSubmit={go}>
-            <ErrorBox error={error || (offline ? new Error('Can’t reach the server. Make sure the API server is running, then reload.') : null)} />
-            <Field label="Email"><input className="input" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
-            <Field label="Password"><input className="input" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
-            <button className="btn btn-primary" disabled={busy} style={{ minHeight: 48 }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-          </form>
-          {config.data?.googleSignInClientId && <GoogleSignIn clientId={config.data.googleSignInClientId} />}
+          <div><h1>{challenge ? 'Check your email' : 'Sign in'}</h1><p className="muted" style={{ marginTop: 4 }}>
+            {challenge ? `If ${email} is registered, a six-digit code will arrive shortly.` :
+              googleClientId ? 'Use the Google account registered in Workflow.' : 'Use the email address registered in Workflow.'}
+          </p></div>
+          <ErrorBox error={error || config.error || (offline ? new Error('Couldn’t reconnect to Workflow. Reload to try again.') : null)} />
+          {googleClientId && !challenge && <GoogleSignIn clientId={googleClientId} />}
+          {config.data && !googleClientId && !emailEnabled && !config.data.demo &&
+            <p className="small muted">Sign-in setup is required. Contact your Workflow administrator.</p>}
+          {emailEnabled && <form className="stack" style={{ gap: 16 }} onSubmit={(event) => {
+            event.preventDefault();
+            if (challenge) run(() => signIn('/auth/email/verify', { email, challenge, code }));
+            else sendCode();
+          }}>
+            {challenge ? <label className="field">Verification code<input className="input" key="code" autoFocus
+              inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code}
+              onChange={(event) => setCode(event.target.value.replace(/[^0-9]/g, ''))} required /></label>
+              : <label className="field">Email address<input className="input" key="email" autoFocus type="email" autoComplete="email" value={email}
+                onChange={(event) => setEmail(event.target.value)} required /></label>}
+            <button className="btn btn-primary" disabled={busy} style={{ minHeight: 48 }}>
+              {challenge ? busy ? 'Verifying…' : 'Verify and sign in' : busy ? 'Sending…' : 'Send code'}
+            </button>
+            {challenge && <div className="row-wrap">
+              <button type="button" className="btn btn-ghost" disabled={busy || !!resendAt} onClick={sendCode}>Resend code</button>
+              <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => { setChallenge(''); setCode(''); setError(null); }}>Change email</button>
+            </div>}
+          </form>}
           {config.data?.demo && <div>
             <div className="row" style={{ margin: '4px 0 10px' }}><Building2 size={14} className="muted" /><span className="small muted">Demo accounts — try each role</span></div>
             <div className="demo-grid">
               {DEMO.map(([em, name, role]) => (
-                <button key={em} className="demo-btn" disabled={busy} onClick={() => go(null, 'demo1234', em)}>
+                <button key={em} className="demo-btn" disabled={busy} onClick={() => run(() => signIn('/auth/demo', { email: em }))}>
                   <Avatar name={name} size="sm" /><span><strong style={{ display: 'block' }}>{name.replace(/Employee \d+ · /, '')}</strong><span className="muted small">{role}</span></span>
                 </button>
               ))}

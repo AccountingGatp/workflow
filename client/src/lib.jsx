@@ -22,7 +22,10 @@ export async function api(path, { method = 'GET', body, signal } = {}) {
   const data = await res.json().catch(() => null);
   // The dev proxy answers 5xx with no JSON body when the API server is down
   if (!data && res.status >= 500) throw offline();
-  if (res.status === 401 && !['/auth/login', '/auth/google', '/auth/google/nonce'].includes(path)) { setToken(null); window.dispatchEvent(new Event('ka:logout')); }
+  if (res.status === 401 && (!path.startsWith('/auth/') || path === '/auth/me')) {
+    setToken(null);
+    window.dispatchEvent(new Event('ka:logout'));
+  }
   if (!res.ok) throw Object.assign(new Error(data?.error || 'Request failed'), { status: res.status });
   return Object.assign(data, { __status: res.status });
 }
@@ -87,28 +90,34 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const out = () => setUser(null);
+    const controller = new AbortController();
     window.addEventListener('ka:logout', out);
-    if (getToken()) {
-      api('/auth/me').then((d) => setUser(d.user)).catch((e) => setOffline(!!e.offline)).finally(() => setReady(true));
-    } else setReady(true);
-    return () => window.removeEventListener('ka:logout', out);
+    api('/auth/me', { signal: controller.signal }).then(({ user }) => {
+      if (!controller.signal.aborted) setUser(user);
+    }).catch((error) => {
+      if (!controller.signal.aborted) setOffline(error.status !== 401);
+    }).finally(() => { if (!controller.signal.aborted) setReady(true); });
+    return () => { controller.abort(); window.removeEventListener('ka:logout', out); };
   }, []);
 
-  const login = async (email, password) => {
-    const d = await api('/auth/login', { method: 'POST', body: { email, password } });
-    setToken(d.token); setUser(d.user);
-  };
-  const loginGoogle = useCallback(async (credential) => {
-    const d = await api('/auth/google', { method: 'POST', body: { credential } });
-    setToken(d.token); setUser(d.user);
+  const signIn = useCallback(async (path, body) => {
+    const { user } = await api(path, { method: 'POST', body });
+    setToken(null);
+    setOffline(false);
+    setUser(user);
   }, []);
-  const logout = () => { setToken(null); setUser(null); };
+  const loginGoogle = useCallback((credential) => signIn('/auth/google', { credential }), [signIn]);
+  const logout = async () => {
+    await api('/auth/logout', { method: 'POST' });
+    setToken(null);
+    setUser(null);
+  };
   const can = {
     super: user?.role === 'super_admin',
     manage: ['super_admin', 'manager', 'admin'].includes(user?.role),
     editTasks: ['super_admin', 'manager'].includes(user?.role),
   };
-  return <AuthCtx.Provider value={{ user, ready, offline, login, loginGoogle, logout, can }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, ready, offline, signIn, loginGoogle, logout, can }}>{children}</AuthCtx.Provider>;
 }
 
 /* ---------- Toast ---------- */

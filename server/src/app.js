@@ -18,6 +18,7 @@ import { assignLoanTasks } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
 import { ensureActivityRetention } from './models/index.js';
+import { demoLoginEnabled, emailLoginConfigured } from './services/email-login.js';
 
 async function connect() {
   let uri = process.env.MONGODB_URI;
@@ -53,7 +54,7 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
-app.get('/api/config', (_req, res) => res.json({ demo: process.env.SEED_DEMO === 'true', googleSignInClientId: process.env.GOOGLE_SIGN_IN_CLIENT_ID || null }));
+app.get('/api/config', (_req, res) => res.json({ demo: demoLoginEnabled(), emailLoginConfigured: emailLoginConfigured(), googleSignInClientId: process.env.GOOGLE_SIGN_IN_CLIENT_ID || null }));
 
 // Background jobs, called by Vercel Cron (see vercel.json). Vercel sends CRON_SECRET as a bearer token.
 const cronAuth = (req, res, next) => (process.env.CRON_SECRET && req.headers.authorization === `Bearer ${process.env.CRON_SECRET}` ? next() : res.status(401).json({ error: 'Unauthorized' }));

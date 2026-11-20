@@ -3,35 +3,35 @@ B=http://localhost:${API_PORT:-4200}/api
 F=http://localhost:4900
 fails=0
 j() { node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{const o=JSON.parse(d);console.log(eval(process.argv[1]))})" "$1"; }
-call() { curl -s -X "$1" "$B$2" -H "authorization: Bearer $3" -H 'content-type: application/json' ${4:+-d "$4"}; }
-code() { curl -s -o /dev/null -w '%{http_code}' -X "$1" "$B$2" -H "authorization: Bearer $3" -H 'content-type: application/json' ${4:+-d "$4"}; }
-login() { curl -s $B/auth/login -H 'content-type: application/json' -d "{\"email\":\"$1\",\"password\":\"Start-1234\"}" | j 'o.token'; }
+call() { curl -s -X "$1" "$B$2" -H "cookie: $3" -H 'content-type: application/json' ${4:+-d "$4"}; }
+code() { curl -s -o /dev/null -w '%{http_code}' -X "$1" "$B$2" -H "cookie: $3" -H 'content-type: application/json' ${4:+-d "$4"}; }
+login() { curl -s -D - -o /dev/null "$B/auth/demo" -H 'content-type: application/json' -d "{\"email\":\"$1\"}" | awk -F '[ ;]' 'tolower($1) == "set-cookie:" {print $2}'; }
 check() { if [ "$2" = "$3" ]; then echo "PASS $1"; else echo "FAIL $1: expected [$3] got [$2]"; fails=$((fails+1)); fi; }
 
-S=$(login boss@firm.test)
-mk() { call POST /users "$S" "{\"name\":\"$1\",\"email\":\"$2\",\"password\":\"Start-1234\",\"role\":\"$3\"}" | j 'o._id'; }
-H=$(mk Hitesh hitesh@firm.test admin); O=$(mk OtherTL other@firm.test admin); A=$(mk Ayush ayush@firm.test employee); N=$(mk Neha neha@firm.test employee)
+S=$(login owner@demo.test)
+mk() { call POST /users "$S" "{\"name\":\"$1\",\"email\":\"$2\",\"role\":\"$3\"}" | j 'o._id'; }
+H=$(mk Hitesh mail-lead@demo.test admin); O=$(mk OtherTL mail-other@demo.test admin); A=$(mk Ayush mail-staff@demo.test employee); N=$(mk Neha mail-neha@demo.test employee)
 T=$(call POST /teams "$S" "{\"name\":\"Team Hitesh\",\"leadId\":\"$H\"}" | j 'o._id')
 T2=$(call POST /teams "$S" "{\"name\":\"Team Other\",\"leadId\":\"$O\"}" | j 'o._id')
 call POST /teams/$T/members "$S" "{\"userId\":\"$A\"}" >/dev/null; call POST /teams/$T/members "$S" "{\"userId\":\"$N\"}" >/dev/null
-C=$(call POST /clients "$S" "{\"name\":\"Hamilton\",\"teamIds\":[\"$T\"]}" | j 'o._id')
+C=$(call POST /clients "$S" "{\"name\":\"Hamilton Mail Test\",\"teamIds\":[\"$T\"]}" | j 'o._id')
 C2=$(call POST /clients "$S" "{\"name\":\"Other Co\",\"teamIds\":[\"$T2\"]}" | j 'o._id')
 check "public domain rule refused" "$(code PATCH /clients/$C "$S" '{"emailMatches":["gmail.com"]}')" 400
 call PATCH /clients/$C "$S" '{"emailMatches":["hamilton.example"]}' >/dev/null
 call POST /clients/$C/permissions "$S" "{\"userId\":\"$A\"}" >/dev/null
 
 URL=$(call POST /mail/accounts/connect "$S" "{\"team\":\"$T\"}" | j 'o.url')
-check "staff cannot connect inbox" "$(code POST /mail/accounts/connect "$(login ayush@firm.test)" '{}')" 403
+check "staff cannot connect inbox" "$(code POST /mail/accounts/connect "$(login mail-staff@demo.test)" '{}')" 403
 curl -s -L -o /dev/null "$URL"; sleep 2
 AC=$(call GET /mail/accounts "$S" | j 'o.accounts[0]._id')
 curl -s -o /dev/null -w '' "$B/mail/oauth/callback?code=x&state=forged"
 call POST /mail/accounts/$AC/sync "$S" >/dev/null
-HT=$(login hitesh@firm.test); AT=$(login ayush@firm.test); NT=$(login neha@firm.test); OT=$(login other@firm.test)
+HT=$(login mail-lead@demo.test); AT=$(login mail-staff@demo.test); NT=$(login mail-neha@demo.test); OT=$(login mail-other@demo.test)
 check "token not exposed" "$(call GET /mail/accounts "$S" | j 'String(o.accounts[0].refreshToken)')" undefined
 check "owner sees 2, spam dropped" "$(call GET /mail/threads "$S" | j 'o.length')" 2
 TH=$(call GET '/mail/threads?q=bank' "$S" | j 'o[0]._id')
 U=$(call GET '/mail/threads?q=Quote' "$S" | j 'o[0]._id')
-check "auto-tagged by domain" "$(call GET /mail/threads/$TH "$S" | j 'o.client.name+":"+o.tagSource')" "Hamilton:auto"
+check "auto-tagged by domain" "$(call GET /mail/threads/$TH "$S" | j 'o.client.name+":"+o.tagSource')" "Hamilton Mail Test:auto"
 check "untagged stays untagged" "$(call GET /mail/threads/$U "$S" | j 'String(o.client)')" null
 check "staff with access sees tagged only" "$(call GET /mail/threads "$AT" | j 'o.map(t=>t.subject).join()')" "October bank statement"
 check "team member without client access sees none" "$(call GET /mail/threads "$NT" | j 'o.length')" 0

@@ -1,11 +1,11 @@
 import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import { User, Team, TeamMembership, ClientPermission, ClientAssignment, slackUserIdPattern, userRoles } from '../models/index.js';
+import { AuthSession, User, Team, TeamMembership, ClientPermission, ClientAssignment, slackUserIdPattern, userRoles } from '../models/index.js';
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { audit, isSuper, ledTeamIds } from '../services/access.js';
 
 import { dailyModels } from '../daily-work/models.js';
 import { dailyReportSettings, parseDailyReport } from '../daily-work/settings.js';
+import { loginEmail } from '../services/email-login.js';
 
 const r = Router();
 
@@ -38,11 +38,12 @@ r.get('/users', ah(async (req, res) => {
 }));
 
 r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
-  const { name, email, password, role = 'employee', title, slackUserId, dailyReport } = req.body || {};
-  if (!name || !email || !password) throw new HttpError(400, 'Name, email and password are required');
+  const { name, email: address, role = 'employee', title, slackUserId, dailyReport } = req.body || {};
+  const email = loginEmail(address);
+  if (!name) throw new HttpError(400, 'Name is required');
   if (!userRoles.includes(role)) throw new HttpError(400, 'Invalid role');
-  if (await User.exists({ email: email.toLowerCase() })) throw new HttpError(409, 'That email is already in use');
-  const user = await User.create({ name, email, role, title, slackUserId: parseSlackUserId(slackUserId), dailyReport: dailyReport === undefined ? undefined : parseDailyReport(dailyReport), passwordHash: await bcrypt.hash(password, 10) });
+  if (await User.exists({ email })) throw new HttpError(409, 'That email is already in use');
+  const user = await User.create({ name, email, role, title, slackUserId: parseSlackUserId(slackUserId), dailyReport: dailyReport === undefined ? undefined : parseDailyReport(dailyReport) });
   audit(req.user, 'user.create', { entity: 'User', entityId: user._id, summary: `Created ${role.replace('_', ' ')} ${name}` });
   res.status(201).json(user);
 }));
@@ -61,8 +62,7 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   }
   if (update.title !== undefined) update.title = String(update.title).trim().slice(0, 150);
   if (update.email !== undefined) {
-    update.email = String(update.email).trim().toLowerCase();
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(update.email) || update.email.length > 254) throw new HttpError(400, 'Enter a valid work email address');
+    update.email = loginEmail(update.email);
     if (update.email !== user.email && await User.exists({ email: update.email, _id: { $ne: user._id } })) {
       throw new HttpError(409, 'That email address is already used by another person');
     }
@@ -72,12 +72,17 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   if (update.dailyReport !== undefined) update.dailyReport = parseDailyReport(update.dailyReport);
   const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '',
     active: user.active, slackUserId: user.slackUserId || null, dailyReport: user.dailyReport?.toObject() };
+  if (update.email !== undefined && update.email !== user.email) {
+    user.googleSubject = undefined;
+    user.markModified('googleSubject');
+  }
   Object.assign(user, update);
   try { await user.save(); } catch (err) {
     if (err.code === 11000) throw new HttpError(409, 'That email address is already used by another person');
     throw err;
   }
   const changed = allowed.filter(k => update[k] !== undefined && JSON.stringify(previous[k]) !== JSON.stringify(update[k]));
+  if (changed.includes('email') || update.active === false) await AuthSession.deleteMany({ user: user._id });
   audit(req.user, 'user.update', { entity: 'User', entityId: user._id, summary: `Updated ${user.name}: ${changed.join(', ') || 'no changes'}` });
   res.json(user);
 }));
@@ -100,6 +105,7 @@ r.delete('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   user.active = false; user.deletedAt = now;
   user.email = `removed-${user._id}-${user.email}`; // frees the email so it can be used again
   await user.save();
+  await AuthSession.deleteMany({ user: user._id });
   audit(req.user, 'user.remove', { entity: 'User', entityId: user._id, summary: `Removed ${user.name}` });
   res.json({ ok: true });
 }));
