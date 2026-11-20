@@ -4,6 +4,8 @@ import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { audit, isSuper, ledTeamIds } from '../services/access.js';
 
 import { dailyModels } from '../daily-work/models.js';
+import { clock } from '../daily-work/dates.js';
+import { leaveDates, setCurrentLeave } from '../daily-work/leave.js';
 import { dailyReportSettings, parseDailyReport } from '../daily-work/settings.js';
 import { loginEmail } from '../services/email-login.js';
 
@@ -30,9 +32,17 @@ r.get('/users', ah(async (req, res) => {
   for (const m of memberships) (byUser[m.user] ||= []).push({ team: m.team, teamRole: m.teamRole });
   if (includeReport) {
     const legacyIds = users.filter((user) => !user.dailyReport).map((user) => String(user._id));
-    const legacy = legacyIds.length ? await (await dailyModels()).Member.find({ _id: { $in: legacyIds } }).lean() : [];
+    const { Member, Leave } = await dailyModels();
+    const { date } = clock();
+    const [legacy, leave] = await Promise.all([
+      legacyIds.length ? Member.find({ _id: { $in: legacyIds } }).lean() : [],
+      leaveDates(Leave, date),
+    ]);
     const legacyById = new Map(legacy.map((member) => [member._id, member]));
-    for (const user of users) user.dailyReport = dailyReportSettings(user.dailyReport, legacyById.get(String(user._id)));
+    for (const user of users) {
+      user.dailyReport = dailyReportSettings(user.dailyReport, legacyById.get(String(user._id)));
+      user.onLeave = leave.has(`${user._id}:${date}`);
+    }
   }
   res.json(users.map((u) => ({ ...u, teams: byUser[u._id] || [] })));
 }));
@@ -46,6 +56,16 @@ r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
   const user = await User.create({ name, email, role, title, slackUserId: parseSlackUserId(slackUserId), dailyReport: dailyReport === undefined ? undefined : parseDailyReport(dailyReport) });
   audit(req.user, 'user.create', { entity: 'User', entityId: user._id, summary: `Created ${role.replace('_', ' ')} ${name}` });
   res.status(201).json(user);
+}));
+
+r.put('/users/:id/leave', requireRole('super_admin'), ah(async (req, res) => {
+  const { onLeave } = req.body || {};
+  if (typeof onLeave !== 'boolean') throw new HttpError(400, 'Choose Active or On leave');
+  const person = await User.findOne({ _id: req.params.id, active: true, deletedAt: null }).select('_id');
+  if (!person) throw new HttpError(404, 'Active person not found');
+  const { Leave } = await dailyModels();
+  await setCurrentLeave(Leave, String(person._id), clock().date, onLeave);
+  res.json({ onLeave });
 }));
 
 r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {

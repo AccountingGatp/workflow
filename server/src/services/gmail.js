@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { mailEnabled } from './mail-settings.js';
 import { Client } from '../models/index.js';
 import { MailAccount, MailMessage, MailThread } from '../models/mail.js';
 
@@ -222,7 +223,7 @@ export async function syncAccount(accountId) {
 }
 
 export async function syncAllAccounts() {
-  if (!gmailConfigured()) return;
+  if (!gmailConfigured() || !await mailEnabled()) return;
   for (const a of await MailAccount.find({ status: { $ne: 'disconnected' } }).select('_id')) {
     await syncAccount(a._id).catch((e) => console.error('Mail sync failed:', e.message));
   }

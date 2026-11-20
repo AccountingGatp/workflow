@@ -10,6 +10,7 @@ import { dailyScope, includes, roster, validateProjectLink, workflowProjects } f
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets, withClientBudgets } from './budgets.js';
 import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
 import { clock, dateValue, shiftDate } from './dates.js';
+import { leaveDates } from './leave.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
 import { defaultStatusReminder, parseStatusReminder, statusRemindersWithDelivery, statusScheduleRevision } from './settings.js';
@@ -377,9 +378,9 @@ r.get('/missing/:date', route(async (req, res, models, scope) => {
   const [members, submitted, leave] = await Promise.all([
     roster(scope, models),
     models.Submission.distinct('memberId', { date, 'entries.0': { $exists: true } }),
-    models.Leave.distinct('memberId', { date }),
+    leaveDates(models.Leave, date),
   ]);
-  const expected = members.filter((member) => reportMember(member, date) && !leave.includes(member.id));
+  const expected = members.filter((member) => reportMember(member, date) && !leave.has(`${member.id}:${date}`));
   res.json({ expected: expected.length, missing: expected.filter((member) => !submitted.includes(member.id))
     .map(({ id, name, shift, shiftStart }) => ({ id, name, shift, shiftStart })) });
 }));
@@ -388,7 +389,7 @@ r.get('/manage', route(async (req, res, models, scope) => {
   const names = await syncClientProjects(models, scope.managed);
   const [workflow, projects, members, leave] = await Promise.all([
     workflowProjects(scope), models.Project.find(scoped(scope.managed)).sort('name').lean(), roster(scope, models),
-    models.Leave.find({ date: { $gte: shiftDate(clock().date, -31) }, ...(scope.members !== null && { memberId: { $in: scope.members } }) }).sort('date').lean(),
+    models.Leave.find({ period: { $ne: true }, date: { $gte: shiftDate(clock().date, -31) }, ...(scope.members !== null && { memberId: { $in: scope.members } }) }).sort('date').lean(),
   ]);
   const projectIds = projects.map((project) => project._id);
   const [catalog, assignments] = await Promise.all([

@@ -73,7 +73,37 @@ function ReminderEditor({ reminder, onClose, onSaved }) {
   </Modal>;
 }
 
-export default function Settings() {
+function MailSettings({ mail, saveMail }) {
+  const toast = useToast();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function toggle(event) {
+    const enabled = event.target.checked;
+    setSaving(true);
+    setError(null);
+    try {
+      await saveMail(enabled);
+      toast(enabled ? 'Mail turned on.' : 'Mail turned off.');
+    } catch (error) {
+      setError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="card card-pad stack" style={{ marginBottom: 20 }} aria-labelledby="mail-settings">
+    <div className="row-wrap reminder-section-head">
+      <div><h2 id="mail-settings">Mail</h2>
+        <p className="small muted" id="mail-setting-hint">Control Mail access and inbox syncing for everyone in Workflow.</p></div>
+      <label className="row"><input type="checkbox" role="switch" checked={mail.data?.enabled === true}
+        disabled={saving || !mail.data} onChange={toggle} aria-describedby="mail-setting-hint" /> Enable Mail</label>
+    </div>
+    <ErrorBox error={error || mail.error} />
+  </section>;
+}
+
+export default function Settings({ mail, saveMail }) {
   const { data, error, loading, reload } = useApi(path);
   const [saved, setSaved] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -100,6 +130,7 @@ export default function Settings() {
 
   return <>
     <PageHead title="Settings" />
+    <MailSettings mail={mail} saveMail={saveMail} />
     <section className="stack" aria-labelledby="slack-reminders">
       <div className="row-wrap reminder-section-head">
         <div><h2 id="slack-reminders">Slack reminders</h2>

@@ -42,7 +42,13 @@ const memberSchema = new Schema({
   hubstaffAccess: { type: Boolean, default: false },
 }, timestamps);
 
-const leaveSchema = new Schema({ _id: String, memberId: text, date: text }, timestamps);
+const leaveSchema = new Schema({
+  _id: String, memberId: text, date: text, period: Boolean, through: String,
+}, timestamps);
+leaveSchema.index({ memberId: 1 }, {
+  unique: true,
+  partialFilterExpression: { period: true, through: { $type: 'null' } },
+});
 leaveSchema.index({ date: 1, memberId: 1 });
 
 const entry = new Schema({

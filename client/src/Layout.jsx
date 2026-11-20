@@ -20,7 +20,7 @@ function ThemeToggle() {
   );
 }
 
-export default function Layout() {
+export default function Layout({ mailEnabled }) {
   const { user, logout, can } = useAuth();
   const toast = useToast();
   const [signingOut, setSigningOut] = useState(false);
@@ -49,7 +49,7 @@ export default function Layout() {
         {!can.super && item('/', CheckSquare, 'My work')}
         {item('/daily-work', CalendarCheck, 'Daily Work')}
         {can.manage && item('/overview', LayoutDashboard, 'Overview')}
-        {item('/mail', MailIcon, 'Mail')}
+        {mailEnabled && item('/mail', MailIcon, 'Mail')}
         {item('/clients', Building2, 'Clients')}
         {can.manage && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>
