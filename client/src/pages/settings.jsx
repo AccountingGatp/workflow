@@ -4,9 +4,9 @@ import { api, useApi, useToast } from '../lib.jsx';
 import { Badge, Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
 const path = '/daily-work/settings/reminders';
-const newReminder = { name: '', time: '18:35', message: '', enabled: true, notifyChannel: false };
+const newReminder = { name: '', time: '18:00', message: '', enabled: true, notifyChannel: false };
 const displayTime = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', hour: 'numeric', minute: '2-digit' });
-const schedule = (time) => time ? `Daily at ${displayTime.format(new Date(`2000-01-01T${time}Z`))} IST` : 'Choose a reminder time';
+const schedule = (time) => time ? `Weekdays at ${displayTime.format(new Date(`2000-01-01T${time}Z`))} IST` : 'Choose a reminder time';
 const deliveryTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit' });
 const deliveryLabels = { sent: 'Sent', sending: 'Sending', failed: 'Delivery failed', uncertain: 'Delivery unconfirmed' };
 
@@ -55,7 +55,7 @@ function ReminderEditor({ reminder, onClose, onSaved }) {
         <div className="grid grid-2">
           <label className="field">Reminder name<input className="input" autoFocus required maxLength={80}
             value={draft.name} onChange={(event) => set('name', event.target.value)} /></label>
-          <label className="field">Daily send time (IST)<input className="input" type="time" required
+          <label className="field">Weekday send time (IST)<input className="input" type="time" required
             value={draft.time} onChange={(event) => set('time', event.target.value)} /></label>
         </div>
         <label className="field">Slack message<textarea className="textarea" required maxLength={1000} rows={4}
@@ -103,7 +103,7 @@ export default function Settings() {
     <section className="stack" aria-labelledby="slack-reminders">
       <div className="row-wrap reminder-section-head">
         <div><h2 id="slack-reminders">Slack reminders</h2>
-          <p className="small muted">Daily messages to the configured Daily Work channel. Times are in India Standard Time.</p></div>
+          <p className="small muted">Weekday messages to the configured Daily Work channel. Times are in India Standard Time.</p></div>
         <div className="row-wrap">
           <button type="button" className="btn" onClick={() => { setSaved(null); reload(); }}><RefreshCw size={16} /> Refresh status</button>
           <button type="button" className="btn btn-primary" disabled={!current} onClick={() => setEditing(newReminder)}><Plus size={16} /> Add reminder</button>

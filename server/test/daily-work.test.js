@@ -204,24 +204,17 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal((await request(other, `/reports?from=${date}`)).submissions.length, 0);
     assert.equal((await request(owner, `/reports?from=${date}`)).submissions.length, 1);
 
-    process.env.DAILY_WORK_SLACK_REPORTS = 'true';
-    process.env.DAILY_WORK_REPORT_DAYS = '0,1,2,3,4,5,6';
-    const scheduled = new Date(`${date}T10:00:00.000Z`);
-    await runDailyWorkJobs(scheduled);
-    await runDailyWorkJobs(scheduled);
-    assert.equal(calls.length, 3);
-    assert.match(calls[2].text, /All employees submitted/);
     const removed = await put(employee, date, [], completed.version);
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 2);
     await send(employee, date, removed.version);
-    assert.equal(calls[3].thread_ts, '1.000001');
-    assert.match(calls[3].text, /All tasks removed/);
+    assert.equal(calls[2].thread_ts, '1.000001');
+    assert.match(calls[2].text, /All tasks removed/);
 
     delete process.env.DAILY_WORK_SLACK_TOKEN;
     const localOnly = await request(employee, `/day/${previousDate}`, 'PUT', { entries: [{ ...entry, workflowTaskId: undefined }] });
     process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
     await request(employee, `/day/${previousDate}`, 'PUT', { entries: [], version: localOnly.version });
-    assert.equal(calls.length, 4);
+    assert.equal(calls.length, 3);
     await request(owner, `/members/${employee._id}/leave/${date}`, 'PUT', {});
     assert.equal((await request(owner, `/missing/${date}`)).expected, 0);
     assert.equal((await dailyModels()).Submission.db.name, 'daily_test');
@@ -392,48 +385,62 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     ]);
     await reportModels.Member.updateOne({ _id: String(employee._id) }, { $set: { reportFrom: reportDate } });
     process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
-    process.env.DAILY_WORK_REPORT_DAYS = '1,2,3,4,5';
     delete process.env.DAILY_WORK_SLACK_REPORTS;
-    process.env.DAILY_WORK_SHIFT_REPORTS = 'true';
+    await reportModels.StatusReminder.create({
+      _id: 'status-reminder', name: 'Task status reminder', time: '19:00', enabled: true,
+      notifyChannel: true, message: 'Team, please update the work status of your tasks on Workflow.',
+    });
     const callsBeforeSchedule = calls.length;
     const at = (day, time) => new Date(`${day}T${time}:00+05:30`);
+    await runDailyWorkJobs(at(reportDate, '00:00'));
+    assert.match(calls.at(-1).text, /No incomplete tasks reported/);
     await runDailyWorkJobs(at(reportDate, '09:55'));
-    assert.equal(calls.length, callsBeforeSchedule);
+    assert.equal(calls.length, callsBeforeSchedule + 1);
     await runDailyWorkJobs(at(reportDate, '10:00'));
     await runDailyWorkJobs(at(reportDate, '10:05'));
-    assert.equal(calls.length, callsBeforeSchedule + 1);
+    assert.equal(calls.length, callsBeforeSchedule + 2);
+    assert.match(calls.at(-1).text, /^<!channel>/);
     assert.match(calls.at(-1).text, /U123EARLY/);
     assert.match(calls.at(-1).text, /Submitted: 1\/2/);
     assert.doesNotMatch(calls.at(-1).text, /U123LATE|U123LEAVE/);
-    await runDailyWorkJobs(at(reportDate, '15:45'));
+    await runDailyWorkJobs(at(reportDate, '15:30'));
+    assert.equal(calls.length, callsBeforeSchedule + 3);
     assert.match(calls.at(-1).text, /U123LATE/);
     assert.doesNotMatch(calls.at(-1).text, /U123EARLY/);
+    await runDailyWorkJobs(at(reportDate, '17:25'));
+    assert.equal(calls.length, callsBeforeSchedule + 3);
+    await runDailyWorkJobs(at(reportDate, '17:30'));
+    assert.equal(calls.length, callsBeforeSchedule + 4);
+    assert.match(calls.at(-1).text, /Weekly Submission Report.*2026-11-02 to 2026-11-06/);
+    await Promise.all([runDailyWorkJobs(at(reportDate, '18:00')), runDailyWorkJobs(at(reportDate, '18:00'))]);
+    await runDailyWorkJobs(at(reportDate, '18:05'));
+    await runDailyWorkJobs(at(reportDate, '19:00'));
+    assert.equal(calls.length, callsBeforeSchedule + 5);
+    assert.equal(calls.at(-1).channel, 'mock-channel');
+    assert.equal(calls.at(-1).thread_ts, undefined);
+    assert.equal(calls.at(-1).text, '<!channel> Team, please update the work status of your tasks on Workflow.');
     await runDailyWorkJobs(at(nextDate, '00:00'));
     await runDailyWorkJobs(at(nextDate, '00:15'));
-    assert.equal(calls.length, callsBeforeSchedule + 3);
-    assert.match(calls.at(-1).text, /Incomplete Tasks Report/);
+    assert.equal(calls.length, callsBeforeSchedule + 6);
+    assert.match(calls.at(-1).text, /^<!channel>.*Incomplete Tasks Report/);
     assert.match(calls.at(-1).text, /Date: 2026-11-06/);
     assert.match(calls.at(-1).text, /Employee: <@U123TEST>/);
     assert.match(calls.at(-1).text, /Reason: Waiting for bank statement/);
     assert.doesNotMatch(calls.at(-1).text, /Next day task|Task pending TL review|Completed closing task/);
-    await runDailyWorkJobs(at(nextDate, '01:00'));
-    assert.equal(calls.length, callsBeforeSchedule + 3);
-    delete process.env.DAILY_WORK_SHIFT_REPORTS;
-    await runDailyWorkJobs(at(nextDate, '18:34'));
-    assert.equal(calls.length, callsBeforeSchedule + 3);
-    await Promise.all([runDailyWorkJobs(at(nextDate, '18:35')), runDailyWorkJobs(at(nextDate, '18:35'))]);
-    await runDailyWorkJobs(at(nextDate, '18:40'));
-    assert.equal(calls.length, callsBeforeSchedule + 4);
-    assert.equal(calls.at(-1).channel, 'mock-channel');
-    assert.equal(calls.at(-1).thread_ts, undefined);
-    assert.equal(calls.at(-1).text, '<!channel> Team, please update the work status of your tasks on Workflow.');
-    await runDailyWorkJobs(at(shiftDate(nextDate, 1), '18:35'));
-    assert.equal(calls.length, callsBeforeSchedule + 5);
+    for (const weekendTime of ['01:00', '10:00', '15:30', '17:30', '18:00']) {
+      await runDailyWorkJobs(at(nextDate, weekendTime));
+    }
+    assert.equal(calls.length, callsBeforeSchedule + 6);
+    await runDailyWorkJobs(at(shiftDate(nextDate, 1), '00:00'));
+    assert.equal(calls.length, callsBeforeSchedule + 7);
+    assert.match(calls.at(-1).text, /Date: 2026-11-07/);
+    process.env.DAILY_WORK_SLACK_REPORTS = 'false';
+    const callsBeforeCustom = calls.length;
 
     const settingsPath = '/settings/reminders';
     const { reminders } = await request(owner, settingsPath);
     const defaultReminder = reminders[0];
-    assert.equal(defaultReminder.time, '18:35');
+    assert.equal(defaultReminder.time, '18:00');
     await request(lead, settingsPath, 'GET', undefined, 403);
     await request(employee, settingsPath, 'POST', defaultReminder, 403);
     await request(manager, `${settingsPath}/${defaultReminder._id}`, 'PUT', defaultReminder, 403);
@@ -446,16 +453,16 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(customReminder.time, '23:58');
     const reminderDay = shiftDate(nextDate, 2);
     await runDailyWorkJobs(at(reminderDay, '18:35'));
-    assert.equal(calls.length, callsBeforeSchedule + 5);
+    assert.equal(calls.length, callsBeforeCustom);
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '00:00'));
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '00:05'));
-    assert.equal(calls.length, callsBeforeSchedule + 6);
+    assert.equal(calls.length, callsBeforeCustom + 1);
     assert.equal(calls.at(-1).text, 'Update A &amp; B &lt;notes&gt;.');
     await request(owner, `${settingsPath}/${customReminder._id}`, 'PUT', {
       ...customReminder, time: '18:40', notifyChannel: true, message: 'Update your close notes.',
     });
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '18:40'));
-    assert.equal(calls.length, callsBeforeSchedule + 7);
+    assert.equal(calls.length, callsBeforeCustom + 2);
     assert.equal(calls.at(-1).text, '<!channel> Update your close notes.');
     const deliveryKey = `${customReminder._id}:${clock().date}`;
     const attempt = new Date();
@@ -479,7 +486,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.deepEqual((await request(owner, settingsPath)).reminders, []);
     await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '18:35'));
     await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '19:00'));
-    assert.equal(calls.length, callsBeforeSchedule + 7);
+    assert.equal(calls.length, callsBeforeCustom + 2);
   } finally {
     globalThis.fetch = realFetch;
     if (server) await new Promise((resolve) => server.close(resolve));

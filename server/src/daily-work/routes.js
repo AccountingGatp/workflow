@@ -12,7 +12,7 @@ import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientP
 import { clock, dateValue, shiftDate } from './dates.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
-import { defaultStatusReminder, parseStatusReminder, statusRemindersWithDelivery } from './settings.js';
+import { defaultStatusReminder, parseStatusReminder, statusRemindersWithDelivery, statusScheduleRevision } from './settings.js';
 
 const r = Router();
 const fail = (message) => { throw new HttpError(400, message); };
@@ -59,6 +59,7 @@ r.put('/settings/reminders/:id', route(async (req, res, models) => {
   const isDefault = req.params.id === defaultStatusReminder._id;
   const _id = isDefault ? defaultStatusReminder._id : idValue(req.params.id);
   const reminder = parseStatusReminder(req.body);
+  if (isDefault) reminder.scheduleRevision = statusScheduleRevision;
   const result = await models.StatusReminder.updateOne({ _id, deletedAt: null }, { $set: reminder }, { upsert: isDefault, runValidators: true });
   if (!result.matchedCount && !result.upsertedCount) throw new HttpError(404, 'Reminder not found');
   res.json(await reminderSettings(models));
