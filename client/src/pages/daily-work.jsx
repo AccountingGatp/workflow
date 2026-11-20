@@ -10,7 +10,10 @@ const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' 
 const hours = (number) => Number(number || 0).toFixed(2);
 const nameKey = (value) => value.trim().toLowerCase();
 const dueLabel = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' });
-const totalHours = (rows) => hours(rows.reduce((sum, item) => sum + Number(item.hours || 0), 0));
+const totalHours = (rows) => hours(rows.reduce((sum, item) => {
+  const value = Number(item.hours);
+  return Number.isFinite(value) && value > 0 ? sum + value : sum;
+}, 0));
 const deliveryLabel = {
   sent: 'Saved and sent to Slack.',
   pending: 'Saved. Slack delivery is queued.',
@@ -323,8 +326,10 @@ function EntryEditor({ date, data }) {
     <section ref={editor} className="card daily-task-editor" aria-labelledby="daily-selected-heading">
       <div className="row-wrap daily-header daily-editor-bar">
         <div><h2 id="daily-selected-heading">Selected tasks</h2><time className="small muted" dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></div>
-        <div className="row-wrap daily-editor-totals" aria-live="polite">
-          <Badge cls="b-primary"><span className="mono">{totalHours(submission?.entries || [])} h</span> {date === today() ? 'today' : 'total'}</Badge>
+        <div className="row-wrap daily-editor-totals">
+          <output aria-label="Total hours" aria-live="polite">
+            <Badge cls="b-primary">{date === today() ? 'Today’s total' : 'Total'} <span className="mono">{totalHours(rows)} h</span></Badge>
+          </output>
           <div className="stack" style={{ gap: 2 }}>
             <button type="button" className="btn btn-primary" onClick={sendToSlack}
               aria-describedby={data.slackEnabled ? undefined : 'daily-slack-setup'}
@@ -339,9 +344,11 @@ function EntryEditor({ date, data }) {
           </div>
         </div>
       </div>
-      <div className="daily-editor-body stack">
+      {(error || (submission?.delivery && submission.delivery !== 'skipped')) && <div className="daily-editor-feedback stack">
         <ErrorBox error={error} />
         {submission?.delivery && submission.delivery !== 'skipped' && <p className="small muted" role="status">{deliveryLabel[submission.delivery]}</p>}
+      </div>}
+      <div className="daily-editor-body stack" role="region" aria-label="Selected task list" tabIndex={rows.length ? 0 : undefined}>
         {!rows.length && <Empty icon={ClipboardList} title="No tasks selected">Choose a task from the project list to start logging hours.</Empty>}
         {rows.map((row) => {
           const linked = !!(row.workflowTaskId || row.workItemId || row.catalogId);
