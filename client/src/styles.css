@@ -375,11 +375,14 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
 .daily-project-task-info { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .daily-project-task-info strong { font-weight: 600; }
-.daily-editor-bar, .daily-editor-body { padding: 14px clamp(14px, 2vw, 22px); }
-.daily-editor-bar { background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 1px solid var(--border); }
+.daily-editor-bar, .daily-editor-body, .daily-editor-feedback { padding: 14px clamp(14px, 2vw, 22px); }
+.daily-editor-bar { position: sticky; top: 64px; z-index: 2; background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 1px solid var(--border); }
 .daily-editor-bar h2 { margin-bottom: 2px; }
 .daily-editor-totals { gap: 10px; }
-.daily-editor-body { min-height: 146px; }
+.daily-editor-feedback { padding-bottom: 0; }
+.daily-editor-body { min-height: 146px; max-height: clamp(240px, 58dvh, 600px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-gutter: stable; scroll-padding-block: 10px; }
+.daily-editor-body > .daily-entry { flex-shrink: 0; }
 .daily-entry { border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; margin: 0; padding: 12px; }
 .daily-task-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-bottom: 12px; }
 .daily-task-search { margin-top: 12px; }
@@ -397,9 +400,10 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   .daily-project-picker { grid-area: project; }
   .daily-task-editor { grid-area: editor; }
   .daily-project-task-panel { grid-area: tasks; }
-  .daily-editor-body { max-height: clamp(260px, calc(100dvh - 390px), 840px); overflow: auto; scrollbar-width: thin; }
+  .daily-editor-body { max-height: clamp(260px, calc(100dvh - 340px), 840px); }
 }
 @media (max-width: 640px) {
+  .daily-editor-bar { top: 56px; }
   .daily-work-page[data-entry] .daily-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .daily-work-page[data-entry] .daily-tab { flex: 0 0 auto; white-space: nowrap; }
 }
