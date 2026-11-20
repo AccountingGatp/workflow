@@ -17,7 +17,7 @@ function reminderDelivery(delivery) {
 
 function ReminderMessage({ reminder }) {
   return <div className="reminder-message">
-    {reminder.notifyChannel && <span className="reminder-mention">@Reporting staff</span>}
+    {reminder.notifyChannel && <span className="reminder-mention">@channel</span>}
     {reminder.message || 'Your reminder message will appear here.'}
   </div>;
 }
@@ -63,7 +63,7 @@ function ReminderEditor({ reminder, onClose, onSaved }) {
         <label className="row"><input type="checkbox" checked={draft.enabled}
           onChange={(event) => set('enabled', event.target.checked)} /> Enable reminder</label>
         <label className="row"><input type="checkbox" checked={draft.notifyChannel}
-          onChange={(event) => set('notifyChannel', event.target.checked)} /> Mention employees and Team Leads in reporting</label>
+          onChange={(event) => set('notifyChannel', event.target.checked)} /> Notify everyone with @channel</label>
       </fieldset>
       <section className="reminder-preview stack" aria-label="Slack message preview">
         <div className="row-wrap reminder-preview-head"><strong>Slack preview</strong><span className="small muted">{schedule(draft.time)}</span></div>

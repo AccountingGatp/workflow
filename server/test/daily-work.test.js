@@ -424,10 +424,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(calls.length, callsBeforeSchedule + 5);
     assert.equal(calls.at(-1).channel, 'mock-channel');
     assert.equal(calls.at(-1).thread_ts, undefined);
-    assert.match(calls.at(-1).text, /<@U123LEAD>/);
-    assert.match(calls.at(-1).text, /<@U123TEST>/);
-    assert.match(calls.at(-1).text, /Team, please update the work status of your tasks on Workflow\.$/);
-    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123OWNER|U123MANAGER|U123LEAVE/);
+    assert.equal(calls.at(-1).text, '<!channel> Team, please update the work status of your tasks on Workflow.');
     await runDailyWorkJobs(at(nextDate, '00:00'));
     await runDailyWorkJobs(at(nextDate, '00:15'));
     assert.equal(calls.length, callsBeforeSchedule + 6);
@@ -473,9 +470,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     });
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '18:40'));
     assert.equal(calls.length, callsBeforeCustom + 2);
-    assert.match(calls.at(-1).text, /<@U123TEST>/);
-    assert.match(calls.at(-1).text, /Update your close notes\.$/);
-    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123OWNER|U123MANAGER/);
+    assert.equal(calls.at(-1).text, '<!channel> Update your close notes.');
     const deliveryKey = `${customReminder._id}:${clock().date}`;
     const attempt = new Date();
     await reportModels.Report.create({ _id: deliveryKey, state: 'sent', startedAt: attempt });
