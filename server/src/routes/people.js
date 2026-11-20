@@ -9,6 +9,8 @@ import { leaveDates, setCurrentLeave } from '../daily-work/leave.js';
 import { dailyReportSettings, parseDailyReport } from '../daily-work/settings.js';
 import { loginEmail } from '../services/email-login.js';
 
+import { SignInRequest } from '../services/sign-in-requests.js';
+
 const r = Router();
 
 /* ---------- Users ---------- */
@@ -20,6 +22,39 @@ function parseSlackUserId(value) {
   if (id && !slackUserIdPattern.test(id)) throw new HttpError(400, 'Enter a Slack user ID, such as U012ABC3456');
   return id || null;
 }
+
+r.get('/sign-in-requests', requireRole('super_admin'), ah(async (_req, res) => {
+  const [pending, history] = await Promise.all([
+    SignInRequest.find({ status: 'pending' }).sort({ createdAt: 1 }).lean(),
+    SignInRequest.find({ status: { $ne: 'pending' } }).sort({ decidedAt: -1 }).limit(50).lean(),
+  ]);
+  res.json({ pending, history });
+}));
+
+r.post('/sign-in-requests/:email/:decision', requireRole('super_admin'), ah(async (req, res) => {
+  const approve = req.params.decision === 'approve';
+  if (!approve && req.params.decision !== 'reject') throw new HttpError(404, 'Unknown action');
+  const email = loginEmail(req.params.email);
+  const status = approve ? 'approved' : 'rejected';
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  if (approve && (name.length > 150 || title.length > 150)) throw new HttpError(400, 'Use up to 150 characters for name and job title');
+  const slackUserId = approve ? parseSlackUserId(req.body?.slackUserId) : undefined;
+  const request = await User.db.transaction(async (session) => {
+    const pending = await SignInRequest.findOneAndUpdate({ _id: email, status: 'pending' }, {
+      $set: { status, decidedBy: req.user._id, decidedAt: new Date() },
+    }, { session, returnDocument: 'after' });
+    if (!pending) throw new HttpError(409, 'This request has already been reviewed or no longer exists');
+    if (approve) {
+      await User.create([{ email, name: name || pending.name, title, slackUserId, role: 'employee' }], { session });
+    }
+    return pending;
+  });
+  audit(req.user, `sign-in-request.${status}`, {
+    entity: 'User', summary: `${approve ? 'Approved' : 'Rejected'} sign-in request for ${email}`,
+  });
+  res.json(request);
+}));
 
 r.get('/users', ah(async (req, res) => {
   // Everyone signed in may look up colleagues by name (needed for assigning work);

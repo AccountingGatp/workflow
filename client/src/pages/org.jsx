@@ -1,5 +1,6 @@
 import GoogleSignIn from '../GoogleSignIn.jsx';
 import { useEffect, useId, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, BrandName, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
@@ -349,6 +350,83 @@ export function Recurring() {
 
 /* ---------- Access requests ---------- */
 
+function SignInRequests() {
+  const { data, error, loading, reload } = useOutletContext();
+  const [review, setReview] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [reviewError, setReviewError] = useState(null);
+  const toast = useToast();
+
+  function open(request) {
+    setReviewError(null);
+    setReview({ request, name: request.name, title: '', slackUserId: '' });
+  }
+
+  async function decide(decision) {
+    setSaving(true);
+    setReviewError(null);
+    const { request, name, title, slackUserId } = review;
+    try {
+      await api(`/sign-in-requests/${encodeURIComponent(request._id)}/${decision}`, {
+        method: 'POST', body: decision === 'approve' ? { name, title, slackUserId } : undefined,
+      });
+      setReview(null);
+      reload();
+      toast(decision === 'approve' ? 'Sign-in approved' : 'Sign-in request rejected');
+    } catch (error) {
+      setReviewError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fields = (key) => ({
+    value: review[key], maxLength: key === 'slackUserId' ? 64 : 150,
+    onChange: (event) => setReview({ ...review, [key]: event.target.value }),
+  });
+  const row = (request) => <div key={request._id} className="list-item">
+    <Avatar name={request.name} />
+    <div className="li-main"><div className="title">{request.name}</div>
+      <div className="li-meta">{request._id} · {fmtTime(request.createdAt)}</div></div>
+    {request.status === 'pending' ? <button className="btn btn-outline btn-sm" onClick={() => open(request)}>Review</button>
+      : <Badge cls={request.status === 'approved' ? 'b-success' : 'b-danger'}>{request.status}</Badge>}
+  </div>;
+
+  return <>
+    <section className="card" aria-labelledby="sign-in-requests">
+      <div className="card-head"><h3 id="sign-in-requests">Company sign-in requests</h3>
+        <div className="row">
+          <Badge cls={data?.pending.length ? 'b-warning' : ''}>{data?.pending.length || 0} pending</Badge>
+          <button className="btn btn-outline btn-sm" onClick={reload}>Refresh</button>
+        </div>
+      </div>
+      {error ? <ErrorBox error={error} /> : loading ? <Skeleton rows={2} />
+        : data?.pending.length ? <div className="list">{data.pending.map(row)}</div>
+          : <Empty icon={UserPlus} title="No pending sign-in requests" />}
+      {!!data?.history.length && <details>
+        <summary className="card-pad">Sign-in request history</summary>
+        <div className="list">{data.history.map(row)}</div>
+      </details>}
+    </section>
+    {review && <Modal title="Review sign-in request" onClose={() => { if (!saving) setReview(null); }} footer={
+      <>
+        <button type="button" className="btn btn-outline" disabled={saving} onClick={() => decide('reject')}>Reject</button>
+        <button type="submit" form="sign-in-review" className="btn btn-primary" disabled={saving}>
+          {saving ? 'Saving…' : 'Approve sign-in'}
+        </button>
+      </>}>
+      <form id="sign-in-review" className="stack" onSubmit={(event) => { event.preventDefault(); decide('approve'); }}>
+        <p><strong>{review.request._id}</strong></p>
+        <p className="small muted">Approving creates an Employee account. You can assign teams and client access separately.</p>
+        <label className="field">Name (optional)<input className="input" {...fields('name')} /></label>
+        <label className="field">Job title (optional)<input className="input" {...fields('title')} /></label>
+        <label className="field">Slack user ID (optional)<input className="input" placeholder="U012ABC3456" {...fields('slackUserId')} /></label>
+        <ErrorBox error={reviewError} />
+      </form>
+    </Modal>}
+  </>;
+}
+
 export function Access() {
   const { can } = useAuth();
   const { data, loading, reload } = useApi('/access-requests');
@@ -371,10 +449,11 @@ export function Access() {
   );
   return (
     <>
-      <PageHead title="Access requests" subtitle={can.super ? 'Admins asking to give client access to people outside their own teams.' : 'Requests you have sent to a Super Admin.'} />
+      <PageHead title="Access requests" subtitle={can.super ? 'Review company sign-in and client access requests.' : 'Requests you have sent to a Super Admin.'} />
       <div className="stack" style={{ gap: 24 }}>
+        {can.super && <SignInRequests />}
         <div className="card">
-          <div className="card-head"><h3>Pending</h3><Badge cls={pending.length ? 'b-warning' : ''}>{pending.length}</Badge></div>
+          <div className="card-head"><h3>Pending client access</h3><Badge cls={pending.length ? 'b-warning' : ''}>{pending.length}</Badge></div>
           {loading && !data ? <Skeleton rows={2} /> : pending.length ? <div className="list">{pending.map(row)}</div> : <Empty icon={ShieldCheck} title="No pending requests" />}
         </div>
         {past.length > 0 && <div className="card"><div className="card-head"><h3>History</h3></div><div className="list">{past.map(row)}</div></div>}
@@ -428,6 +507,7 @@ export function Login() {
   const [challenge, setChallenge] = useState('');
   const [code, setCode] = useState('');
   const [resendAt, setResendAt] = useState(null);
+  const [requestStatus, setRequestStatus] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const config = useApi('/config');
@@ -470,17 +550,31 @@ export function Login() {
       <section className="login-panel">
         <div className="login-card">
           <div className="login-mobile-brand"><BrandName /></div>
+          {requestStatus ? <>
+            <div role="status">
+              <h1>{requestStatus === 'pending' ? 'Request sent' : 'Sign-in request reviewed'}</h1>
+              <p className="muted">{requestStatus === 'pending'
+                ? 'A Super Admin needs to approve your company account. Sign in again after approval.'
+                : 'Contact your Super Admin to check access for your company account.'}</p>
+            </div>
+            <button type="button" className="btn btn-outline" onClick={() => {
+              setRequestStatus(null); setChallenge(''); setCode(''); setError(null);
+            }}>Back to sign in</button>
+          </> : <>
           <div><h1>{challenge ? 'Check your email' : 'Sign in'}</h1><p className="muted" style={{ marginTop: 4 }}>
-            {challenge ? `If ${email} is registered, a six-digit code will arrive shortly.` :
-              googleClientId ? 'Use the Google account registered in Workflow.' : 'Use the email address registered in Workflow.'}
+            {challenge ? `If ${email} is eligible, a six-digit code will arrive shortly.` :
+              googleClientId ? 'Use your GATP company email or your registered Google account.' : 'Use your GATP company email or your registered email address.'}
           </p></div>
           <ErrorBox error={error || config.error || (offline ? new Error('Couldn’t reconnect to Workflow. Reload to try again.') : null)} />
-          {googleClientId && !challenge && <GoogleSignIn clientId={googleClientId} />}
+          {googleClientId && !challenge && <GoogleSignIn clientId={googleClientId} onRequest={setRequestStatus} />}
           {config.data && !googleClientId && !emailEnabled && !config.data.demo &&
             <p className="small muted">Sign-in setup is required. Contact your Workflow administrator.</p>}
           {emailEnabled && <form className="stack" style={{ gap: 16 }} onSubmit={(event) => {
             event.preventDefault();
-            if (challenge) run(() => signIn('/auth/email/verify', { email, challenge, code }));
+            if (challenge) run(async () => {
+              const status = await signIn('/auth/email/verify', { email, challenge, code });
+              if (status) setRequestStatus(status);
+            });
             else sendCode();
           }}>
             {challenge ? <label className="field">Verification code<input className="input" key="code" autoFocus
@@ -506,6 +600,7 @@ export function Login() {
               ))}
             </div>
           </div>}
+          </>}
         </div>
       </section>
     </div>

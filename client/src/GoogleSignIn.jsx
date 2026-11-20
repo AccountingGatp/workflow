@@ -16,7 +16,7 @@ function loadGoogle() {
   return googleScript;
 }
 
-export default function GoogleSignIn({ clientId }) {
+export default function GoogleSignIn({ clientId, onRequest }) {
   const button = useRef(null);
   const { loginGoogle } = useAuth();
   const [error, setError] = useState(null);
@@ -30,7 +30,8 @@ export default function GoogleSignIn({ clientId }) {
       if (!active) return;
       google.initialize({ client_id: clientId, nonce, callback: async ({ credential }) => {
         try {
-          await loginGoogle(credential);
+          const status = await loginGoogle(credential);
+          if (active && status) onRequest(status);
         } catch (error) {
           if (active) setError(error);
         }
@@ -39,6 +40,6 @@ export default function GoogleSignIn({ clientId }) {
     }
     render().catch((error) => { if (active) setError(error); });
     return () => { active = false; container.replaceChildren(); };
-  }, [clientId, loginGoogle]);
+  }, [clientId, loginGoogle, onRequest]);
   return <div className="stack"><div ref={button} /><ErrorBox error={error} /></div>;
 }

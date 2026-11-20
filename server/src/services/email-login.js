@@ -3,6 +3,8 @@ import { isIP } from 'node:net';
 import { EmailCode, LoginLimit, User } from '../models/index.js';
 import { HttpError, JWT_SECRET } from '../middleware/auth.js';
 
+import { companyEmail } from './sign-in-requests.js';
+
 const minute = 60000;
 const hash = (value) => createHmac('sha256', JWT_SECRET).update(value).digest('hex');
 export const emailLoginConfigured = () => Boolean(process.env.RESEND_API_KEY && process.env.LOGIN_EMAIL_FROM);
@@ -27,7 +29,8 @@ export async function limitEmailLogin(req, action, maximum) {
 
 export async function requestEmailCode(email) {
   const challenge = randomBytes(24).toString('hex');
-  if (!await User.exists({ email, active: true, deletedAt: null })) return challenge;
+  const user = await User.findOne({ email }).select('active deletedAt').lean();
+  if (user ? !user.active || user.deletedAt : !companyEmail(email)) return challenge;
   const now = Date.now();
   const code = String(randomInt(1000000)).padStart(6, '0');
   const digest = hash(`${challenge}:${code}`);
@@ -66,6 +69,5 @@ export async function verifyEmailCode(email, challenge, code) {
     { $inc: { attempts: 1 } }, { returnDocument: 'after' }).lean();
   if (!record || record.digest !== hash(`${challenge}:${code}`)) return null;
   const consumed = await EmailCode.deleteOne(scope);
-  if (!consumed.deletedCount) return null;
-  return User.findOne({ email, active: true, deletedAt: null });
+  return Boolean(consumed.deletedCount);
 }
