@@ -20,15 +20,6 @@ async function reportingRoster(models) {
   return members.filter(({ role }) => role === 'employee' || role === 'admin');
 }
 
-async function statusReminderPeople(models, date) {
-  const [members, leave] = await Promise.all([
-    reportingRoster(models),
-    models.Leave.find({ date }).select('_id').lean(),
-  ]);
-  const absent = new Set(leave.map(({ _id }) => _id));
-  return members.filter((member) => activeDate(member, date) && !absent.has(`${member.id}:${date}`));
-}
-
 async function attendance(models, from, to = from) {
   const range = { $gte: from, $lte: to };
   const [members, entries, leave] = await Promise.all([
@@ -127,10 +118,7 @@ export async function runDailyWorkJobs(now = new Date()) {
     const reminderDate = time < reminder.time ? shiftDate(date, -1) : date;
     const day = dayOf(reminderDate);
     if (day < 1 || day > 5) return [];
-    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, async () => {
-      const people = reminder.notifyChannel ? await statusReminderPeople(models, reminderDate) : [];
-      return statusReminderText(reminder, people);
-    });
+    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, () => statusReminderText(reminder));
   }));
   await retrySlack(models);
   if (process.env.DAILY_WORK_SLACK_REPORTS === 'false') return;
