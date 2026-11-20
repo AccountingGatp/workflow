@@ -8,6 +8,8 @@ import { User, Client, Team, TeamMembership, ClientAssignment, ClientProject, Ta
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import { seedLoanReminders } from '../src/seed-loan-reminders.js';
 import { assignLoanTasks } from '../src/assign-loan-reviewers.js';
+import { importWorkflowProjects } from '../src/import-workflow-projects.js';
+import { dailyModels } from '../src/daily-work/models.js';
 import { generateRecurringTasks } from '../src/services/recurrence.js';
 
 test('API roles, scheduling, reviewed completion, deletion and loan migration', async () => {
@@ -178,6 +180,25 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     await request(admin, '/tasks', 'POST', {
       title: 'New task after removal', client: standalone.client, project: standalone._id, dueDate: new Date().toISOString(),
     }, 400);
+
+    const { Project } = await dailyModels();
+    const alias = await Project.create({ name: 'Existing Brand with Suffix', clientId: String(client._id) });
+    const dailyOnly = await Project.create({ name: 'Legacy Daily Work', clientId: String(client._id) });
+    const core = await ClientProject.create({ name: 'Existing Brand', client: client._id });
+    await Project.create({ name: 'Archived Daily Work', clientId: String(client._id), archived: true });
+    const payload = JSON.stringify([
+      ['Existing Brand with Suffix', 'Existing Brand'], 'legacy-daily-work', 'Brand new workspace',
+      'BRAND NEW WORKSPACE', 'Archived Daily Work', standalone.name,
+    ]);
+    const imports = await Promise.all([importWorkflowProjects(payload), importWorkflowProjects(payload)]);
+    assert.deepEqual(imports.filter(Boolean), [{ added: 2, reusedDailyWork: 2, existing: 2, skipped: 2 }]);
+    assert.equal((await Project.findById(alias._id)).workflowProjectId, String(core._id));
+    const promoted = await ClientProject.findOne({ name: 'Legacy Daily Work' });
+    assert.equal(String(promoted.client), String(client._id));
+    assert.equal((await Project.findById(dailyOnly._id)).workflowProjectId, String(promoted._id));
+    assert.equal(await ClientProject.countDocuments({ name: 'Brand new workspace' }), 1);
+    assert.equal(await ClientProject.countDocuments({ name: 'Archived Daily Work' }), 0);
+    assert.equal(await importWorkflowProjects(payload), null);
   } finally {
     if (server) await new Promise(resolve=>server.close(resolve));
     await mongoose.disconnect();await db.stop();
