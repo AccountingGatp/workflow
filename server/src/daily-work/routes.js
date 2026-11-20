@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
-import { Task, User } from '../models/index.js';
+import { ClientProject, Task, User } from '../models/index.js';
 import { applyTaskTransition } from '../services/task-review.js';
 import { isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
@@ -185,6 +185,9 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   const projectIds = [...new Set([...entries, ...(previous?.entries || [])].map((entry) => idValue(entry.projectId)))];
   const catalog = await models.CatalogTask.find({ projectId: { $in: projectIds } }).session(session).lean();
   const linkedProjects = await models.Project.find({ _id: { $in: projectIds }, ...scoped(scope.visible) }).session(session).lean();
+  const removedProjects = new Set((await ClientProject.distinct('_id', {
+    _id: { $in: linkedProjects.map((project) => project.workflowProjectId).filter(Boolean) }, deletedAt: { $ne: null },
+  })).map(String));
   const workItems = await listClientWork(linkedProjects, user, undefined, session);
   const budgetCatalog = withClientBudgets(catalog, workItems);
   const saved = [];
@@ -195,7 +198,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     const sameProject = !!existing && existing.projectId === input.projectId;
     if (existing?.workflowTaskId && !sameProject) fail('Remove the entry and add another to change its project');
     const project = sameProject ? null : await projectInScope(models, scope, input.projectId, false, session);
-    if (project?.archived) fail('Select an active project');
+    if (project?.archived || removedProjects.has(project?.workflowProjectId)) fail('Select an active project');
     const projectId = String(project?._id || existing.projectId);
     const clientId = project?.clientId || existing.clientId;
     if (!includes(scope.visible, clientId)) {
@@ -420,6 +423,9 @@ r.post('/projects', route(async (req, res, models, scope) => {
 r.patch('/projects/:id', route(async (req, res, models, scope) => {
   const project = await projectInScope(models, scope, req.params.id, true);
   if (req.body.name !== undefined) project.name = textValue(req.body.name, 120);
+  if (req.body.archived === false && project.workflowProjectId) {
+    await validateProjectLink(scope, project.clientId, project.workflowProjectId);
+  }
   if (typeof req.body.archived === 'boolean') project.archived = req.body.archived;
   res.json(await project.save());
 }, true));

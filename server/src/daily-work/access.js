@@ -33,14 +33,14 @@ export async function roster(scope, models, inactive = false) {
 export async function workflowProjects(scope) {
   const filter = scope.managed === null ? {} : { _id: { $in: scope.managed } };
   const clients = await Client.find(filter).select('name').sort('name').lean();
-  const projects = await ClientProject.find({ client: { $in: clients.map((client) => client._id) } }).select('client name').sort('name').lean();
+  const projects = await ClientProject.find({ client: { $in: clients.map((client) => client._id) }, deletedAt: null }).select('client name').sort('name').lean();
   return { clients, projects };
 }
 
 export async function validateProjectLink(scope, clientId, workflowProjectId) {
   if (!includes(scope.managed, clientId)) throw new HttpError(403, 'You do not manage that client');
   if (!(await Client.exists({ _id: clientId }))) throw new HttpError(404, 'Workflow client not found');
-  if (workflowProjectId && !(await ClientProject.exists({ _id: workflowProjectId, client: clientId }))) {
+  if (workflowProjectId && !(await ClientProject.exists({ _id: workflowProjectId, client: clientId, deletedAt: null }))) {
     throw new HttpError(400, 'Select a Workflow project belonging to this client');
   }
 }

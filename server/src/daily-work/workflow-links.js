@@ -11,11 +11,16 @@ export async function syncClientProjects(models, clientIds) {
     .select('name').lean();
   const ids = clients.map(({ _id }) => String(_id));
   const [workspaces, saved] = await Promise.all([
-    ClientProject.find({ client: { $in: ids } }).select('client name').lean(),
+    ClientProject.find({ client: { $in: ids } }).select('client name deletedAt').lean(),
     models.Project.find({ clientId: { $in: ids } }).lean(),
   ]);
-  const sources = workspaces.map(({ _id, client, name }) => ({ name, clientId: String(client), workflowProjectId: String(_id) }));
-  const scopedClients = new Set(sources.map((row) => row.clientId));
+  const removed = workspaces.filter((workspace) => workspace.deletedAt).map(({ _id }) => String(_id));
+  if (removed.length) await models.Project.updateMany({
+    workflowProjectId: { $in: removed }, archived: false,
+  }, { $set: { archived: true } });
+  const sources = workspaces.filter((workspace) => !workspace.deletedAt)
+    .map(({ _id, client, name }) => ({ name, clientId: String(client), workflowProjectId: String(_id) }));
+  const scopedClients = new Set(workspaces.map((workspace) => String(workspace.client)));
   sources.push(...clients.filter(({ _id }) => !scopedClients.has(String(_id)))
     .map(({ _id, name }) => ({ name, clientId: String(_id) })));
 

@@ -16,7 +16,7 @@ const validateProject = async (clientId, projectId) => {
     if (available) throw new HttpError(400, 'Choose a project for this client');
     return undefined;
   }
-  if (!mongoose.isValidObjectId(projectId) || !(await ClientProject.exists({ _id: projectId, client: clientId }))) {
+  if (!mongoose.isValidObjectId(projectId) || !(await ClientProject.exists({ _id: projectId, client: clientId, deletedAt: null }))) {
     throw new HttpError(400, 'Project does not belong to this client');
   }
   return projectId;
@@ -297,6 +297,7 @@ r.patch('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
   if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
+  if (req.body.active === true && tpl.project) await validateProject(tpl.client, tpl.project);
   if (typeof req.body.active === 'boolean') tpl.active = req.body.active;
   await tpl.save();
   if (tpl.active) await generateRecurringTasks(tpl._id);

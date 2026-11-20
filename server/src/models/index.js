@@ -75,6 +75,7 @@ const projectContactSchema = new Schema({
 export const ClientProject = model('ClientProject', new Schema({
   client: { ...ref('Client'), required: true },
   referenceClient: ref('Client'),
+  deletedAt: Date,
   name: { type: String, required: true, trim: true },
   description: String,
   businessType: String,
