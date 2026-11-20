@@ -215,6 +215,34 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     process.env.DAILY_WORK_SLACK_TOKEN = 'mock-token';
     await request(employee, `/day/${previousDate}`, 'PUT', { entries: [], version: localOnly.version });
     assert.equal(calls.length, 3);
+
+    const readyToResend = await put(employee, previousDate, [{ ...entry, workflowTaskId: undefined }],
+      (await request(employee, `/day/${previousDate}`)).submission.version);
+    const originalPost = await send(employee, previousDate, readyToResend.version);
+    assert.equal(originalPost.canSendToNewSlackChannel, false);
+
+    process.env.DAILY_WORK_SLACK_CHANNEL = 'new-channel';
+    try {
+      const { submission: existingDay } = await request(employee, `/day/${previousDate}`);
+      assert.equal(existingDay.canSendToNewSlackChannel, true);
+      assert.equal(existingDay.version, originalPost.version);
+      const reposted = await send(employee, previousDate, existingDay.version);
+      assert.equal(reposted.delivery, 'sent');
+      assert.equal(reposted.canSendToNewSlackChannel, false);
+      assert.equal(calls.at(-1).channel, 'new-channel');
+      assert.equal(calls.at(-1).thread_ts, undefined);
+      assert.match(calls.at(-1).text, /^<@U123TEST> Employee: employee/);
+      assert.equal(calls.length, 5);
+      await send(employee, previousDate, reposted.version);
+      assert.equal(calls.length, 5);
+
+      const edited = await put(employee, previousDate, [{ ...reposted.entries[0], note: 'Updated note' }], reposted.version);
+      await send(employee, previousDate, edited.version);
+      assert.equal(calls.at(-1).channel, 'new-channel');
+      assert.equal(calls.at(-1).thread_ts, '5.000001');
+    } finally {
+      process.env.DAILY_WORK_SLACK_CHANNEL = 'mock-channel';
+    }
     await request(owner, `/members/${employee._id}/leave/${date}`, 'PUT', {});
     assert.equal((await request(owner, `/missing/${date}`)).expected, 0);
     assert.equal((await dailyModels()).Submission.db.name, 'daily_test');

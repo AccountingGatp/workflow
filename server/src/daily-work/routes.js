@@ -83,10 +83,16 @@ async function projectInScope(models, scope, id, managing = false, session) {
   return project;
 }
 
+function canSendToNewSlackChannel(doc) {
+  return slackConfigured() && doc.entries.length > 0 && Boolean(doc.slackTs && doc.slackChannel) &&
+    doc.slackChannel !== process.env.DAILY_WORK_SLACK_CHANNEL && ['sent', 'skipped'].includes(doc.delivery);
+}
+
 function publicSubmission(doc, entries = doc.entries) {
   return {
     id: doc._id, date: doc.date, memberId: doc.memberId, memberName: doc.memberName, entries,
     version: doc.__v, delivery: doc.delivery, slackPosted: Boolean(doc.slackTs),
+    canSendToNewSlackChannel: canSendToNewSlackChannel(doc),
   };
 }
 
@@ -149,9 +155,16 @@ r.post('/day/:date/slack', route(async (req, res, models, scope) => {
   enforce(submission.entries.every((entry) => includes(scope.visible, entry.clientId)));
   if (submission.delivery === 'uncertain') throw new HttpError(409, 'The last Slack delivery could not be confirmed.');
   if (submission.__v !== req.body.version) throw new HttpError(409, 'This submission changed. Reload it before sending.');
-  if (submission.delivery === 'skipped') {
-    const queued = await models.Submission.updateOne({ _id: key, __v: submission.__v, delivery: 'skipped' },
-      { $set: { delivery: 'pending', deliveryAfter: new Date() }, $inc: { __v: 1 } });
+  const newChannel = canSendToNewSlackChannel(submission);
+  if (submission.delivery === 'skipped' || newChannel) {
+    const queued = await models.Submission.updateOne({ _id: key, __v: submission.__v, delivery: submission.delivery }, {
+      $set: {
+        delivery: 'pending', deliveryAfter: new Date(),
+        ...(newChannel && { slackChannel: process.env.DAILY_WORK_SLACK_CHANNEL }),
+      },
+      ...(newChannel && { $unset: { slackTs: '' } }),
+      $inc: { __v: 1 },
+    });
     if (!queued.modifiedCount) throw new HttpError(409, 'This submission changed. Reload it before sending.');
   }
   const result = await deliverSubmission(models, key);
