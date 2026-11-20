@@ -24,15 +24,15 @@ export function Clients() {
   const search = query.trim().toLowerCase();
   const rows = (source.data || []).filter((row) => {
     const context = clientView ? row.accountingId : row.clientName;
-    return `${row.name} ${context || ''}`.toLowerCase().includes(search);
+    return (!clientView || !row.standaloneProject) && `${row.name} ${context || ''}`.toLowerCase().includes(search);
   });
-  const manageableClients = (clients.data || []).filter((client) => client.canManage);
+  const manageableClients = (clients.data || []).filter((client) => client.canManage && !client.standaloneProject);
   const label = clientView ? 'clients' : 'projects';
 
   return <>
     <PageHead title={clientView ? 'Clients' : 'Projects'} subtitle={clientView ? 'Manage client details and access.' : undefined}>
-      {(can.super || manageableClients.length > 0) && <button type="button" className="btn btn-primary"
-        disabled={!manageableClients.length} onClick={() => setCreating('project')}><Plus size={18} />New project</button>}
+      {can.manage && <button type="button" className="btn btn-primary"
+        onClick={() => setCreating('project')}><Plus size={18} />New project</button>}
       {can.super && <button type="button" className="btn btn-outline" onClick={() => setCreating('client')}><Plus size={16} />New client</button>}
     </PageHead>
 
@@ -53,8 +53,7 @@ export function Clients() {
     <div className="card" style={{ overflow: 'hidden' }}>
       {source.error ? <ErrorBox error={source.error} /> : source.loading && !source.data ? <Skeleton />
         : rows.length === 0 ? <Empty icon={clientView ? Building2 : FolderKanban} title={search ? `No matching ${label}` : `No ${label} yet`}>
-          {!search && !clientView && manageableClients.length > 0 ? 'Create a project to start organizing work.'
-            : !search && !clientView && can.super ? 'Add a client to set permissions for your first project.' : undefined}
+          {!search && !clientView && can.manage ? 'Create a project to start organizing work.' : undefined}
         </Empty> : <div className="table-wrap"><table>
           <thead>{clientView ? <tr><th>Client</th><th>Managers</th><th>Status</th></tr>
             : <tr><th>Project</th><th>Client</th><th>Open work</th></tr>}</thead>
@@ -71,7 +70,8 @@ export function Clients() {
                 <td><Avatars people={row.admins} /></td>
                 <td><Badge cls={STATUS_CLS[row.status]} dot>{row.status}</Badge></td>
               </> : <>
-                <td className="small muted"><Link to={`/clients/${row.client}`}>{row.clientName}</Link></td>
+                <td className="small muted">{row.clientInfoId
+                  ? <Link to={`/clients/${row.clientInfoId}`}>{row.clientName}</Link> : 'No client'}</td>
                 <td><span className="row-wrap"><span className="mono">{row.openTasks}</span>
                   {row.overdueTasks > 0 && <Badge cls="b-danger">{row.overdueTasks} overdue</Badge>}</span></td>
               </>}

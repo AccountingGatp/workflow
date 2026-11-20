@@ -20,7 +20,8 @@ export function NewProjectForm({ clientId, clients = [], onClose, onSaved }) {
     setError(null);
     setSaving(true);
     try {
-      const project = await api(`/clients/${selectedClient}/projects`, {
+      const path = selectedClient ? `/clients/${selectedClient}/projects` : '/projects';
+      const project = await api(path, {
         method: 'POST', body: { name: name.trim(), description: description.trim() },
       });
       toast('Project created');
@@ -34,7 +35,7 @@ export function NewProjectForm({ clientId, clients = [], onClose, onSaved }) {
 
   return <Modal title="New project" onClose={close} footer={<>
     <button type="button" className="btn btn-ghost" onClick={close} disabled={saving}>Cancel</button>
-    <button type="submit" className="btn btn-primary" form="new-project" disabled={!name.trim() || !selectedClient || saving}>
+    <button type="submit" className="btn btn-primary" form="new-project" disabled={!name.trim() || saving}>
       {saving ? 'Creating…' : 'Create project'}
     </button>
   </>}>
@@ -42,13 +43,56 @@ export function NewProjectForm({ clientId, clients = [], onClose, onSaved }) {
       <ErrorBox error={error} />
       <label className="field">Project name<input className="input" autoFocus required maxLength={120}
         value={name} onChange={(event) => setName(event.target.value)} /></label>
-      {!clientId && <label className="field">Client<select className="select" required
+      {!clientId && <label className="field">Client (optional)<select className="select"
         value={selectedClient} onChange={(event) => setSelectedClient(event.target.value)}>
-        <option value="">Select a client</option>
+        <option value="">No client</option>
         {clients.map((client) => <option key={client._id} value={client._id}>{client.name}</option>)}
-      </select><span className="hint">The project uses this client’s access permissions.</span></label>}
+      </select><span className="hint">Leave blank to create a standalone project. You can add client information later.</span></label>}
       <label className="field">Summary (optional)<textarea className="textarea" rows={3} maxLength={3000}
         value={description} onChange={(event) => setDescription(event.target.value)} /></label>
+    </form>
+  </Modal>;
+}
+
+function ProjectClientForm({ project, onClose, onSaved }) {
+  const [clientId, setClientId] = useState(project.clientReference?._id || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const clients = useApi('/clients');
+  const toast = useToast();
+  const close = () => { if (!saving) onClose(); };
+
+  async function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/clients/${project.client}/projects/${project._id}/client-reference`, {
+        method: 'PATCH', body: { clientId: clientId || null },
+      });
+      toast('Client information saved');
+      onSaved();
+    } catch (error) {
+      setError(error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <Modal title={project.clientReference ? 'Change client' : 'Add client'} onClose={close} footer={<>
+    <button type="button" className="btn btn-ghost" onClick={close} disabled={saving}>Cancel</button>
+    <button type="submit" className="btn btn-primary" form="project-client" disabled={saving || !clients.data}>
+      {saving ? 'Saving…' : 'Save client'}
+    </button>
+  </>}>
+    <form id="project-client" className="stack" onSubmit={save}>
+      <ErrorBox error={error || clients.error} />
+      <label className="field">Client (optional)<select className="select" autoFocus disabled={saving || !clients.data}
+        value={clientId} onChange={(event) => setClientId(event.target.value)}>
+        <option value="">No client</option>
+        {(clients.data || []).filter((client) => !client.standaloneProject)
+          .map((client) => <option key={client._id} value={client._id}>{client.name}</option>)}
+      </select><span className="hint">This adds client information to the project. Manage project access separately.</span></label>
     </form>
   </Modal>;
 }
@@ -150,6 +194,7 @@ export function ClientProjects() {
   const detail = useApi(projectId ? `/clients/${id}/projects/${projectId}` : null, [id, projectId]);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editingClient, setEditingClient] = useState(false);
   const [creatingTask, setCreatingTask] = useState(null);
   const [workView, setWorkView] = useState('due');
   const [openTask, setOpenTask] = useState(null);
@@ -158,17 +203,19 @@ export function ClientProjects() {
   if (client.error) return <div className="card card-pad"><ErrorBox error={client.error}/></div>;
   const p = detail.data;
   const parent = client.data?.name || 'Client';
+  const standalone = !!client.data?.standaloneProject;
   return <>
     <div className="row-wrap small" style={{ marginBottom: 12 }}>
       <Link to="/clients">Projects</Link><span className="muted">/</span>
-      <Link to={`/clients/${id}`}>{parent}</Link>
-      <span className="muted">/</span>
-      {projectId ? <Link to={`/clients/${id}/projects`}>Projects</Link> : <strong>Projects</strong>}
-      {projectId && <><span className="muted">/</span><strong>{p?.name || 'Project'}</strong></>}
+      {!standalone && <>
+        <Link to={`/clients/${id}`}>{parent}</Link><span className="muted">/</span>
+        {projectId ? <Link to={`/clients/${id}/projects`}>Projects</Link> : <strong>Projects</strong>}
+      </>}
+      {projectId && <>{!standalone && <span className="muted">/</span>}<strong>{p?.name || 'Project'}</strong></>}
     </div>
     <PageHead title={projectId ? p?.name || 'Project' : parent + ' · Projects'}
       subtitle={projectId ? 'Project details, responsibilities, procedures and key links' : 'Separate project workspaces under this client.'}>
-      {!projectId && client.data?.canManage && <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16}/>New project</button>}
+      {!projectId && !standalone && client.data?.canManage && <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16}/>New project</button>}
       {projectId && client.data?.canManage && p && <>
         <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>
         <button className="btn btn-primary" onClick={() => setCreatingTask('once')}><Plus size={16}/>New task</button>
@@ -185,7 +232,18 @@ export function ClientProjects() {
       </Link>)}</div> : <div className="card card-pad"><Empty icon={FolderKanban} title="No projects yet"/></div>
     ) : detail.loading || !p ? <div className="card card-pad">{detail.error ? <ErrorBox error={detail.error}/> : <Skeleton/>}</div> : <>
       <div className="card card-pad" style={{ marginBottom: 16 }}>
-        <div className="row"><Building2 size={16}/><strong>{parent}</strong></div>
+        <div className="row-wrap">
+          <Building2 size={16} aria-hidden="true" />
+          {standalone && p.clientReference
+            ? <Link to={`/clients/${p.clientReference._id}`}>{p.clientReference.name}</Link>
+            : <strong>{standalone ? 'No client' : parent}</strong>}
+          {standalone && client.data?.canManage && <>
+            <button type="button" className="btn btn-outline btn-sm" onClick={() => setEditingClient(true)}>
+              {p.clientReference ? 'Change client' : 'Add client'}
+            </button>
+            <Link className="small" to={`/clients/${id}`}>Manage project access</Link>
+          </>}
+        </div>
         <p style={{ marginTop: 8 }}>{p.description || 'No project summary entered yet.'}</p>
         <div className="row-wrap small muted" style={{ marginTop: 10 }}>
           {p.businessType && <span>Business: {p.businessType}</span>}
@@ -234,6 +292,8 @@ export function ClientProjects() {
     {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId} recurring={creatingTask === 'recurring'} onClose={() => setCreatingTask(null)} onSaved={() => { tasks.reload(); setCreatingTask(null); }} />}
     {adding && <NewProjectForm clientId={id} onClose={() => setAdding(false)}
       onSaved={() => { setAdding(false); projects.reload(); }} />}
+    {editingClient && p && <ProjectClientForm project={p} onClose={() => setEditingClient(false)}
+      onSaved={() => { setEditingClient(false); detail.reload(); }} />}
     {editing && p && <ProjectEditor project={p} onClose={() => setEditing(false)} onSaved={() => { detail.reload(); projects.reload(); setEditing(false); }} />}
   </>;
 }

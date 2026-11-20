@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import app, { handleErrors } from '../src/app.js';
 import { User, Client, Team, TeamMembership, ClientAssignment, ClientProject, Task, TaskTemplate, ProjectWorkItem, AuditLog } from '../src/models/index.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
@@ -11,7 +11,7 @@ import { assignLoanTasks } from '../src/assign-loan-reviewers.js';
 import { generateRecurringTasks } from '../src/services/recurrence.js';
 
 test('API roles, scheduling, reviewed completion, deletion and loan migration', async () => {
-  const db = await MongoMemoryServer.create({ instance: { args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] } });
+  const db = await MongoMemoryReplSet.create({ replSet: { count: 1, args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] } });
   let server;
   try {
     await mongoose.connect(db.getUri());
@@ -136,6 +136,32 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     assert.equal(paid.completedBy, String(sathya._id));
     const mercedes=loans.find(t=>t.monthDay===12);await mercedes.deleteOne();
     await seedLoanReminders();assert.equal(await TaskTemplate.countDocuments({importKey:{$exists:true}}),3);
+
+    await request(sathya, '/projects', 'POST', { name: 'Unauthorized standalone project' }, 403);
+    const standalone = await request(tl, '/projects', 'POST', { name: 'Internal work', description: 'No client yet' }, 201);
+    const workspacePath = `/clients/${standalone.client}`;
+    const standalonePath = `${workspacePath}/projects/${standalone._id}`;
+    assert.equal((await request(tl, workspacePath)).canManage, true);
+    assert.equal((await request(tl, '/projects')).find((row) => row._id === standalone._id).clientInfoId, undefined);
+    await request(outsider, standalonePath, 'GET', undefined, 403);
+    const taskInStandalone = await request(tl, '/tasks', 'POST', {
+      title: 'Project task', client: standalone.client, project: standalone._id, dueDate: new Date().toISOString(),
+    }, 201);
+    const otherClient = await Client.create({ name: 'Restricted client' });
+    await request(tl, `${standalonePath}/client-reference`, 'PATCH', { clientId: String(otherClient._id) }, 404);
+    await request(tl, `${standalonePath}/client-reference`, 'PATCH', { clientId: String(client._id) });
+    assert.equal((await request(tl, standalonePath)).clientReference.name, client.name);
+    const linked = (await request(tl, '/projects')).find((row) => row._id === standalone._id);
+    assert.equal(linked.clientInfoId, String(client._id));
+    assert.equal(linked.client, standalone.client);
+    assert.equal(linked.openTasks, 1);
+    assert.equal((await request(tl, `/tasks/${taskInStandalone._id}`)).project._id, standalone._id);
+    await request(admin, `${workspacePath}/permissions`, 'POST', { userId: String(outsider._id) }, 201);
+    assert.equal((await request(outsider, standalonePath)).clientReference, null);
+    assert.equal((await request(outsider, '/projects')).find((row) => row._id === standalone._id).clientInfoId, undefined);
+    await request(outsider, `${standalonePath}/client-reference`, 'PATCH', { clientId: null }, 403);
+    await request(tl, `${standalonePath}/client-reference`, 'PATCH', { clientId: null });
+    assert.equal((await request(tl, standalonePath)).clientReference, null);
   } finally {
     if (server) await new Promise(resolve=>server.close(resolve));
     await mongoose.disconnect();await db.stop();
