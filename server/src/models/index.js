@@ -54,6 +54,7 @@ export const TeamMembership = model('TeamMembership', membershipSchema, 'team_me
 export const Client = model('Client', new Schema({
   name: { type: String, required: true, trim: true },
   accountingId: { type: String, trim: true },
+  standaloneProject: Boolean,
   contactName: String,
   contactEmail: String,
   contactPhone: String,
@@ -73,6 +74,7 @@ const projectContactSchema = new Schema({
 }, { _id: false });
 export const ClientProject = model('ClientProject', new Schema({
   client: { ...ref('Client'), required: true },
+  referenceClient: ref('Client'),
   name: { type: String, required: true, trim: true },
   description: String,
   businessType: String,
