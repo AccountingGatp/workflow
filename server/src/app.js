@@ -19,6 +19,7 @@ import { assignLoanTasks } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
 import { importWorkflowProjects } from './import-workflow-projects.js';
+import { importProjectTaskList } from './import-project-task-list.js';
 import { ensureActivityRetention } from './models/index.js';
 import { demoLoginEnabled, emailLoginConfigured } from './services/email-login.js';
 
@@ -71,6 +72,15 @@ app.get('/api/cron/daily-work', cronAuth, async (_req, res) => {
       if (counts) console.info('Workflow project import completed', counts);
     } catch (error) {
       console.error('Workflow project import failed', error.code || error.name);
+    }
+  }
+  const taskImport = process.env.WORKFLOW_PROJECT_TASK_IMPORT;
+  if (taskImport) {
+    try {
+      const counts = await importProjectTaskList(taskImport);
+      if (counts) console.info('Workflow project task import completed', counts);
+    } catch (error) {
+      console.error('Workflow project task import failed', error.code || error.name);
     }
   }
   await runDailyWorkJobs();

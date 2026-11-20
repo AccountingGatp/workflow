@@ -1,7 +1,7 @@
 import GoogleSignIn from '../GoogleSignIn.jsx';
 import { useEffect, useId, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
-import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
+import { Plus, UserPlus, X, Repeat, Pause, Play, ShieldCheck, Search, Check, History, Crown, Users, Building2, Lock, CalendarCheck, Trash2, Pencil } from 'lucide-react';
 import { api, useApi, useAuth, useToast, fmtDate, fmtTime, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, BrandName, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskForm } from '../tasks.jsx';
@@ -116,6 +116,9 @@ export function People() {
   const { user: me } = useAuth();
   const { data, error, loading, reload } = useApi('/users?dailyReport=1');
   const toast = useToast();
+  const [search, setSearch] = useState('');
+  const query = search.trim().toLowerCase();
+  const filtered = (data || []).filter(({ name, email }) => `${name} ${email}`.toLowerCase().includes(query));
   const [creating, setCreating] = useState(false);
   const [editingPerson, setEditingPerson] = useState(null);
   const [changingLeave, setChangingLeave] = useState(null);
@@ -139,15 +142,21 @@ export function People() {
   };
   return (
     <>
-      <PageHead title="People" subtitle="Everyone in the practice. One account per person, however many teams they work in.">
+      <PageHead title="People" subtitle={data ? `Total people: ${data.length}` : undefined}>
+        <div className="search" style={{ width: 240 }}>
+          <Search size={16} aria-hidden="true" />
+          <input className="input" type="search" aria-label="Search people" placeholder="Search name or email"
+            value={search} onChange={(event) => setSearch(event.target.value)} />
+        </div>
         <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Add person</button>
       </PageHead>
       <div className="card" style={{ overflow: 'hidden' }}>
         <ErrorBox error={error} />
-        {loading && !data ? <Skeleton /> : data && (
+        {loading && !data ? <Skeleton /> : data && (!filtered.length
+          ? <Empty icon={Users} title={query ? 'No people match your search' : 'No people yet'} /> : (
           <div className="table-wrap"><table>
             <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Availability</th><th>Account</th><th /></tr></thead>
-            <tbody>{data.map((u) => (
+            <tbody>{filtered.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
                   {u.dailyReport?.enabled && <div className="small muted">Shift starts {u.dailyReport.shiftStart} IST</div>}
@@ -168,7 +177,7 @@ export function People() {
               </tr>
             ))}</tbody>
           </table></div>
-        )}
+        ))}
       </div>
       {creating && <NewPerson onClose={() => setCreating(false)} onSaved={reload} />}
       {editingPerson && <EditPerson person={editingPerson} isSelf={editingPerson._id === me._id} onClose={() => setEditingPerson(null)} onSaved={() => { reload(); setEditingPerson(null); }} />}
