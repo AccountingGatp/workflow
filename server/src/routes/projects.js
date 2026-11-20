@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
-import { Client, ClientAssignment, ClientProject, Task, TaskTemplate } from '../models/index.js';
+import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, Task, TaskTemplate, TeamMembership, User } from '../models/index.js';
 import { ah, HttpError, requireRole } from '../middleware/auth.js';
-import { canSeeClient, canManageClient, visibleClientIds, audit } from '../services/access.js';
+import { canSeeClient, canSeeProject, canManageClient, canGrantDirectly, clientAssignees, grantedProjectIds, managedClientIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
 
 const r = Router();
 const valid = (id) => mongoose.isValidObjectId(id);
@@ -25,17 +25,84 @@ async function check(req, clientId, manage = false) {
   if (!valid(clientId) || !(await Client.exists({ _id: clientId }))) throw new HttpError(404, 'Client not found');
   if (!(await (manage ? canManageClient : canSeeClient)(req.user, clientId))) throw new HttpError(403, 'Client access denied');
 }
+async function findProject(clientId, id) {
+  if (!valid(clientId) || !valid(id)) throw new HttpError(404, 'Project not found');
+  const project = await ClientProject.findOne({ _id: id, client: clientId, deletedAt: null }).lean();
+  if (!project) throw new HttpError(404, 'Project not found');
+  return project;
+}
+
+r.get('/users/:id/projects', requireRole('super_admin'), ah(async (req, res) => {
+  const person = valid(req.params.id) && await User.findOne({ _id: req.params.id, active: true, deletedAt: null }).select('role');
+  if (!person) throw new HttpError(404, 'Active person not found');
+  const [clients, granted, visible] = await Promise.all([
+    Client.find({ status: { $ne: 'inactive' } }).select('name standaloneProject').lean(),
+    grantedProjectIds(person),
+    visibleClientIds(person),
+  ]);
+  const names = new Map(clients.filter((client) => !client.standaloneProject).map((client) => [String(client._id), client.name]));
+  const assigned = new Set(granted.map(String));
+  const projects = await ClientProject.find({ client: { $in: clients.map((client) => client._id) }, deletedAt: null })
+    .select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
+  res.json(projects.map(({ referenceClient, ...project }) => ({
+    ...project, clientName: names.get(String(referenceClient || project.client)),
+    assigned: visible === null || visible.includes(String(project.client)) || assigned.has(String(project._id)),
+  })));
+}));
+
+r.get('/clients/:clientId/projects/:id/people', ah(async (req, res) => {
+  const { clientId, id } = req.params;
+  await check(req, clientId, true);
+  const project = await findProject(clientId, id);
+  const [people, grants, direct, managers] = await Promise.all([
+    clientAssignees(req.user, clientId, project._id),
+    ProjectPermission.distinct('user', { project: project._id }),
+    ClientPermission.distinct('user', { client: clientId, ...activePermissionFilter() }),
+    ClientAssignment.find({ client: clientId, endedAt: null }).select('team admin').lean(),
+  ]);
+  const leads = await TeamMembership.distinct('user', { team: { $in: managers.map((row) => row.team).filter(Boolean) }, teamRole: 'lead', removedAt: null });
+  const assigned = new Set([...grants, ...direct].map(String));
+  const managed = new Set([...leads, ...managers.map((row) => row.admin).filter(Boolean)].map(String));
+  res.json(people.map((person) => ({ ...person,
+    assigned: person.role === 'super_admin' || assigned.has(String(person._id)) ||
+      (['admin', 'manager'].includes(person.role) && managed.has(String(person._id))),
+  })));
+}));
+
+r.put('/clients/:clientId/projects/:id/people/:userId', ah(async (req, res) => {
+  const { clientId, id, userId } = req.params;
+  await check(req, clientId, true);
+  const project = await findProject(clientId, id);
+  if (!(await Client.exists({ _id: clientId, status: { $ne: 'inactive' } }))) throw new HttpError(400, 'This project is inactive');
+  const person = valid(userId) && await User.findOne({ _id: userId, active: true, deletedAt: null }).select('name role');
+  if (!person) throw new HttpError(404, 'Active person not found');
+  if (await canSeeProject(person, project)) return res.json({ ok: true });
+  if (!(await canGrantDirectly(req.user, clientId, userId))) throw new HttpError(403, 'A Super Admin can assign this project to people outside your team');
+  const filter = { project: project._id, user: person._id };
+  try {
+    const result = await ProjectPermission.updateOne(filter, { $setOnInsert: { grantedBy: req.user._id } }, { upsert: true });
+    if (result.upsertedCount) await audit(req.user, 'access.grant', {
+      entity: 'ProjectPermission', entityId: result.upsertedId, client: clientId,
+      summary: `Gave ${person.name} access to ${project.name}`,
+    });
+  } catch (error) {
+    if (error.code !== 11000 || !(await ProjectPermission.exists(filter))) throw error;
+  }
+  res.json({ ok: true });
+}));
+
 r.get('/projects', ah(async (req, res) => {
-  const ids = await visibleClientIds(req.user);
+  const [ids, granted, managed] = await Promise.all([visibleClientIds(req.user), grantedProjectIds(req.user), managedClientIds(req.user)]);
   const clients = await Client.find(ids === null ? {} : { _id: { $in: ids } }).select('name standaloneProject').lean();
   const clientInfo = new Map(clients.map((client) => [String(client._id), client]));
   const clientIds = clients.map(({ _id }) => _id);
-  const projects = await ClientProject.find({ client: { $in: clientIds }, deletedAt: null })
-    .select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
+  const projects = await ClientProject.find(ids === null ? { deletedAt: null } : {
+    deletedAt: null, $or: [{ client: { $in: clientIds } }, { _id: { $in: granted } }],
+  }).select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
   if (!projects.length) return res.json([]);
   const now = new Date();
   const counts = await Task.aggregate([
-    { $match: { client: { $in: clientIds }, project: { $in: projects.map(({ _id }) => _id) }, deletedAt: null, status: { $ne: 'done' } } },
+    { $match: { $or: [{ client: { $in: clientIds } }, { project: { $in: granted }, assignees: req.user._id }], project: { $in: projects.map(({ _id }) => _id) }, deletedAt: null, status: { $ne: 'done' } } },
     { $group: { _id: '$project', open: { $sum: 1 }, overdue: {
       $sum: { $cond: [{ $and: [{ $ne: [{ $ifNull: ['$dueDate', null] }, null] }, { $lt: ['$dueDate', now] }] }, 1, 0] },
     } } },
@@ -44,10 +111,11 @@ r.get('/projects', ah(async (req, res) => {
   res.json(projects.map(({ referenceClient, ...project }) => {
     const tasks = byProject.get(String(project._id));
     const owner = clientInfo.get(String(project.client));
-    const reference = owner.standaloneProject ? clientInfo.get(String(referenceClient)) : owner;
+    const reference = owner?.standaloneProject ? clientInfo.get(String(referenceClient)) : owner;
     return {
       ...project,
       clientName: reference?.name,
+      canManage: managed === null || managed.includes(String(project.client)),
       clientInfoId: reference?._id,
       openTasks: tasks?.open || 0,
       overdueTasks: tasks?.overdue || 0,
@@ -77,15 +145,19 @@ r.get('/clients/:clientId/projects', ah(async (req, res) => {
   res.json(projects.map(p => safeProject(p, manager)));
 }));
 r.get('/clients/:clientId/projects/:id', ah(async (req, res) => {
-  await check(req, req.params.clientId);
-  if (!valid(req.params.id)) throw new HttpError(404, 'Project not found');
-  const project = await ClientProject.findOne({ _id: req.params.id, client: req.params.clientId, deletedAt: null }).lean();
-  if (!project) throw new HttpError(404, 'Project not found');
-  const [manager, clientReference] = await Promise.all([
-    canManageClient(req.user, req.params.clientId),
+  const { clientId, id } = req.params;
+  const project = await findProject(clientId, id);
+  if (!(await canSeeProject(req.user, project))) throw new HttpError(403, 'Project access denied');
+  const [manager, clientReference, clientVisible, client] = await Promise.all([
+    canManageClient(req.user, clientId),
     visibleReference(req.user, project.referenceClient),
+    canSeeClient(req.user, clientId),
+    Client.findById(clientId).select('name standaloneProject').lean(),
   ]);
-  res.json({ ...safeProject(project, manager), clientReference });
+  if (!client) throw new HttpError(404, 'Project not found');
+  res.json({ ...safeProject(project, manager), clientReference, workspace: {
+    name: client.name, standaloneProject: !!client.standaloneProject, canManage: manager, canSeeClient: clientVisible,
+  } });
 }));
 r.post('/clients/:clientId/projects', ah(async (req, res) => {
   await check(req, req.params.clientId, true);
@@ -145,6 +217,7 @@ r.delete('/clients/:clientId/projects/:id', requireRole('super_admin'), ah(async
       if (await ClientProject.exists({ _id: id, client: clientId, deletedAt: { $ne: null } }).session(session)) return null;
       throw new HttpError(404, 'Project not found');
     }
+    await ProjectPermission.deleteMany({ project: id }).session(session);
     await TaskTemplate.updateMany({ project: id, active: true }, { $set: { active: false } }, { session });
     return removed;
   });

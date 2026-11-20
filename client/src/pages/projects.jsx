@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
+import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { api, useApi, usePaginatedTasks, useAuth, useToast } from '../lib.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import { ProjectAssignment } from '../project-assignment.jsx';
 import ProjectWorkRegister from './project-work-register.jsx';
 import { Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
@@ -224,10 +225,11 @@ export function ClientProjects() {
   const { id, projectId } = useParams();
   const { can } = useAuth();
   const navigate = useNavigate();
-  const client = useApi(`/clients/${id}`, [id]);
-  const projects = useApi(`/clients/${id}/projects`, [id]);
+  const client = useApi(projectId ? null : `/clients/${id}`, [id]);
+  const projects = useApi(projectId ? null : `/clients/${id}/projects`, [id]);
   const detail = useApi(projectId ? `/clients/${id}/projects/${projectId}` : null, [id, projectId]);
   const [adding, setAdding] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingClient, setEditingClient] = useState(false);
@@ -238,21 +240,25 @@ export function ClientProjects() {
   const toggleTask = useTaskToggle(tasks.reload);
   if (client.error) return <div className="card card-pad"><ErrorBox error={client.error}/></div>;
   const p = detail.data;
-  const parent = client.data?.name || 'Client';
-  const standalone = !!client.data?.standaloneProject;
+  const workspace = projectId ? p?.workspace : client.data;
+  const parent = workspace?.name || 'Client';
+  const standalone = !!workspace?.standaloneProject;
+  const seeClient = !projectId || workspace?.canSeeClient;
+  const canManage = !!workspace?.canManage;
   return <>
     <div className="row-wrap small" style={{ marginBottom: 12 }}>
       <Link to="/clients">Projects</Link><span className="muted">/</span>
-      {!standalone && <>
+      {!standalone && seeClient && <>
         <Link to={`/clients/${id}`}>{parent}</Link><span className="muted">/</span>
         {projectId ? <Link to={`/clients/${id}/projects`}>Projects</Link> : <strong>Projects</strong>}
       </>}
-      {projectId && <>{!standalone && <span className="muted">/</span>}<strong>{p?.name || 'Project'}</strong></>}
+      {projectId && <>{!standalone && seeClient && <span className="muted">/</span>}<strong>{p?.name || 'Project'}</strong></>}
     </div>
     <PageHead title={projectId ? p?.name || 'Project' : parent + ' · Projects'}
       subtitle={projectId ? 'Project details, responsibilities, procedures and key links' : 'Separate project workspaces under this client.'}>
-      {!projectId && !standalone && client.data?.canManage && <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16}/>New project</button>}
-      {projectId && client.data?.canManage && p && <>
+      {!projectId && !standalone && canManage && <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16}/>New project</button>}
+      {projectId && canManage && p && <>
+        <button className="btn btn-outline" onClick={() => setAssigning(true)}><UserPlus size={16}/>Assign people</button>
         <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>
         <button className="btn btn-primary" onClick={() => setCreatingTask('once')}><Plus size={16}/>New task</button>
         <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>
@@ -276,11 +282,11 @@ export function ClientProjects() {
           {standalone && p.clientReference
             ? <Link to={`/clients/${p.clientReference._id}`}>{p.clientReference.name}</Link>
             : <strong>{standalone ? 'No client' : parent}</strong>}
-          {standalone && client.data?.canManage && <>
+          {standalone && canManage && <>
             <button type="button" className="btn btn-outline btn-sm" onClick={() => setEditingClient(true)}>
               {p.clientReference ? 'Change client' : 'Add client'}
             </button>
-            <Link className="small" to={`/clients/${id}`}>Manage project access</Link>
+            <Link className="small" to={`/clients/${id}`}>Access settings</Link>
           </>}
         </div>
         <p style={{ marginTop: 8 }}>{p.description || 'No project summary entered yet.'}</p>
@@ -289,7 +295,7 @@ export function ClientProjects() {
           {safeUrl(p.website) && <a href={p.website} target="_blank" rel="noopener noreferrer">Website <ExternalLink size={12} style={{ display: 'inline' }}/></a>}
         </div>
       </div>
-      <ProjectWorkRegister clientId={id} projectId={projectId} canManage={!!client.data?.canEditMasterList} canArchive={!!client.data?.canManage} />
+      <ProjectWorkRegister clientId={id} projectId={projectId} canManage={canManage} canArchive={canManage} />
       <section style={{ marginBottom: 20 }}>
         <div className="row-wrap" style={{ marginBottom: 12 }}>
           <h3>Scheduled tasks & completion</h3><div className="spacer" />
@@ -319,7 +325,7 @@ export function ClientProjects() {
         {p.notes && group('Other notes', <p style={{ whiteSpace: 'pre-wrap' }}>{p.notes}</p>)}
       </div>
     </>}
-    {!projectId && client.data?.canManage && tasks.total > 0 && <section style={{ marginTop: 22 }}>
+    {!projectId && canManage && tasks.total > 0 && <section style={{ marginTop: 22 }}>
       <div className="row-wrap" style={{ marginBottom: 10 }}>
         <h3>Tasks needing a project</h3>
         <p className="small muted">Open an older unassigned task and choose Bluntd or Bravura.</p>
@@ -329,6 +335,7 @@ export function ClientProjects() {
     </section>}
     {openTask && <TaskDrawer id={openTask} onClose={() => setOpenTask(null)} onChanged={tasks.reload} />}
     {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId} recurring={creatingTask === 'recurring'} onClose={() => setCreatingTask(null)} onSaved={() => { tasks.reload(); setCreatingTask(null); }} />}
+    {assigning && p && <ProjectAssignment project={p} onClose={() => setAssigning(false)} />}
     {adding && <NewProjectForm clientId={id} onClose={() => setAdding(false)}
       onSaved={() => { setAdding(false); projects.reload(); }} />}
     {editingClient && p && <ProjectClientForm project={p} onClose={() => setEditingClient(false)}

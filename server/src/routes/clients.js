@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Client, ClientAssignment, ClientPermission, AccessRequest, User, Task } from '../models/index.js';
+import { Client, ClientAssignment, ClientPermission, ClientProject, AccessRequest, User, Task } from '../models/index.js';
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { retagUntagged } from '../services/gmail.js';
 
@@ -91,7 +91,12 @@ r.get('/clients/:id/assignees', ah(async (req, res) => {
   if (!(await canManageClient(req.user, req.params.id))) throw new HttpError(403, 'Only managing admins can assign work');
   const client = await Client.findById(req.params.id).select('_id');
   if (!client) throw new HttpError(404, 'Client not found');
-  res.json(await clientAssignees(req.user, client._id));
+  const projectId = req.query.project;
+  if (projectId !== undefined && (typeof projectId !== 'string' || !/^[a-f0-9]{24}$/i.test(projectId) ||
+    !(await ClientProject.exists({ _id: projectId, client: client._id, deletedAt: null })))) {
+    throw new HttpError(404, 'Project not found');
+  }
+  res.json(await clientAssignees(req.user, client._id, projectId));
 }));
 
 r.patch('/clients/:id', ah(async (req, res) => {

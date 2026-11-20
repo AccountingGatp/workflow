@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { AuthSession, User, Team, TeamMembership, ClientPermission, ClientAssignment, slackUserIdPattern, userRoles } from '../models/index.js';
+import { AuthSession, User, Team, TeamMembership, ClientPermission, ProjectPermission, ClientAssignment, slackUserIdPattern, userRoles } from '../models/index.js';
 import { ah, requireRole, HttpError } from '../middleware/auth.js';
 import { audit, isSuper, ledTeamIds } from '../services/access.js';
 
@@ -156,6 +156,7 @@ r.delete('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   const now = new Date();
   await TeamMembership.updateMany({ user: user._id, removedAt: null }, { removedAt: now });
   await ClientPermission.updateMany({ user: user._id, revokedAt: null }, { revokedAt: now, revokedBy: req.user._id });
+  await ProjectPermission.deleteMany({ user: user._id });
   await ClientAssignment.updateMany({ admin: user._id, endedAt: null }, { endedAt: now });
   user.active = false; user.deletedAt = now;
   user.email = `removed-${user._id}-${user.email}`; // frees the email so it can be used again

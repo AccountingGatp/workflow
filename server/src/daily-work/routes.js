@@ -34,11 +34,17 @@ const hoursValue = (value, limit = 24) => {
 };
 const enforce = (access) => { if (!access) throw new HttpError(403, 'You do not have permission for this'); };
 const scoped = (ids) => ids === null ? {} : { clientId: { $in: ids } };
+const visibleProjects = (scope) => scope.projects.length ? {
+  $or: [scoped(scope.visible), { workflowProjectId: { $in: scope.projects } }],
+} : scoped(scope.visible);
+const visibleEntry = (scope, entry) => includes(scope.visible, entry.clientId) || scope.dailyProjectIds.has(entry.projectId);
 const reportMember = (member, date) => member.enrolled && (!member.reportFrom || member.reportFrom <= date);
 const route = (handler, superOnly = false) => ah(async (req, res) => {
   if (superOnly) enforce(isSuper(req.user));
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
   const [models, scope] = await Promise.all([dailyModels(), dailyScope(req.user)]);
+  scope.dailyProjectIds = new Set(scope.projects.length
+    ? (await models.Project.distinct('_id', { workflowProjectId: { $in: scope.projects } })).map(String) : []);
   await handler(req, res, models, scope);
 });
 
@@ -80,7 +86,8 @@ r.delete('/settings/reminders/:id', route(async (req, res, models) => {
 async function projectInScope(models, scope, id, managing = false, session) {
   const project = await models.Project.findById(idValue(id)).session(session || null);
   if (!project) throw new HttpError(404, 'Daily Work project not found');
-  enforce(includes(managing ? scope.managed : scope.visible, project.clientId));
+  enforce(managing ? includes(scope.managed, project.clientId) :
+    includes(scope.visible, project.clientId) || scope.projects.includes(project.workflowProjectId));
   return project;
 }
 
@@ -100,13 +107,14 @@ function publicSubmission(doc, entries = doc.entries) {
 r.get('/day/:date', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
   const memberId = scope.own;
-  const names = await syncClientProjects(models, scope.visible);
+  const names = await syncClientProjects(models, scope.visible, scope.projects);
   const [projects, submission, assignments, settings] = await Promise.all([
-    models.Project.find({ ...scoped(scope.visible), archived: false }).sort('name').lean(),
+    models.Project.find({ ...visibleProjects(scope), archived: false }).sort('name').lean(),
     models.Submission.findById(`${memberId}:${date}`).lean(),
     models.Assignment.find({ memberId }).lean(),
     models.Member.findById(memberId).lean(),
   ]);
+  for (const project of projects) scope.dailyProjectIds.add(String(project._id));
   const [catalog, reviewAllowed, live] = await Promise.all([
     models.CatalogTask.find({ projectId: { $in: projects.map((project) => project._id) }, archived: false }).sort('title').lean(),
     canLogReview(req.user),
@@ -117,9 +125,9 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
   res.json({
     date, projects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })), workItems,
     catalog: await catalogAvailability(models, memberId, date, budgetCatalog.filter((task) => reviewAllowed || !isReview(task.title))),
-    assignments, memberName: req.user.name,
+    assignments: assignments.filter((entry) => scope.dailyProjectIds.has(entry.projectId)), memberName: req.user.name,
     reviewProjects: reviewAllowed ? projects.filter((project) => includes(scope.managed, project.clientId)).map((project) => String(project._id)) : [],
-    submission: live[0] && publicSubmission(live[0], live[0].entries.filter((entry) => includes(scope.visible, entry.clientId))),
+    submission: live[0] && publicSubmission(live[0], live[0].entries.filter((entry) => visibleEntry(scope, entry))),
     slackEnabled: slackConfigured(),
     hubstaffAccess: isSuper(req.user) || !!settings?.hubstaffAccess,
   });
@@ -144,7 +152,7 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
     return saveDay(req.user, models, scope, { date, key, entries, version, reviewAllowed, session });
   });
   const [live] = await projectWorkflowStatuses([submission.toObject()]);
-  res.json(publicSubmission(live, live.entries.filter((entry) => includes(scope.visible, entry.clientId))));
+  res.json(publicSubmission(live, live.entries.filter((entry) => visibleEntry(scope, entry))));
 }));
 
 r.post('/day/:date/slack', route(async (req, res, models, scope) => {
@@ -153,7 +161,7 @@ r.post('/day/:date/slack', route(async (req, res, models, scope) => {
   if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
   const submission = await models.Submission.findById(key);
   if (!submission || (!submission.entries.length && !submission.slackTs)) fail('Save a task before sending to Slack');
-  enforce(submission.entries.every((entry) => includes(scope.visible, entry.clientId)));
+  enforce(submission.entries.every((entry) => visibleEntry(scope, entry)));
   if (submission.delivery === 'uncertain') throw new HttpError(409, 'The last Slack delivery could not be confirmed.');
   if (submission.__v !== req.body.version) throw new HttpError(409, 'This submission changed. Reload it before sending.');
   const newChannel = canSendToNewSlackChannel(submission);
@@ -170,7 +178,7 @@ r.post('/day/:date/slack', route(async (req, res, models, scope) => {
   }
   const result = await deliverSubmission(models, key);
   const [live] = await projectWorkflowStatuses([result.toObject()]);
-  res.json(publicSubmission(live, live.entries.filter((entry) => includes(scope.visible, entry.clientId))));
+  res.json(publicSubmission(live, live.entries.filter((entry) => visibleEntry(scope, entry))));
 }));
 
 async function saveDay(user, models, scope, { date, key, entries, version, reviewAllowed, session }) {
@@ -184,7 +192,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   if (!previous && !entries.length) fail('Add at least one task');
   const projectIds = [...new Set([...entries, ...(previous?.entries || [])].map((entry) => idValue(entry.projectId)))];
   const catalog = await models.CatalogTask.find({ projectId: { $in: projectIds } }).session(session).lean();
-  const linkedProjects = await models.Project.find({ _id: { $in: projectIds }, ...scoped(scope.visible) }).session(session).lean();
+  const linkedProjects = await models.Project.find({ _id: { $in: projectIds }, ...visibleProjects(scope) }).session(session).lean();
   const removedProjects = new Set((await ClientProject.distinct('_id', {
     _id: { $in: linkedProjects.map((project) => project.workflowProjectId).filter(Boolean) }, deletedAt: { $ne: null },
   })).map(String));
@@ -201,7 +209,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
     if (project?.archived || removedProjects.has(project?.workflowProjectId)) fail('Select an active project');
     const projectId = String(project?._id || existing.projectId);
     const clientId = project?.clientId || existing.clientId;
-    if (!includes(scope.visible, clientId)) {
+    if (!visibleEntry(scope, { clientId, projectId })) {
       if (existing && sameProject) { saved.push(existing.toObject()); continue; }
       enforce(false);
     }
@@ -254,7 +262,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
   }
   // A full-day save cannot remove entries for a client whose access was revoked.
   for (const existing of previous?.entries || []) {
-    if (!includes(scope.visible, existing.clientId) && !saved.some((row) => String(row._id) === String(existing._id))) {
+    if (!visibleEntry(scope, existing) && !saved.some((row) => String(row._id) === String(existing._id))) {
       saved.push(existing.toObject());
     }
   }
@@ -302,7 +310,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
     const doc = await models.Submission.findById(`${memberId}:${date}`).session(session);
     const entry = doc?.entries.id(entryId);
     if (!entry) throw new HttpError(404, 'Task entry not found');
-    enforce(includes(own ? scope.visible : scope.managed, entry.clientId));
+    enforce(own ? visibleEntry(scope, entry) : includes(scope.managed, entry.clientId));
     if (doc.__v !== version) throw new HttpError(409, 'This task changed. Refresh before saving again.');
     if (doc.delivery === 'sending') throw new HttpError(409, 'Slack delivery is in progress. Try again in a moment.');
 
@@ -351,8 +359,7 @@ async function reportRows(req, models, scope) {
   const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean(), req.user._id);
   return documents.flatMap((doc) => {
     const own = doc.memberId === scope.own;
-    const scopeIds = own ? scope.visible : scope.managed;
-    const entries = doc.entries.filter((entry) => includes(scopeIds, entry.clientId) &&
+    const entries = doc.entries.filter((entry) => (own ? visibleEntry(scope, entry) : includes(scope.managed, entry.clientId)) &&
       (!req.query.projectId || entry.projectId === req.query.projectId) &&
       (!req.query.status || entry.status === req.query.status));
     return entries.length ? [publicSubmission(doc, entries.map((entry) => statusEntry(entry, own, scope)))] : [];
@@ -362,7 +369,7 @@ async function reportRows(req, models, scope) {
 r.get('/reports', route(async (req, res, models, scope) => {
   const [submissions, members, projects] = await Promise.all([
     reportRows(req, models, scope), roster(scope, models, true),
-    models.Project.find(scoped(scope.visible)).sort('name').lean(),
+    models.Project.find(visibleProjects(scope)).sort('name').lean(),
   ]);
   res.json({ submissions, members: members.map(({ id, name }) => ({ id, name })), projects, slackEnabled: slackConfigured() });
 }));

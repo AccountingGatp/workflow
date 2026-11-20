@@ -29,11 +29,11 @@ const populateTask = (q) => q.populate('client', 'name').populate('team', 'name 
  * Assignees must be able to see the client. If the person assigning is allowed to grant
  * access to them (their TL, or a Super Admin), access is granted automatically.
  */
-async function assertAssignable(actor, clientId, userIds = []) {
+async function assertAssignable(actor, clientId, userIds = [], projectId) {
   for (const id of userIds) {
     const u = await User.findOne({ _id: id, deletedAt: null, active: true });
     if (!u) throw new HttpError(400, 'Unknown assignee');
-    await ensureAssigneeAccess(actor, clientId, u);
+    await ensureAssigneeAccess(actor, clientId, u, projectId);
   }
 }
 
@@ -199,7 +199,7 @@ r.post('/tasks', ah(async (req, res) => {
   if (!title || !client || !dueDate) throw new HttpError(400, 'Title, client and due date are required');
   if (!(await canManageClient(req.user, client))) throw new HttpError(403, 'You can only create work for clients you manage');
   const validProject = await validateProject(client, project);
-  await assertAssignable(req.user, client, assignees);
+  await assertAssignable(req.user, client, assignees, validProject);
   const task = await Task.create({
     title, client, project: validProject, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
     checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: req.user._id,
@@ -245,7 +245,7 @@ r.patch('/tasks/:id', ah(async (req, res) => {
       if (!Array.isArray(body.assignees) || body.assignees.some((id) => typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id))) {
         throw new HttpError(400, 'Select valid assignees');
       }
-      await assertAssignable(req.user, task.client, body.assignees);
+      await assertAssignable(req.user, task.client, body.assignees, task.project);
       task.assignees = body.assignees;
       if (!body.assignees.some((a) => String(a) === String(task.owner))) task.owner = body.assignees[0];
     }
@@ -285,7 +285,7 @@ r.post('/templates', ah(async (req, res) => {
   if (!b.title || !b.client || !b.frequency) throw new HttpError(400, 'Title, client and frequency are required');
   if (!(await canManageClient(req.user, b.client))) throw new HttpError(403, 'You can only schedule work for clients you manage');
   const validProject = await validateProject(b.client, b.project);
-  await assertAssignable(req.user, b.client, b.assignees || []);
+  await assertAssignable(req.user, b.client, b.assignees || [], validProject);
   const schedule = scheduleFields(b);
   const tpl = await TaskTemplate.create({ title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined, assignees: b.assignees || [], owner: (b.assignees || []).includes(b.owner) ? b.owner : b.assignees?.[0], priority: b.priority, sop: b.sop, ...schedule, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
   const created = await generateRecurringTasks(tpl._id);
@@ -315,7 +315,7 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
   const schedule = scheduleFields(b);
   const assignees = Array.isArray(b.assignees) ? b.assignees : [];
   const validProject = await validateProject(tpl.client, b.project ?? tpl.project);
-  await assertAssignable(req.user, tpl.client, assignees);
+  await assertAssignable(req.user, tpl.client, assignees, validProject);
   tpl.project = validProject;
   tpl.title = String(b.title).trim();
   Object.assign(tpl, schedule);

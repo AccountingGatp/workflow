@@ -1,3 +1,4 @@
+import { ProjectAssignment } from '../project-assignment.jsx';
 import GoogleSignIn from '../GoogleSignIn.jsx';
 import { useEffect, useId, useState } from 'react';
 import { useOutletContext } from 'react-router-dom';
@@ -120,6 +121,7 @@ export function People() {
   const query = search.trim().toLowerCase();
   const filtered = (data || []).filter(({ name, email }) => `${name} ${email}`.toLowerCase().includes(query));
   const [creating, setCreating] = useState(false);
+  const [assigningPerson, setAssigningPerson] = useState(null);
   const [editingPerson, setEditingPerson] = useState(null);
   const [changingLeave, setChangingLeave] = useState(null);
   async function changeLeave(person) {
@@ -143,19 +145,22 @@ export function People() {
   return (
     <>
       <PageHead title="People" subtitle={data ? `Total people: ${data.length}` : undefined}>
-        <div className="search" style={{ width: 240 }}>
-          <Search size={16} aria-hidden="true" />
-          <input className="input" type="search" aria-label="Search people" placeholder="Search name or email"
-            value={search} onChange={(event) => setSearch(event.target.value)} />
-        </div>
         <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Add person</button>
       </PageHead>
+      <div className="people-search" role="search" aria-label="People">
+        <div className="search">
+          <Search size={18} aria-hidden="true" />
+          <input className="input" type="search" aria-label="Search people" placeholder="Search people by name or email"
+            value={search} onChange={(event) => setSearch(event.target.value)} />
+        </div>
+        {data && query && <span className="small muted" role="status">{filtered.length} of {data.length} people</span>}
+      </div>
       <div className="card" style={{ overflow: 'hidden' }}>
         <ErrorBox error={error} />
         {loading && !data ? <Skeleton /> : data && (!filtered.length
           ? <Empty icon={Users} title={query ? 'No people match your search' : 'No people yet'} /> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Availability</th><th>Account</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Projects</th><th>Availability</th><th>Account</th><th /></tr></thead>
             <tbody>{filtered.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
@@ -164,6 +169,9 @@ export function People() {
                 <td><select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
                   {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
                 <td><div className="row-wrap">{u.teams.map((t) => <span key={t.team._id} className="badge"><span className="team-dot" style={{ background: t.team.color }} />{t.team.name}{t.teamRole === 'lead' && <><Crown size={12} />TL</>}</span>)}</div></td>
+                <td>{u.active && (u.role === 'super_admin' ? <span className="small muted">All projects</span> :
+                  <button type="button" className="btn btn-outline btn-sm" aria-label={`Assign projects to ${u.name}`}
+                    onClick={() => setAssigningPerson(u)}><Plus size={14} />Assign projects</button>)}</td>
                 <td>{u.active && <div className="row-wrap">
                   <Badge cls={u.onLeave ? 'b-warning' : 'b-success'}>{u.onLeave ? 'On leave' : 'Active'}</Badge>
                   <button type="button" className="btn btn-outline btn-sm" disabled={changingLeave !== null}
@@ -179,6 +187,7 @@ export function People() {
           </table></div>
         ))}
       </div>
+      {assigningPerson && <ProjectAssignment person={assigningPerson} onClose={() => setAssigningPerson(null)} />}
       {creating && <NewPerson onClose={() => setCreating(false)} onSaved={reload} />}
       {editingPerson && <EditPerson person={editingPerson} isSelf={editingPerson._id === me._id} onClose={() => setEditingPerson(null)} onSaved={() => { reload(); setEditingPerson(null); }} />}
     </>
