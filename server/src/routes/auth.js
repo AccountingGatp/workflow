@@ -7,6 +7,8 @@ import { requireAuth, ah, JWT_SECRET, startSession, endSession } from '../middle
 import { audit, userTeamIds } from '../services/access.js';
 import { demoLoginEnabled, emailLoginConfigured, limitEmailLogin, loginEmail, requestEmailCode, verifyEmailCode } from '../services/email-login.js';
 
+import { requestCompanyAccess } from '../services/sign-in-requests.js';
+
 const r = Router();
 r.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
@@ -37,18 +39,22 @@ r.post('/google', ah(async (req, res) => {
     const nonce = jwt.verify(cookie?.slice(nonceCookie.length + 1), JWT_SECRET);
     const ticket = await google.verifyIdToken({ idToken: req.body?.credential, audience });
     payload = ticket.getPayload();
-    if (nonce.purpose !== nonceCookie || nonce.nonce !== payload?.nonce || !payload.email_verified) throw new Error('Invalid Google session');
+    if (nonce.purpose !== nonceCookie || nonce.nonce !== payload?.nonce || payload?.email_verified !== true || typeof payload.sub !== 'string' || !payload.sub) throw new Error('Invalid Google session');
   } catch {
     return res.status(401).json({ error: 'Google sign-in expired or could not be verified. Reload and try again.' });
   }
   const email = payload.email?.toLowerCase();
-  const linked = await User.findOne({ googleSubject: payload.sub, active: true }).select('+googleSubject');
+  const linked = await User.findOne({ googleSubject: payload.sub, active: true, deletedAt: null }).select('+googleSubject');
   let user = linked?.email === email ? linked : null;
   if (!linked && email && (email.endsWith('@gmail.com') || payload.hd)) {
-    user = await User.findOneAndUpdate({ email, active: true, googleSubject: { $exists: false } },
+    user = await User.findOneAndUpdate({ email, active: true, deletedAt: null, googleSubject: { $exists: false } },
       { $set: { googleSubject: payload.sub } }, { returnDocument: 'after' });
   }
-  if (!user) return res.status(401).json({ error: 'Use the Google Workspace or Gmail address on your active Workflow account' });
+  if (!linked && !user && payload.hd === 'gatpsolutions.com') {
+    const requestStatus = await requestCompanyAccess(email, payload.name);
+    if (requestStatus) return res.status(202).json({ requestStatus });
+  }
+  if (!user) return res.status(401).json({ error: 'Use your GATP company email or the Google address on your active Workflow account' });
   res.clearCookie(nonceCookie, nonceOptions);
   await signIn(user, res);
 }));
@@ -63,8 +69,15 @@ r.post('/email/request', ah(async (req, res) => {
 r.post('/email/verify', ah(async (req, res) => {
   const email = loginEmail(req.body?.email);
   await limitEmailLogin(req, 'verify', 100);
-  const user = await verifyEmailCode(email, req.body?.challenge, req.body?.code);
-  if (!user) return res.status(401).json({ error: 'That code is invalid or expired. Check it or request a new code.' });
+  if (!await verifyEmailCode(email, req.body?.challenge, req.body?.code)) {
+    return res.status(401).json({ error: 'That code is invalid or expired. Check it or request a new code.' });
+  }
+  const user = await User.findOne({ email, active: true, deletedAt: null });
+  if (!user) {
+    const requestStatus = await requestCompanyAccess(email);
+    if (requestStatus) return res.status(202).json({ requestStatus });
+    return res.status(401).json({ error: 'This Workflow account is unavailable. Contact your Super Admin.' });
+  }
   await signIn(user, res);
 }));
 

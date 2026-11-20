@@ -33,7 +33,15 @@ export default function Layout({ mailEnabled }) {
   const loc = useLocation();
   useEffect(() => setOpen(false), [loc.pathname]);
   const requests = useApi(can.super ? '/access-requests' : null, [loc.pathname]);
-  const pending = (requests.data || []).filter?.((r) => r.status === 'pending').length || 0;
+  const signInRequests = useApi(can.super ? '/sign-in-requests' : null, [loc.pathname]);
+  const { reload: reloadSignInRequests } = signInRequests;
+  useEffect(() => {
+    if (!can.super) return;
+    window.addEventListener('focus', reloadSignInRequests);
+    return () => window.removeEventListener('focus', reloadSignInRequests);
+  }, [can.super, reloadSignInRequests]);
+  const pending = ((requests.data || []).filter?.((r) => r.status === 'pending').length || 0) +
+    (signInRequests.data?.pending.length || 0);
 
   const item = (to, Icon, label, extra) => (
     <NavLink to={to} end={to === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
@@ -71,7 +79,7 @@ export default function Layout({ mailEnabled }) {
           <div className="spacer" />
           <ThemeToggle />
         </header>
-        <main className="content"><Outlet /></main>
+        <main className="content"><Outlet context={signInRequests} /></main>
       </div>
     </div>
   );

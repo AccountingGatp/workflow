@@ -101,7 +101,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signIn = useCallback(async (path, body) => {
-    const { user } = await api(path, { method: 'POST', body });
+    const { user, requestStatus } = await api(path, { method: 'POST', body });
+    if (requestStatus) return requestStatus;
     setToken(null);
     setOffline(false);
     setUser(user);

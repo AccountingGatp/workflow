@@ -51,7 +51,7 @@ syncs Gmail every 5 minutes and creates recurring tasks every hour. Cron needs a
 
 1. Open Google Auth Platform in a Google Cloud project belonging to your Workspace organization. Configure Branding and select **Internal** under Audience if only people in that organization should sign in.
 2. Under **Clients**, create an OAuth client of type **Web application**. Add the exact Workflow site origin under **Authorized JavaScript origins**.
-3. Set the client ID as `GOOGLE_SIGN_IN_CLIENT_ID` in Vercel. Add each person’s Workspace email under **People** before they sign in. The Google sign-in button can run by itself.
+3. Set the client ID as `GOOGLE_SIGN_IN_CLIENT_ID` in Vercel. New users with a verified GATP company email can request access by signing in. A Super Admin reviews them under **Access → Company sign-in requests**. The Google sign-in button can run by itself.
 
 ## Demo data
 
