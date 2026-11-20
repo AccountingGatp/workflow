@@ -134,7 +134,7 @@ export function People() {
             <tbody>{data.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
-                  {u.dailyReport?.enabled && <div className="small muted">Shift {u.dailyReport.shiftStart} · Reminder {u.dailyReport.reminderAt} IST</div>}
+                  {u.dailyReport?.enabled && <div className="small muted">Shift starts {u.dailyReport.shiftStart} IST</div>}
                 </div></div></td>
                 <td><select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
                   {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
@@ -171,13 +171,14 @@ function DailyReportFields({ value, onChange }) {
     <label className="row"><input type="checkbox" checked={value.enabled} onChange={(event) => set('enabled', event.target.checked)} />Include in Daily Work Slack reports</label>
     <div className="grid grid-2">
       <label className="field"><span>Shift starts (IST)</span>
-        <input className="input" type="time" required value={value.shiftStart} onChange={(event) => set('shiftStart', event.target.value)} />
-      </label>
-      <label className="field"><span>Submission reminder (IST)</span>
-        <input className="input" type="time" required min={value.enabled ? value.shiftStart : undefined} value={value.reminderAt}
-          onChange={(event) => set('reminderAt', event.target.value)} />
+        <input className="input" type="time" required value={value.shiftStart} onChange={(event) => {
+          const shiftStart = event.target.value;
+          const reportTime = shiftStart < '12:00' ? '10:00' : '15:30';
+          onChange({ ...value, shiftStart, reminderAt: shiftStart > reportTime ? shiftStart : reportTime });
+        }} />
       </label>
     </div>
+    <span className="hint">Weekday reports check morning shifts at 10:00 AM and afternoon shifts at 3:30 PM IST.</span>
   </div>;
 }
 

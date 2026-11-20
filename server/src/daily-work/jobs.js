@@ -15,30 +15,43 @@ const withinWindow = (time, at) => {
 const dayOf = (date) => new Date(date).getUTCDay();
 const names = (members) => members.map((member) => member.name.replace(/[&<>]/g, '')).join(', ');
 
+async function reportingRoster(models) {
+  const members = await roster({ members: null }, models);
+  return members.filter(({ role }) => role === 'employee' || role === 'admin');
+}
+
+async function statusReminderPeople(models, date) {
+  const [members, leave] = await Promise.all([
+    reportingRoster(models),
+    models.Leave.find({ date }).select('_id').lean(),
+  ]);
+  const absent = new Set(leave.map(({ _id }) => _id));
+  return members.filter((member) => activeDate(member, date) && !absent.has(`${member.id}:${date}`));
+}
+
 async function attendance(models, from, to = from) {
   const range = { $gte: from, $lte: to };
   const [members, entries, leave] = await Promise.all([
-    roster({ members: null }, models),
+    reportingRoster(models),
     models.Submission.find({ date: range, 'entries.0': { $exists: true } }).lean(),
     models.Leave.find({ date: range }).lean(),
   ]);
   return { members, entries, leave: new Set(leave.map((row) => row._id)) };
 }
 
-async function missingText(models, date, reminderAt, allSubmitted = false) {
+async function missingText(models, date, shift, at) {
   const data = await attendance(models, date);
   const expected = data.members.filter((member) => activeDate(member, date) &&
-    (!reminderAt || member.reminderAt === reminderAt) && !data.leave.has(`${member.id}:${date}`));
-  if (!expected.length) return null;
+    member.shift === shift && member.shiftStart <= at && !data.leave.has(`${member.id}:${date}`));
+  if (!expected.length) return `:clipboard: *${shift === 'morning' ? 'Morning' : 'Afternoon'} submissions report*\n:date: Date: ${date}\nNo employees were expected to submit at this check.`;
   const submitted = new Set(data.entries.map((entry) => entry.memberId));
   const missing = expected.filter((member) => !submitted.has(member.id));
-  if (!missing.length) return allSubmitted
-    ? `:confetti_ball: All employees submitted their work details.\n:white_check_mark: Total submissions: ${expected.length}/${expected.length}`
-    : null;
+  if (!missing.length) return `:confetti_ball: All employees submitted their work details.\n:white_check_mark: Total submissions: ${expected.length}/${expected.length}`;
   const count = expected.length - missing.length;
   return [
     ':clipboard: *Missing Daily Work submissions*',
     `:date: Date: ${date}`,
+    ...(shift === 'afternoon' ? [':alarm_clock: 3:30 PM IST reminder'] : []),
     '',
     `:warning: ${missing.length} ${missing.length === 1 ? 'employee has' : 'employees have'} not submitted their work details:`,
     ...missing.map((member, index) => `${index + 1}. ${slackPerson(member.name, member.slackUserId)}`),
@@ -53,7 +66,7 @@ async function missingText(models, date, reminderAt, allSubmitted = false) {
 }
 
 async function weeklyText(models, date) {
-  const from = shiftDate(date, -6);
+  const from = shiftDate(date, -4);
   const data = await attendance(models, from, date);
   const rows = data.members.flatMap((member) => {
     const submitted = data.entries.filter((entry) => entry.memberId === member.id && activeDate(member, entry.date) &&
@@ -61,20 +74,20 @@ async function weeklyText(models, date) {
     if (!submitted.length) return [];
     return `• ${names([member])} (${member.shift}): ${submitted.map((entry) => entry.date).sort().join(', ')}`;
   });
-  return rows.length ? [`*Weekly Submission Report* · ${from} to ${date}`, ...rows].join('\n') : null;
+  return [`*Weekly Submission Report* · ${from} to ${date}`, ...(rows.length ? rows : ['No submissions recorded for this week.'])].join('\n');
 }
 
 async function incompleteText(models, date) {
   const data = await attendance(models, date);
   const members = data.members.filter((member) => activeDate(member, date) && !data.leave.has(`${member.id}:${date}`));
-  if (!members.length) return null;
   const people = new Map(members.map((member) => [member.id, member]));
   const rows = (await projectWorkflowStatuses(data.entries)).filter((doc) => people.has(doc.memberId))
     .map((doc) => ({ ...doc, entries: doc.entries.filter((row) => row.status === 'incomplete' && row.workflowStatus !== 'pending_review') }))
     .filter((doc) => doc.entries.length);
   const heading = `:warning: *Incomplete Tasks Report*\nDate: ${date}`;
   if (!rows.length) return `${heading}\n\n:white_check_mark: No incomplete tasks reported.`;
-  return [heading, ...rows.map((row) => dailySubmissionText(row, people.get(row.memberId).slackUserId, true))].join('\n\n');
+  return [heading, ...rows.map((row) => dailySubmissionText(row, people.get(row.memberId).slackUserId, true)),
+    'Please complete or update these tasks and contact your project manager if you need help.'].join('\n\n');
 }
 
 async function sendScheduled(models, key, now, compose) {
@@ -108,32 +121,26 @@ export async function runDailyWorkJobs(now = new Date()) {
   const models = await dailyModels();
   const { date, time, weekday } = clock(now);
   const configured = await statusReminders(models);
-  await Promise.all(configured.filter((reminder) => {
+  await Promise.all(configured.flatMap((reminder) => {
     const elapsed = (minutes(time) - minutes(reminder.time) + 1440) % 1440;
-    return reminder.enabled && elapsed < 25;
-  }).map((reminder) => {
+    if (!reminder.enabled || elapsed >= 25) return [];
     const reminderDate = time < reminder.time ? shiftDate(date, -1) : date;
-    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, () => statusReminderText(reminder));
+    const day = dayOf(reminderDate);
+    if (day < 1 || day > 5) return [];
+    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, async () => {
+      const people = reminder.notifyChannel ? await statusReminderPeople(models, reminderDate) : [];
+      return statusReminderText(reminder, people);
+    });
   }));
   await retrySlack(models);
-  const allReports = process.env.DAILY_WORK_SLACK_REPORTS === 'true';
-  if (!allReports && process.env.DAILY_WORK_SHIFT_REPORTS !== 'true') return;
+  if (process.env.DAILY_WORK_SLACK_REPORTS === 'false') return;
   const yesterday = shiftDate(date, -1);
-  const reportDays = (process.env.DAILY_WORK_REPORT_DAYS || '1,2,3,4,5').split(',').map(Number);
-  const weeklyDay = Number(process.env.DAILY_WORK_WEEKLY_DAY ?? 5);
-  const workday = reportDays.includes(weekday);
-  const active = workday ? await roster({ members: null }, models) : [];
-  const reminderTimes = new Set(active.filter((member) => activeDate(member, date)).map((member) => member.reminderAt));
-  const reminders = [...reminderTimes].map((at) => {
-    const key = at === '10:00' ? 'morning' : at === '15:30' ? 'afternoon' : `reminder:${at}`;
-    return [key, at, workday, () => missingText(models, date, at, at === '15:30')];
-  });
-  const priorWorkday = reportDays.includes(dayOf(yesterday));
+  const workday = weekday >= 1 && weekday <= 5;
   const jobs = [
-    ...reminders,
-    ['overnight', '01:00', allReports && priorWorkday, () => missingText(models, yesterday)],
-    ['weekly', process.env.DAILY_WORK_WEEKLY_TIME || '18:00', allReports && weekday === weeklyDay, () => weeklyText(models, date)],
-    ['incomplete', process.env.DAILY_WORK_INCOMPLETE_TIME || '00:00', priorWorkday, () => incompleteText(models, yesterday)],
+    ['morning', '10:00', workday, () => missingText(models, date, 'morning', '10:00')],
+    ['afternoon', '15:30', workday, () => missingText(models, date, 'afternoon', '15:30')],
+    ['weekly', '17:30', weekday === 5, () => weeklyText(models, date)],
+    ['incomplete', '00:00', true, () => incompleteText(models, yesterday)],
   ];
   await Promise.all(jobs.filter(([, at, enabled]) => enabled && withinWindow(time, at))
     .map(([key, , , compose]) => sendScheduled(models, `${key}:${date}`, now, compose)));

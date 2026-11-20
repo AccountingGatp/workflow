@@ -19,7 +19,7 @@ export const includes = (scope, id) => scope === null || scope.includes(String(i
 export async function roster(scope, models, inactive = false) {
   const filter = inactive ? {} : { active: true, deletedAt: null };
   if (scope.members !== null) filter._id = { $in: scope.members };
-  const users = await User.find(filter).select('name active +dailyReport +slackUserId').sort('name').lean();
+  const users = await User.find(filter).select('name role active +dailyReport +slackUserId').sort('name').lean();
   const settings = await models.Member.find({ _id: { $in: users.map((user) => String(user._id)) } }).lean();
   const byId = new Map(settings.map((member) => [member._id, member]));
   return users.map(({ _id, dailyReport, ...user }) => {

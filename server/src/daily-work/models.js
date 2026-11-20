@@ -89,6 +89,7 @@ const statusReminderSchema = new Schema({
   notifyChannel: { type: Boolean, required: true },
   message: { ...text, maxlength: 1000 },
   deletedAt: Date,
+  scheduleRevision: Number,
 }, timestamps);
 
 const budgetRevisionSchema = new Schema({ _id: String, revision: Number });
