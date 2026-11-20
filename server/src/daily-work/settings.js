@@ -9,26 +9,23 @@ export const defaultStatusReminder = {
   name: 'Task status reminder',
   time: '18:00',
   enabled: true,
-  notifyChannel: true,
   message: 'Team, please update the work status of your tasks on Workflow.',
 };
 
 export function parseStatusReminder(value) {
-  const { enabled, notifyChannel, time } = value;
+  const { enabled, time } = value;
   const name = typeof value.name === 'string' ? value.name.trim() : '';
   const message = typeof value.message === 'string' ? value.message.trim() : '';
   if (!name || name.length > 80) throw new HttpError(400, 'Enter a reminder name of up to 80 characters');
   if (!validTime(time)) throw new HttpError(400, 'Enter a valid reminder time');
   if (!message || message.length > 1000) throw new HttpError(400, 'Enter a Slack message of up to 1,000 characters');
-  if (typeof enabled !== 'boolean' || typeof notifyChannel !== 'boolean') {
-    throw new HttpError(400, 'Choose whether to enable the reminder and notify the channel');
-  }
-  return { name, time, enabled, notifyChannel, message };
+  if (typeof enabled !== 'boolean') throw new HttpError(400, 'Choose whether to enable the reminder');
+  return { name, time, enabled, message };
 }
 
 export async function statusReminders(models) {
   const records = await models.StatusReminder.find({ $or: [{ deletedAt: null }, { _id: defaultStatusReminder._id }] })
-    .select('name time enabled notifyChannel message deletedAt scheduleRevision').lean();
+    .select('name time enabled message deletedAt scheduleRevision').lean();
   const reminders = records.filter(({ deletedAt }) => !deletedAt).map(({ scheduleRevision, ...reminder }) =>
     reminder._id === defaultStatusReminder._id && scheduleRevision !== statusScheduleRevision
       ? { ...reminder, time: defaultStatusReminder.time } : reminder);

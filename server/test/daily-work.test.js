@@ -447,7 +447,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     delete process.env.DAILY_WORK_SLACK_REPORTS;
     await reportModels.StatusReminder.create({
       _id: 'status-reminder', name: 'Task status reminder', time: '19:00', enabled: true,
-      notifyChannel: true, message: 'Team, please update the work status of your tasks on Workflow.',
+      message: 'Team, please update the work status of your tasks on Workflow.',
     });
     const callsBeforeSchedule = calls.length;
     const at = (day, time) => new Date(`${day}T${time}:00+05:30`);
@@ -458,7 +458,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(reportDate, '10:00'));
     await runDailyWorkJobs(at(reportDate, '10:05'));
     assert.equal(calls.length, callsBeforeSchedule + 2);
-    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123OWNER|U123MANAGER/);
+    assert.doesNotMatch(calls.at(-1).text, /U123OWNER|U123MANAGER/);
     assert.match(calls.at(-1).text, /U123EARLY/);
     assert.match(calls.at(-1).text, /Submitted: 1\/2/);
     assert.doesNotMatch(calls.at(-1).text, /U123LATE|U123LEAVE/);
@@ -483,7 +483,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(nextDate, '00:15'));
     assert.equal(calls.length, callsBeforeSchedule + 6);
     assert.match(calls.at(-1).text, /Incomplete Tasks Report/);
-    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123MANAGER|Manager-only incomplete task|U123LEAVE|Incomplete task while on leave/);
+    assert.doesNotMatch(calls.at(-1).text, /U123MANAGER|Manager-only incomplete task|U123LEAVE|Incomplete task while on leave/);
     assert.match(calls.at(-1).text, /Date: 2026-11-06/);
     assert.match(calls.at(-1).text, /Employee: <@U123TEST>/);
     assert.match(calls.at(-1).text, /Reason: Waiting for bank statement/);
@@ -495,6 +495,19 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(shiftDate(nextDate, 1), '00:00'));
     assert.equal(calls.length, callsBeforeSchedule + 7);
     assert.match(calls.at(-1).text, /Date: 2026-11-07/);
+    for (const { text } of calls.slice(callsBeforeSchedule)) assert.match(text, /^<!channel> /);
+
+    const completedDate = shiftDate(reportDate, 7);
+    await reportModels.Submission.create([employee, earlyMissing].map((member) => ({
+      _id: `${member._id}:${completedDate}`, memberId: String(member._id), memberName: member.name, date: completedDate,
+      entries: [{ ...baseRow, title: 'Submitted on time', status: 'complete' }],
+    })));
+    await setCurrentLeave(reportModels.Leave, String(lateMissing._id), completedDate, true);
+    const allSubmitted = '<!channel> :confetti_ball: *Excellent!* All employees have submitted their work details.';
+    await runDailyWorkJobs(at(completedDate, '10:00'));
+    assert.equal(calls.at(-1).text, allSubmitted);
+    await runDailyWorkJobs(at(completedDate, '15:30'));
+    assert.equal(calls.at(-1).text, allSubmitted);
     process.env.DAILY_WORK_SLACK_REPORTS = 'false';
     const callsBeforeCustom = calls.length;
 
@@ -518,9 +531,9 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '00:00'));
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '00:05'));
     assert.equal(calls.length, callsBeforeCustom + 1);
-    assert.equal(calls.at(-1).text, 'Update A &amp; B &lt;notes&gt;.');
+    assert.equal(calls.at(-1).text, '<!channel> Update A &amp; B &lt;notes&gt;.');
     await request(owner, `${settingsPath}/${customReminder._id}`, 'PUT', {
-      ...customReminder, time: '18:40', notifyChannel: true, message: 'Update your close notes.',
+      ...customReminder, time: '18:40', message: 'Update your close notes.',
     });
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '18:40'));
     assert.equal(calls.length, callsBeforeCustom + 2);
