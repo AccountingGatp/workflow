@@ -18,6 +18,7 @@ import { generateRecurringTasks } from './services/recurrence.js';
 import { assignLoanTasks } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
+import { importWorkflowProjects } from './import-workflow-projects.js';
 import { ensureActivityRetention } from './models/index.js';
 import { demoLoginEnabled, emailLoginConfigured } from './services/email-login.js';
 
@@ -63,6 +64,15 @@ app.get('/api/cron/recurring', cronAuth, async (_req, res) => res.json({ created
 app.get('/api/cron/mail', cronAuth, async (_req, res) => { await syncAllAccounts(); res.json({ ok: true }); });
 
 app.get('/api/cron/daily-work', cronAuth, async (_req, res) => {
+  const projectImport = process.env.WORKFLOW_PROJECT_IMPORT;
+  if (projectImport) {
+    try {
+      const counts = await importWorkflowProjects(projectImport);
+      if (counts) console.info('Workflow project import completed', counts);
+    } catch (error) {
+      console.error('Workflow project import failed', error.code || error.name);
+    }
+  }
   await runDailyWorkJobs();
   console.info('Daily Work cron finished');
   res.json({ ok: true });
