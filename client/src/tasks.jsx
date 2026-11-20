@@ -49,7 +49,7 @@ export function useTaskToggle(reload) {
 /* ---------- Detail drawer ---------- */
 
 function EditAssignees({ task, busy, onSave }) {
-  const { data, error } = useApi(`/clients/${task.client._id}/assignees`);
+  const { data, error } = useApi(`/clients/${task.client._id}/assignees${task.project?._id ? '?project=' + task.project._id : ''}`);
   const [selected, setSelected] = useState(() => task.assignees.map((person) => person._id));
   const people = [...(data || [])];
   for (const person of task.assignees) {
@@ -221,7 +221,7 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e?.target ? e.target.value : e }));
 
   const manageable = (clients.data || []).filter((c) => c.canManage);
-  const assignees = useApi(f.client ? `/clients/${f.client}/assignees` : null);
+  const assignees = useApi(f.client ? `/clients/${f.client}/assignees${f.project ? '?project=' + f.project : ''}` : null);
   const people = (assignees.loading ? [] : assignees.data || []).filter((person) => person.role !== 'super_admin');
 
   const toggleAssignee = (id) => setF((s) => {

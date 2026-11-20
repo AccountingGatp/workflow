@@ -1,4 +1,4 @@
-import { Client, ClientAssignment, ClientPermission, TeamMembership, User, AuditLog } from '../models/index.js';
+import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, TeamMembership, User, AuditLog } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 
 /**
@@ -46,6 +46,18 @@ export async function visibleClientIds(user) {
   return [...ids];
 }
 
+/** Active grants that apply only to their own project. */
+export async function grantedProjectIds(user) {
+  if (isSuper(user)) return [];
+  const ids = await ProjectPermission.distinct('project', { user: user._id });
+  return ids.length ? ClientProject.distinct('_id', { _id: { $in: ids }, deletedAt: null }) : [];
+}
+
+export async function canSeeProject(user, project) {
+  return await canSeeClient(user, project.client) ||
+    !!await ProjectPermission.exists({ project: project._id, user: user._id });
+}
+
 export async function canSeeClient(user, clientId) {
   const ids = await visibleClientIds(user);
   return ids === null || ids.includes(String(clientId));
@@ -82,13 +94,14 @@ export async function canGrantDirectly(actor, clientId, targetUserId) {
 }
 
 /** People the actor can assign to this client, including team members who get access on assignment. */
-export async function clientAssignees(actor, clientId) {
+export async function clientAssignees(actor, clientId, projectId) {
   const filter = { active: true, deletedAt: null };
   if (!isSuper(actor)) {
-    const [assignments, grants, led] = await Promise.all([
+    const [assignments, grants, led, projectGrants] = await Promise.all([
       ClientAssignment.find({ client: clientId, endedAt: null }).select('team admin').lean(),
       ClientPermission.distinct('user', { client: clientId, ...activePermissionFilter() }),
       ledTeamIds(actor),
+      projectId ? ProjectPermission.distinct('user', { project: projectId }) : [],
     ]);
     const teams = assignments.map((row) => row.team).filter(Boolean);
     const memberships = await TeamMembership.distinct('user', { removedAt: null, $or: [
@@ -96,7 +109,7 @@ export async function clientAssignees(actor, clientId) {
       { team: { $in: teams }, teamRole: 'lead' },
     ] });
     filter.$or = [
-      { _id: { $in: [...grants, ...memberships] } },
+      { _id: { $in: [...grants, ...memberships, ...projectGrants] } },
       { _id: { $in: assignments.map((row) => row.admin).filter(Boolean) }, role: { $in: ['manager', 'admin'] } },
       { role: 'super_admin' },
     ];
@@ -104,8 +117,8 @@ export async function clientAssignees(actor, clientId) {
   return User.find(filter).select('name email role').sort('name').lean();
 }
 
-export async function ensureAssigneeAccess(actor, clientId, person) {
-  if (await canSeeClient(person, clientId)) return;
+export async function ensureAssigneeAccess(actor, clientId, person, projectId) {
+  if (projectId ? await canSeeProject(person, { _id: projectId, client: clientId }) : await canSeeClient(person, clientId)) return;
   if (!(await canGrantDirectly(actor, clientId, person._id))) {
     throw new HttpError(400, `${person.name} is outside your team and needs access to this client before you can assign work.`);
   }
@@ -118,15 +131,14 @@ export async function ensureAssigneeAccess(actor, clientId, person) {
 /** Mongo filter for tasks the user can see. */
 export async function taskScope(user) {
   if (isSuper(user)) return { deletedAt: null };
-  const managed = await managedClientIds(user);
-  const visible = await visibleClientIds(user);
+  const [managed, visible, projects] = await Promise.all([managedClientIds(user), visibleClientIds(user), grantedProjectIds(user)]);
   // Admins see every task on clients they manage; anyone sees their own assigned tasks
   // provided they still have access to that client.
   return {
     deletedAt: null,
     $or: [
       { client: { $in: managed } },
-      { assignees: user._id, client: { $in: visible } },
+      { assignees: user._id, $or: [{ client: { $in: visible } }, { project: { $in: projects } }] },
     ],
   };
 }

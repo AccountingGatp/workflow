@@ -6,12 +6,18 @@ import { clock, shiftDate } from './dates.js';
 import { applyTaskTransition } from '../services/task-review.js';
 import { catalogCollation, ensureReviewCatalog, isReview, periodBounds, periodLimits, taskName } from './budgets.js';
 
-export async function syncClientProjects(models, clientIds) {
-  const clients = await Client.find({ ...(clientIds === null ? {} : { _id: { $in: clientIds } }), status: { $ne: 'inactive' } })
-    .select('name').lean();
+export async function syncClientProjects(models, clientIds, projectIds = []) {
+  const clientFilter = clientIds === null ? {} : { _id: { $in: clientIds } };
+  if (projectIds.length) {
+    const extraClients = await ClientProject.distinct('client', { _id: { $in: projectIds } });
+    clientFilter._id = { $in: [...clientIds, ...extraClients] };
+  }
+  const clients = await Client.find({ ...clientFilter, status: { $ne: 'inactive' } }).select('name').lean();
   const ids = clients.map(({ _id }) => String(_id));
   const [workspaces, saved] = await Promise.all([
-    ClientProject.find({ client: { $in: ids } }).select('client name deletedAt').lean(),
+    ClientProject.find({ client: { $in: ids }, ...(clientIds === null ? {} : {
+      $or: [{ client: { $in: clientIds } }, { _id: { $in: projectIds } }],
+    }) }).select('client name deletedAt').lean(),
     models.Project.find({ clientId: { $in: ids } }).lean(),
   ]);
   const removed = workspaces.filter((workspace) => workspace.deletedAt).map(({ _id }) => String(_id));
@@ -21,7 +27,7 @@ export async function syncClientProjects(models, clientIds) {
   const sources = workspaces.filter((workspace) => !workspace.deletedAt)
     .map(({ _id, client, name }) => ({ name, clientId: String(client), workflowProjectId: String(_id) }));
   const scopedClients = new Set(workspaces.map((workspace) => String(workspace.client)));
-  sources.push(...clients.filter(({ _id }) => !scopedClients.has(String(_id)))
+  sources.push(...clients.filter(({ _id }) => !scopedClients.has(String(_id)) && (clientIds === null || clientIds.includes(String(_id))))
     .map(({ _id, name }) => ({ name, clientId: String(_id) })));
 
   const additions = sources.flatMap((source) => {

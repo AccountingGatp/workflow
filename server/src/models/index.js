@@ -122,6 +122,15 @@ const permissionSchema = new Schema({
 permissionSchema.index({ client: 1, user: 1 });
 export const ClientPermission = model('ClientPermission', permissionSchema, 'client_permissions');
 
+const projectPermissionSchema = new Schema({
+  project: { ...ref('ClientProject'), required: true },
+  user: { ...ref('User'), required: true },
+  grantedBy: ref('User'),
+}, opts);
+projectPermissionSchema.index({ project: 1, user: 1 }, { unique: true });
+projectPermissionSchema.index({ user: 1 });
+export const ProjectPermission = model('ProjectPermission', projectPermissionSchema, 'project_permissions');
+
 /** Admin asks to give client access to someone outside their own teams -> Super Admin approves. */
 export const AccessRequest = model('AccessRequest', new Schema({
   client: { ...ref('Client'), required: true },

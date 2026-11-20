@@ -21,7 +21,7 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const toast = useToast();
-  const people = useApi(`/clients/${clientId}/assignees`);
+  const people = useApi(`/clients/${clientId}/assignees?project=${projectId}`);
   const activePeople = people.data || [];
   const set = (key, value) => setF(v => ({ ...v, [key]: value }));
   const setLink = (index, key, value) => setF(v => ({

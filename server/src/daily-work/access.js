@@ -1,17 +1,17 @@
 import { User, TeamMembership, Client, ClientProject } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
-import { isSuper, ledTeamIds, managedClientIds, visibleClientIds } from '../services/access.js';
+import { isSuper, ledTeamIds, managedClientIds, visibleClientIds, grantedProjectIds } from '../services/access.js';
 
 import { dailyReportSettings } from './settings.js';
 
 export async function dailyScope(user) {
   const own = String(user._id);
-  if (isSuper(user)) return { own, managed: null, visible: null, members: null };
-  const [managed, visible, teams] = await Promise.all([managedClientIds(user), visibleClientIds(user), ledTeamIds(user)]);
+  if (isSuper(user)) return { own, managed: null, visible: null, members: null, projects: [] };
+  const [managed, visible, teams, projects] = await Promise.all([managedClientIds(user), visibleClientIds(user), ledTeamIds(user), grantedProjectIds(user)]);
   const teamMembers = teams.length
     ? await TeamMembership.distinct('user', { team: { $in: teams }, removedAt: null })
     : [];
-  return { own, managed, visible, members: [...new Set([own, ...teamMembers.map(String)])] };
+  return { own, managed, visible, projects: projects.map(String), members: [...new Set([own, ...teamMembers.map(String)])] };
 }
 
 export const includes = (scope, id) => scope === null || scope.includes(String(id));

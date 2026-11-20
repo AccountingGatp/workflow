@@ -4,6 +4,7 @@ import { Building2, FolderKanban, Plus, Search, ArrowLeft, ShieldCheck, Trash2, 
 import { api, useApi, usePaginatedTasks, useAuth, useToast, fmtDate, toInputDate, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import { ProjectAssignment } from '../project-assignment.jsx';
 import { NewProjectForm } from './projects.jsx';
 
 const STATUS_CLS = { active: 'b-success', onboarding: 'b-info', inactive: '' };
@@ -18,6 +19,7 @@ export function Clients() {
   const [projectQuery, setProjectQuery] = useState('');
   const [clientQuery, setClientQuery] = useState('');
   const [creating, setCreating] = useState(null);
+  const [assigning, setAssigning] = useState(null);
   const source = clientView ? clients : projects;
   const query = clientView ? clientQuery : projectQuery;
   const setQuery = clientView ? setClientQuery : setProjectQuery;
@@ -56,7 +58,7 @@ export function Clients() {
           {!search && !clientView && can.manage ? 'Create a project to start organizing work.' : undefined}
         </Empty> : <div className="table-wrap"><table>
           <thead>{clientView ? <tr><th>Client</th><th>Managers</th><th>Status</th></tr>
-            : <tr><th>Project</th><th>Client</th><th>Open work</th></tr>}</thead>
+            : <tr><th>Project</th><th>Client</th><th>Open work</th>{can.manage && <th>Access</th>}</tr>}</thead>
           <tbody>{rows.map((row) => {
             const destination = clientView ? `/clients/${row._id}` : `/clients/${row.client}/projects/${row._id}`;
             const Icon = clientView ? Building2 : FolderKanban;
@@ -74,11 +76,16 @@ export function Clients() {
                   ? <Link to={`/clients/${row.clientInfoId}`}>{row.clientName}</Link> : 'No client'}</td>
                 <td><span className="row-wrap"><span className="mono">{row.openTasks}</span>
                   {row.overdueTasks > 0 && <Badge cls="b-danger">{row.overdueTasks} overdue</Badge>}</span></td>
+                {can.manage && <td>{row.canManage && <button type="button" className="btn btn-outline btn-sm"
+                  aria-label={`Assign people to ${row.name}`} onClick={() => setAssigning(row)}>
+                  <UserPlus size={15} />Assign people
+                </button>}</td>}
               </>}
             </tr>;
           })}</tbody>
         </table></div>}
     </div>
+    {assigning && <ProjectAssignment project={assigning} onClose={() => setAssigning(null)} />}
     {creating === 'project' && <NewProjectForm clients={manageableClients} onClose={() => setCreating(null)}
       onSaved={(project) => nav(`/clients/${project.client}/projects/${project._id}`)} />}
     {creating === 'client' && <ClientForm onClose={() => setCreating(null)} onSaved={clients.reload} />}
