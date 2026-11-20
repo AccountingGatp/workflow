@@ -370,10 +370,15 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(settings.find((row) => row._id === String(lateMissing._id)).dailyReport.reminderAt, '15:45');
     assert.equal(settings.find((row) => row._id === String(employee._id)).dailyReport.reminderAt, '15:30');
     await configure(employee, 'U123TEST', '09:00', '10:00');
+    await configure(owner, 'U123OWNER', '09:00', '10:00');
+    await configure(manager, 'U123MANAGER', '09:00', '10:00');
+    await configure(lead, 'U123LEAD', '16:00', '16:00');
 
     const reportModels = await dailyModels();
     const baseRow = { projectId: daily._id, clientId: String(client._id), projectName: 'Accounting', status: 'incomplete', priority: 'high', hours: 1 };
     await reportModels.Submission.create([
+      { _id: `${manager._id}:${reportDate}`, memberId: String(manager._id), memberName: manager.name, date: reportDate,
+        entries: [{ ...baseRow, title: 'Manager-only incomplete task' }] },
       { _id: `${earlyMissing._id}:${nextDate}`, memberId: String(earlyMissing._id), memberName: earlyMissing.name, date: nextDate,
         entries: [{ ...baseRow, title: 'Next day task' }] },
       { _id: `${employee._id}:${reportDate}`, memberId: String(employee._id), memberName: employee.name, date: reportDate,
@@ -399,7 +404,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(reportDate, '10:00'));
     await runDailyWorkJobs(at(reportDate, '10:05'));
     assert.equal(calls.length, callsBeforeSchedule + 2);
-    assert.match(calls.at(-1).text, /^<!channel>/);
+    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123OWNER|U123MANAGER/);
     assert.match(calls.at(-1).text, /U123EARLY/);
     assert.match(calls.at(-1).text, /Submitted: 1\/2/);
     assert.doesNotMatch(calls.at(-1).text, /U123LATE|U123LEAVE/);
@@ -412,17 +417,22 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(reportDate, '17:30'));
     assert.equal(calls.length, callsBeforeSchedule + 4);
     assert.match(calls.at(-1).text, /Weekly Submission Report.*2026-11-02 to 2026-11-06/);
+    assert.doesNotMatch(calls.at(-1).text, /manager \(morning\)/);
     await Promise.all([runDailyWorkJobs(at(reportDate, '18:00')), runDailyWorkJobs(at(reportDate, '18:00'))]);
     await runDailyWorkJobs(at(reportDate, '18:05'));
     await runDailyWorkJobs(at(reportDate, '19:00'));
     assert.equal(calls.length, callsBeforeSchedule + 5);
     assert.equal(calls.at(-1).channel, 'mock-channel');
     assert.equal(calls.at(-1).thread_ts, undefined);
-    assert.equal(calls.at(-1).text, '<!channel> Team, please update the work status of your tasks on Workflow.');
+    assert.match(calls.at(-1).text, /<@U123LEAD>/);
+    assert.match(calls.at(-1).text, /<@U123TEST>/);
+    assert.match(calls.at(-1).text, /Team, please update the work status of your tasks on Workflow\.$/);
+    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123OWNER|U123MANAGER|U123LEAVE/);
     await runDailyWorkJobs(at(nextDate, '00:00'));
     await runDailyWorkJobs(at(nextDate, '00:15'));
     assert.equal(calls.length, callsBeforeSchedule + 6);
-    assert.match(calls.at(-1).text, /^<!channel>.*Incomplete Tasks Report/);
+    assert.match(calls.at(-1).text, /Incomplete Tasks Report/);
+    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123MANAGER|Manager-only incomplete task/);
     assert.match(calls.at(-1).text, /Date: 2026-11-06/);
     assert.match(calls.at(-1).text, /Employee: <@U123TEST>/);
     assert.match(calls.at(-1).text, /Reason: Waiting for bank statement/);
@@ -463,7 +473,9 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     });
     await runDailyWorkJobs(at(shiftDate(reminderDay, 1), '18:40'));
     assert.equal(calls.length, callsBeforeCustom + 2);
-    assert.equal(calls.at(-1).text, '<!channel> Update your close notes.');
+    assert.match(calls.at(-1).text, /<@U123TEST>/);
+    assert.match(calls.at(-1).text, /Update your close notes\.$/);
+    assert.doesNotMatch(calls.at(-1).text, /<!channel>|U123OWNER|U123MANAGER/);
     const deliveryKey = `${customReminder._id}:${clock().date}`;
     const attempt = new Date();
     await reportModels.Report.create({ _id: deliveryKey, state: 'sent', startedAt: attempt });

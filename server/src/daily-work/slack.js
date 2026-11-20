@@ -4,7 +4,11 @@ import { slackUserIdPattern, User } from '../models/index.js';
 export const slackConfigured = () => !!(process.env.DAILY_WORK_SLACK_TOKEN && process.env.DAILY_WORK_SLACK_CHANNEL);
 const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 
-export const statusReminderText = ({ notifyChannel, message }) => `${notifyChannel ? '<!channel> ' : ''}${escape(message)}`;
+export function statusReminderText({ message }, people) {
+  const ids = new Set(people.map(({ slackUserId }) => slackUserId).filter((id) => id && slackUserIdPattern.test(id)));
+  const mentions = [...ids].map((id) => `<@${id}>`).join(' ');
+  return [mentions, escape(message)].filter(Boolean).join('\n');
+}
 
 export function submissionText({ memberName, date, entries }, heading = 'Daily project update') {
   return [

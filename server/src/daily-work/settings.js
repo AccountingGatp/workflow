@@ -21,7 +21,7 @@ export function parseStatusReminder(value) {
   if (!validTime(time)) throw new HttpError(400, 'Enter a valid reminder time');
   if (!message || message.length > 1000) throw new HttpError(400, 'Enter a Slack message of up to 1,000 characters');
   if (typeof enabled !== 'boolean' || typeof notifyChannel !== 'boolean') {
-    throw new HttpError(400, 'Choose whether to enable the reminder and notify the channel');
+    throw new HttpError(400, 'Choose whether to enable the reminder and mention reporting staff');
   }
   return { name, time, enabled, notifyChannel, message };
 }

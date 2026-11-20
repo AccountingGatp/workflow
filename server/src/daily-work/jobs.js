@@ -15,10 +15,24 @@ const withinWindow = (time, at) => {
 const dayOf = (date) => new Date(date).getUTCDay();
 const names = (members) => members.map((member) => member.name.replace(/[&<>]/g, '')).join(', ');
 
+async function reportingRoster(models) {
+  const members = await roster({ members: null }, models);
+  return members.filter(({ role }) => role === 'employee' || role === 'admin');
+}
+
+async function statusReminderPeople(models, date) {
+  const [members, leave] = await Promise.all([
+    reportingRoster(models),
+    models.Leave.find({ date }).select('_id').lean(),
+  ]);
+  const absent = new Set(leave.map(({ _id }) => _id));
+  return members.filter((member) => activeDate(member, date) && !absent.has(`${member.id}:${date}`));
+}
+
 async function attendance(models, from, to = from) {
   const range = { $gte: from, $lte: to };
   const [members, entries, leave] = await Promise.all([
-    roster({ members: null }, models),
+    reportingRoster(models),
     models.Submission.find({ date: range, 'entries.0': { $exists: true } }).lean(),
     models.Leave.find({ date: range }).lean(),
   ]);
@@ -35,7 +49,7 @@ async function missingText(models, date, shift, at) {
   if (!missing.length) return `:confetti_ball: All employees submitted their work details.\n:white_check_mark: Total submissions: ${expected.length}/${expected.length}`;
   const count = expected.length - missing.length;
   return [
-    '<!channel> :clipboard: *Missing Daily Work submissions*',
+    ':clipboard: *Missing Daily Work submissions*',
     `:date: Date: ${date}`,
     ...(shift === 'afternoon' ? [':alarm_clock: 3:30 PM IST reminder'] : []),
     '',
@@ -72,7 +86,7 @@ async function incompleteText(models, date) {
     .filter((doc) => doc.entries.length);
   const heading = `:warning: *Incomplete Tasks Report*\nDate: ${date}`;
   if (!rows.length) return `${heading}\n\n:white_check_mark: No incomplete tasks reported.`;
-  return [`<!channel> ${heading}`, ...rows.map((row) => dailySubmissionText(row, people.get(row.memberId).slackUserId, true)),
+  return [heading, ...rows.map((row) => dailySubmissionText(row, people.get(row.memberId).slackUserId, true)),
     'Please complete or update these tasks and contact your project manager if you need help.'].join('\n\n');
 }
 
@@ -113,7 +127,10 @@ export async function runDailyWorkJobs(now = new Date()) {
     const reminderDate = time < reminder.time ? shiftDate(date, -1) : date;
     const day = dayOf(reminderDate);
     if (day < 1 || day > 5) return [];
-    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, () => statusReminderText(reminder));
+    return sendScheduled(models, `${reminder._id}:${reminderDate}`, now, async () => {
+      const people = reminder.notifyChannel ? await statusReminderPeople(models, reminderDate) : [];
+      return statusReminderText(reminder, people);
+    });
   }));
   await retrySlack(models);
   if (process.env.DAILY_WORK_SLACK_REPORTS === 'false') return;
