@@ -10,7 +10,7 @@ import { dailyScope, includes, roster, validateProjectLink, workflowProjects } f
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets, withClientBudgets } from './budgets.js';
 import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
 import { clock, dateValue, shiftDate } from './dates.js';
-import { leaveDates } from './leave.js';
+import { missingSubmissionText, missingSubmissions } from './jobs.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
 import { defaultStatusReminder, parseStatusReminder, statusRemindersWithDelivery, statusScheduleRevision } from './settings.js';
@@ -38,7 +38,6 @@ const visibleProjects = (scope) => scope.projects.length ? {
   $or: [scoped(scope.visible), { workflowProjectId: { $in: scope.projects } }],
 } : scoped(scope.visible);
 const visibleEntry = (scope, entry) => includes(scope.visible, entry.clientId) || scope.dailyProjectIds.has(entry.projectId);
-const reportMember = (member, date) => member.enrolled && (!member.reportFrom || member.reportFrom <= date);
 const route = (handler, superOnly = false) => ah(async (req, res) => {
   if (superOnly) enforce(isSuper(req.user));
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
@@ -387,15 +386,19 @@ r.post('/reports/slack', route(async (req, res, models, scope) => {
 
 r.get('/missing/:date', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
-  const [members, submitted, leave] = await Promise.all([
-    roster(scope, models),
-    models.Submission.distinct('memberId', { date, 'entries.0': { $exists: true } }),
-    leaveDates(models.Leave, date),
-  ]);
-  const expected = members.filter((member) => reportMember(member, date) && !leave.has(`${member.id}:${date}`));
-  res.json({ expected: expected.length, missing: expected.filter((member) => !submitted.includes(member.id))
-    .map(({ id, name, shift, shiftStart }) => ({ id, name, shift, shiftStart })) });
+  const { expected, missing } = await missingSubmissions(models, date, { scope });
+  res.json({ expected, missing: missing.map(({ id, name, shift, shiftStart }) => ({ id, name, shift, shiftStart })) });
 }));
+
+r.post('/missing/:date/slack', route(async (req, res, models) => {
+  const date = dateValue(req.params.date);
+  const now = clock();
+  if (date > now.date) fail('Choose today or an earlier date');
+  if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
+  const report = await missingSubmissions(models, date, { at: date === now.date ? now.time : undefined });
+  await postSlack(`<!channel> ${missingSubmissionText(report, date)}`, { userError: true });
+  res.json({ expected: report.expected, missing: report.missing.length });
+}, true));
 
 r.get('/manage', route(async (req, res, models, scope) => {
   const names = await syncClientProjects(models, scope.managed);
