@@ -607,10 +607,12 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
   </div>;
 }
 
-function Missing({ date }) {
-  const { data, error, loading } = useApi(`${root}/missing/${date}`);
+function Missing({ date, preview }) {
+  const report = useApi(preview ? null : `${root}/missing/${date}`);
+  const { data, error, loading } = preview || report;
   if (loading) return <Skeleton />;
   if (error) return <ErrorBox error={error} />;
+  if (!data) return <Empty title="Choose today or an earlier date" />;
   return <div className="card daily-card stack">
     <h2>Missing Report</h2>
     <p className="muted">{data.missing.length} of {data.expected} expected employees have yet to submit.</p>
@@ -636,24 +638,62 @@ export default function DailyWork() {
   const day = useApi(tab === 'entry' ? `${root}/day/${date}` : null);
   const choose = (id) => setParams(id === 'entry' ? {} : { tab: id });
   const reportDate = ['entry', 'missing'].includes(tab) ? date : today();
+  const preview = useApi(can.super && reportDate <= today() ? `${root}/missing/${reportDate}/slack` : null);
+  const { reload: refreshPreview } = preview;
+  useEffect(() => {
+    if (!can.super || reportDate > today()) return;
+    const refresh = () => { if (!document.hidden) refreshPreview(); };
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [can.super, reportDate, refreshPreview]);
+
   async function sendMissing() {
     setMissingError(null);
     setSendingMissing(true);
     try {
-      const result = await api(`${root}/missing/${reportDate}/slack`, { method: 'POST' });
+      const result = await api(`${root}/missing/${reportDate}/slack`, {
+        method: 'POST', body: { previewVersion: preview.data.previewVersion },
+      });
       toast(result.expected ? `Missing submissions report sent to Slack (${result.missing} missing).` : 'No submissions expected. Report sent to Slack.');
     } catch (error) { setMissingError(error); }
-    finally { setSendingMissing(false); }
+    finally { setSendingMissing(false); refreshPreview(); }
   }
   return <div className="daily-work-page" data-entry={tab === 'entry' ? '' : undefined}>
     <PageHead title="Daily Work">
       {['entry', 'missing'].includes(tab) && <DateField value={date} onChange={setDate} />}
-      {can.super && <button type="button" className="btn btn-outline" disabled={sendingMissing || reportDate > today()}
+      {can.super && <button type="button" className="btn btn-outline" disabled={sendingMissing || !preview.data?.slackEnabled}
         onClick={sendMissing}><Send size={16} aria-hidden="true" />
         {sendingMissing ? 'Sending…' : 'Send missing submissions to Slack'}
       </button>}
     </PageHead>
     <ErrorBox error={missingError} />
+    {can.super && tab !== 'missing' && reportDate <= today() && <section className="card daily-card stack missing-slack-preview"
+      aria-label="Missing submissions Slack preview">
+      <div className="row-wrap">
+        <h2>{reportDate === today() ? 'Missing submissions today' : 'Missing submissions'}</h2>
+        <span className="small muted">{dueLabel.format(new Date(`${reportDate}T00:00:00+05:30`))}</span>
+        <div className="spacer" />
+        <button type="button" className="btn btn-outline btn-sm" disabled={preview.loading}
+          onClick={refreshPreview}>Refresh list</button>
+      </div>
+      <ErrorBox error={preview.error} />
+      {preview.loading ? <p role="status" className="small muted">Checking submissions…</p> : preview.data && <>
+        <p className="small muted">
+          {!preview.data.expected ? 'No employees are expected to submit at this check.'
+            : preview.data.missing.length
+              ? `${preview.data.missing.length} of ${preview.data.expected} expected employees haven’t submitted. Slack will list the people below.`
+              : `All ${preview.data.expected} expected employees have submitted.`}
+        </p>
+        {!preview.data.slackEnabled && <p className="small muted">Slack is not configured.</p>}
+        {!!preview.data.missing.length && <ul className="missing-slack-names" aria-label="Employees who haven’t submitted">
+          {preview.data.missing.map(({ id, name }) => <li key={id}>{name}</li>)}
+        </ul>}
+      </>}
+    </section>}
     <nav className="daily-tabs" aria-label="Daily Work">
       {tabs.map(([id, label]) => <button key={id} type="button" className={`daily-tab ${id === tab ? 'active' : ''}`}
         aria-current={id === tab ? 'page' : undefined} onClick={() => choose(id)}>{label}</button>)}
@@ -662,6 +702,6 @@ export default function DailyWork() {
       <EntryEditor key={date} date={date} data={day.data} />)}
     {tab === 'status' && <DailyTaskStatus date={date} />}
     {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
-    {tab === 'missing' && <Missing date={date} />}
+    {tab === 'missing' && <Missing date={date} preview={can.super ? preview : undefined} />}
   </div>;
 }
