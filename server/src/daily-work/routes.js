@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
@@ -390,13 +391,31 @@ r.get('/missing/:date', route(async (req, res, models, scope) => {
   res.json({ expected, missing: missing.map(({ id, name, shift, shiftStart }) => ({ id, name, shift, shiftStart })) });
 }));
 
-r.post('/missing/:date/slack', route(async (req, res, models) => {
-  const date = dateValue(req.params.date);
+async function missingSlackReport(models, inputDate) {
+  const date = dateValue(inputDate);
   const now = clock();
   if (date > now.date) fail('Choose today or an earlier date');
-  if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
   const report = await missingSubmissions(models, date, { at: date === now.date ? now.time : undefined });
-  await postSlack(`<!channel> ${missingSubmissionText(report, date)}`, { userError: true });
+  const message = `<!channel> ${missingSubmissionText(report, date)}`;
+  const previewVersion = createHash('sha256').update(date + '\n' + message).digest('hex');
+  return { ...report, message, previewVersion };
+}
+
+r.get('/missing/:date/slack', route(async (req, res, models) => {
+  const { expected, missing, previewVersion } = await missingSlackReport(models, req.params.date);
+  res.json({
+    expected, missing: missing.map(({ id, name, shiftStart }) => ({ id, name, shiftStart })),
+    previewVersion, slackEnabled: slackConfigured(),
+  });
+}, true));
+
+r.post('/missing/:date/slack', route(async (req, res, models) => {
+  if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
+  const report = await missingSlackReport(models, req.params.date);
+  if (req.body.previewVersion !== undefined && req.body.previewVersion !== report.previewVersion) {
+    throw new HttpError(409, 'The missing list changed. Review the refreshed list before sending.');
+  }
+  await postSlack(report.message, { userError: true });
   res.json({ expected: report.expected, missing: report.missing.length });
 }, true));
 

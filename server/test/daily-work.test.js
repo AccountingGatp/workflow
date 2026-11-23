@@ -512,7 +512,16 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const missingSlackPath = `/missing/${reportDate}/slack`;
     await request(lead, missingSlackPath, 'POST', undefined, 403);
     await request(employee, missingSlackPath, 'POST', undefined, 403);
-    const manualReport = await request(owner, missingSlackPath, 'POST');
+    await request(employee, missingSlackPath, 'GET', undefined, 403);
+    const countBeforePreview = calls.length;
+    const preview = await request(owner, missingSlackPath);
+    assert.equal(calls.length, countBeforePreview);
+    assert.equal(preview.slackEnabled, true);
+    assert.equal(preview.missing.length, 3);
+    assert.ok(preview.missing.some(({ id }) => id === String(earlyMissing._id)));
+    await request(owner, missingSlackPath, 'POST', { previewVersion: 'old' }, 409);
+    assert.equal(calls.length, countBeforePreview);
+    const manualReport = await request(owner, missingSlackPath, 'POST', { previewVersion: preview.previewVersion });
     assert.equal(manualReport.missing, 3);
     assert.match(calls.at(-1).text, /^<!channel> :clipboard:/);
     assert.match(calls.at(-1).text, /<@U123EARLY>/);

@@ -356,6 +356,17 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-tab:hover, .daily-tab.active { color: var(--primary); }
 .daily-tab.active { border-bottom-color: var(--primary); }
 .daily-card { padding: clamp(14px, 3vw, 22px); }
+.missing-slack-preview { margin-bottom: 16px; }
+.missing-slack-preview h2 { font-size: 1rem; }
+.missing-slack-names {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 6px 24px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding-left: 22px;
+  margin: 0;
+}
 .daily-header { justify-content: space-between; }
 .daily-controls { align-items: flex-end; margin-block: 10px; }
 .daily-controls .field { flex: 1 1 155px; min-width: 0; }
