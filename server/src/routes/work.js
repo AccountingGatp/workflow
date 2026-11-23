@@ -257,7 +257,7 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   const status = body.status || (reopen ? 'in_progress' : undefined);
   if (status) applyTaskTransition(task, { status }, { manager, isAssignee, actorId: req.user._id });
   await task.save();
-  if (edited) audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, summary: `Edited “${task.title}”` });
+  if (edited && !task.dailyWorkCustom) audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, summary: `Edited “${task.title}”` });
   res.json(task);
 }));
 

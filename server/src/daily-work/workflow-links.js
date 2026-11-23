@@ -256,6 +256,7 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
     }
     task = new Task({
       client: row.clientId, project: projectId, masterItem: master?._id,
+      dailyWorkCustom: !master && !row.catalogId,
       title: master?.title || row.title, dueDate: new Date(`${date}T12:00:00+05:30`),
       assignees: [user._id], owner: user._id, createdBy: user._id,
       priority: row.priority, sop: row.description || undefined, status: 'in_progress',
@@ -281,7 +282,7 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
   }
   const created = task.isNew;
   if (created || task.isModified()) await task.save({ session });
-  if (created) await AuditLog.create([{
+  if (created && !task.dailyWorkCustom) await AuditLog.create([{
     actor: user._id, action: 'task.create', entity: 'Task', entityId: task._id, client: task.client,
     summary: `Created “${task.title}”`,
   }], { session });

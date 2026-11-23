@@ -1,4 +1,4 @@
-import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, TeamMembership, User, AuditLog } from '../models/index.js';
+import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, TeamMembership, User, Task, AuditLog } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 
 /**
@@ -58,6 +58,19 @@ export async function canSeeProject(user, project) {
     !!await ProjectPermission.exists({ project: project._id, user: user._id });
 }
 
+export async function canEditProjectWork(user, project) {
+  if (await canManageClient(user, project.client)) return true;
+  if (user.role !== 'admin') return false;
+  if (await ProjectPermission.exists({ project: project._id, user: user._id })) return true;
+  if (!await canSeeClient(user, project.client)) return false;
+  return !!await Task.exists({
+    project: project._id, client: project.client, assignees: user._id, deletedAt: null,
+    status: { $nin: ['cancelled', 'done'] },
+    // A lead's own Daily Work entries must not grant editing access.
+    dailyWorkCustom: { $exists: false }, createdBy: { $ne: user._id },
+  });
+}
+
 export async function canSeeClient(user, clientId) {
   const ids = await visibleClientIds(user);
   return ids === null || ids.includes(String(clientId));
@@ -94,13 +107,13 @@ export async function canGrantDirectly(actor, clientId, targetUserId) {
 }
 
 /** People the actor can assign to this client, including team members who get access on assignment. */
-export async function clientAssignees(actor, clientId, projectId) {
+export async function clientAssignees(actor, clientId, projectId, { existingAccessOnly = false } = {}) {
   const filter = { active: true, deletedAt: null };
   if (!isSuper(actor)) {
     const [assignments, grants, led, projectGrants] = await Promise.all([
       ClientAssignment.find({ client: clientId, endedAt: null }).select('team admin').lean(),
       ClientPermission.distinct('user', { client: clientId, ...activePermissionFilter() }),
-      ledTeamIds(actor),
+      existingAccessOnly ? [] : ledTeamIds(actor),
       projectId ? ProjectPermission.distinct('user', { project: projectId }) : [],
     ]);
     const teams = assignments.map((row) => row.team).filter(Boolean);

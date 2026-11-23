@@ -364,6 +364,10 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     assert.equal(custom.entries[0].title, 'Prepare one-off report');
     assert.equal(custom.entries[0].hours, 1);
     assert.ok(custom.entries[0].workflowTaskId);
+    const customTaskPath = `/tasks/${custom.entries[0].workflowTaskId}`;
+    assert.deepEqual((await request(employee, customTaskPath)).activity, []);
+    await request(owner, customTaskPath, 'PATCH', { priority: 'low' });
+    assert.deepEqual((await request(employee, customTaskPath)).activity, []);
     const increased = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.5 }], 200, custom.version);
     assert.equal(increased.entries[0].hours, 1.5);
     await log(employee, emptyDate, [{ ...increased.entries[0], hours: 24.01 }], 400, increased.version);
