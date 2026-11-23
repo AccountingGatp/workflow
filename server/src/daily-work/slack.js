@@ -1,5 +1,6 @@
+import { isObjectIdOrHexString } from 'mongoose';
 import { HttpError } from '../middleware/auth.js';
-import { slackUserIdPattern, User } from '../models/index.js';
+import { ProjectWorkItem, slackUserIdPattern, User } from '../models/index.js';
 
 export const slackConfigured = () => !!(process.env.DAILY_WORK_SLACK_TOKEN && process.env.DAILY_WORK_SLACK_CHANNEL);
 const escape = (value) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -29,7 +30,7 @@ function workDate(date) {
 export const slackPerson = (name, id) =>
   id && slackUserIdPattern.test(id) ? `<@${id}>` : escape(name);
 
-export function dailySubmissionText({ memberName, date, entries }, slackUserId, report = false) {
+export function dailySubmissionText({ memberName, date, entries }, slackUserId, report = false, automationByTask = new Map()) {
   const projects = new Map();
   for (const entry of entries) {
     const key = entry.projectId || entry.projectName;
@@ -49,7 +50,9 @@ export function dailySubmissionText({ memberName, date, entries }, slackUserId, 
   for (const [index, project] of [...projects.values()].entries()) {
     lines.push(`${index + 1}. ${escape(project.name)} - ${hoursLabel(showHours(project.hours))}`);
     for (const [taskIndex, entry] of project.entries.entries()) {
-      lines.push(`   Task ${taskIndex + 1}: ${escape(entry.title)} (${showHours(entry.hours)}h) - Priority: ${priority[entry.priority] || 'Medium'}`);
+      const automation = automationByTask.get(entry.workItemId);
+      const suffix = typeof automation === 'boolean' ? (automation ? ' - Y' : ' - N') : '';
+      lines.push(`   Task ${taskIndex + 1}: ${escape(entry.title)} (${showHours(entry.hours)}h) - Priority: ${priority[entry.priority] || 'Medium'}${suffix}`);
       if (entry.note && !report) lines.push(`      Note: ${escape(entry.note)}`);
       if (entry.incompleteReason && entry.status !== 'complete') lines.push(`      ${report ? 'Reason' : 'Incomplete'}: ${escape(entry.incompleteReason)}`);
     }
@@ -86,7 +89,11 @@ export async function deliverSubmission({ Submission }, id) {
   let result;
   try {
     const member = sending.slackTs ? null : await User.findById(sending.memberId).select('+slackUserId').lean();
-    result = await postSlack(dailySubmissionText(sending, member?.slackUserId), {
+    const ids = [...new Set(sending.entries.map(({ workItemId }) => workItemId).filter(isObjectIdOrHexString))];
+    const tasks = ids.length ? await ProjectWorkItem.find({ _id: { $in: ids }, automationStatus: { $type: 'bool' } })
+      .select('automationStatus').lean() : [];
+    const automation = new Map(tasks.map(({ _id, automationStatus }) => [String(_id), automationStatus]));
+    result = await postSlack(dailySubmissionText(sending, member?.slackUserId, false, automation), {
       channel: sending.slackChannel, thread: sending.slackTs,
     });
   } catch (error) {

@@ -32,6 +32,12 @@ function payload(body) {
   const result = { title: name };
   for (const k of allowed) if (body[k] !== undefined) result[k] = String(body[k] || '').trim().slice(0, 3000);
   if (body.automated !== undefined) result.automated = !!body.automated;
+  if (body.automationStatus !== undefined) {
+    if (body.automationStatus !== null && typeof body.automationStatus !== 'boolean') {
+      throw new HttpError(400, 'Choose Yes, No or Not set for automation');
+    }
+    result.automationStatus = body.automationStatus;
+  }
   if (body.links !== undefined) result.links = safeLinks(body.links);
   if (body.responsibleUser !== undefined) {
     if (body.responsibleUser && !mongoose.isValidObjectId(body.responsibleUser)) throw new HttpError(400, 'Invalid employee');
