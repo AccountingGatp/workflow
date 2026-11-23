@@ -170,6 +170,7 @@ const workItemSchema = new Schema({
   executionDay: String,
   software: String,
   automated: Boolean,
+  automationStatus: Boolean,
   reminder: String,
   notes: String,
   links: [workLinkSchema],

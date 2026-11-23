@@ -6,7 +6,7 @@ import { ErrorBox, Modal, Skeleton } from '../ui.jsx';
 const initial = {
   title: '', category: 'Bookkeeping & Operations', frequency: '', executionDay: '',
   responsibleUser: '',
-  responsible: '', weeklyHours: '', software: '', automated: false, reminder: '', notes: '',
+  responsible: '', weeklyHours: '', software: '', automationStatus: null, reminder: '', notes: '',
   links: [],
 };
 const basePath = (clientId, projectId) => `/clients/${clientId}/projects/${projectId}/work-items`;
@@ -16,7 +16,7 @@ const validUrl = value => {
 function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
   const editing = !!item;
   const [f, setF] = useState(() => item ? {
-    ...initial, ...item, links: (item.links || []).map(l => ({ label: l.label, url: l.url })),
+    ...initial, ...item, automationStatus: item.automationStatus, links: (item.links || []).map(l => ({ label: l.label, url: l.url })),
   } : { ...initial });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -40,7 +40,7 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
     setSaving(true);
     try {
       const path = basePath(clientId, projectId) + (editing ? '/' + item._id : '');
-      await api(path, { method: editing ? 'PATCH' : 'POST', body: { ...f, links } });
+      await api(path, { method: editing ? 'PATCH' : 'POST', body: { ...f, automationStatus: !editing || f.automationStatus !== item.automationStatus ? f.automationStatus : undefined, links } });
       toast(editing ? 'Task details and links updated' : 'Project task added');
       onSaved();
     } catch (err) { setError(err); } finally { setSaving(false); }
@@ -68,7 +68,14 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
         {field('weeklyHours','Estimated hours','e.g. 1 hour')}
         {field('software','Software','e.g. QBD, Gusto')}
       </div>
-      <label className="row-wrap"><input type="checkbox" checked={!!f.automated} onChange={e => set('automated', e.target.checked)} /> <strong className="small">Automation available</strong></label>
+      <label className="stack" style={{ gap: 4 }}>
+        <strong className="small">Automated</strong>
+        <select className="select" value={f.automationStatus == null ? '' : String(f.automationStatus)}
+          onChange={e => set('automationStatus', e.target.value === '' ? null : e.target.value === 'true')}>
+          <option value="">Not set</option><option value="true">Yes</option><option value="false">No</option>
+        </select>
+        <span className="small muted">Slack adds Y or N to the task when this is set.</span>
+      </label>
       {field('reminder','Reminder / source status (optional)')}
       <label className="stack"><strong className="small">Instructions / notes</strong>
         <textarea className="textarea" rows={3} value={f.notes || ''} onChange={e => set('notes', e.target.value)} placeholder="Any important information, handoff or scheduling clarification"/>
@@ -135,7 +142,8 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
             {item.category === 'Payroll' && <div className="small muted">Payroll</div>}
             <div className="small muted" style={{ marginTop: 5 }}>{item.responsible ? 'Owner: ' + item.responsible : 'Owner not specified'}{item.responsibleUser ? ' · Workflow account linked' : ' · No account assigned'}</div>
             <div className="small" style={{ marginTop: 5, color: item.scheduledTemplate ? 'var(--success)' : 'var(--text-3)' }}>{item.scheduledTemplate ? 'Scheduled · appears in My Work' : 'Master list only · no dated assignment'}</div>
-            {item.automated && <span className="small" style={{ color: 'var(--success)' }}>Automation noted</span>}
+            {typeof item.automationStatus === 'boolean' &&
+              <span className="small muted">Automated: {item.automationStatus ? 'Yes' : 'No'}</span>}
             {item.notes && <div className="small muted" style={{ marginTop: 4 }}>{item.notes}</div>}
           </td>
           <td><div className="row small"><Clock3 size={13}/><strong>{item.frequency || 'Not specified'}</strong></div></td>
