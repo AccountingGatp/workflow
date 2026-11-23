@@ -6,7 +6,6 @@ import { leaveDates } from './leave.js';
 import { dailySubmissionText, postSlack, retrySlack, slackConfigured, slackPerson, statusReminderText } from './slack.js';
 import { statusReminders, validTime } from './settings.js';
 
-const activeDate = (member, date) => member.enrolled && (!member.reportFrom || member.reportFrom <= date);
 const minutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
 const withinWindow = (time, at) => {
   if (!validTime(at)) return false;
@@ -32,11 +31,12 @@ async function attendance(models, from, to = from, scope = { members: null }) {
   return { members, entries, leave };
 }
 
-const eligible = (member, date, leave) => activeDate(member, date) && !leave.has(`${member.id}:${date}`);
+const eligible = (member, date, leave, enrolledOnly = true) =>
+  (!enrolledOnly || member.enrolled) && (!member.reportFrom || member.reportFrom <= date) && !leave.has(`${member.id}:${date}`);
 
-export async function missingSubmissions(models, date, { at = '23:59', shift, scope } = {}) {
+export async function missingSubmissions(models, date, { at = '23:59', shift, scope, enrolledOnly = true } = {}) {
   const { members, entries, leave } = await attendance(models, date, date, scope);
-  const expected = members.filter((member) => eligible(member, date, leave) &&
+  const expected = members.filter((member) => eligible(member, date, leave, enrolledOnly) &&
     (!shift || member.shift === shift) && member.shiftStart <= at);
   const submitted = new Set(entries.map((entry) => entry.memberId));
   return { expected: expected.length, missing: expected.filter((member) => !submitted.has(member.id)) };

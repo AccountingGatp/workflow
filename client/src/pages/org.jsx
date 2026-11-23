@@ -208,7 +208,7 @@ const defaultDailyReport = { enabled: false, shiftStart: '09:00', reminderAt: '1
 function DailyReportFields({ value, onChange }) {
   const set = (key, val) => onChange({ ...value, [key]: val });
   return <div className="stack" style={{ gap: 8 }}>
-    <label className="row"><input type="checkbox" checked={value.enabled} onChange={(event) => set('enabled', event.target.checked)} />Include in Daily Work Slack reports</label>
+    <label className="row"><input type="checkbox" checked={value.enabled} onChange={(event) => set('enabled', event.target.checked)} />Include in scheduled Daily Work Slack reports</label>
     <div className="grid grid-2">
       <label className="field"><span>Shift starts (IST)</span>
         <input className="input" type="time" required value={value.shiftStart} onChange={(event) => {

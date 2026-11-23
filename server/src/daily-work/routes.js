@@ -395,7 +395,7 @@ async function missingSlackReport(models, inputDate) {
   const date = dateValue(inputDate);
   const now = clock();
   if (date > now.date) fail('Choose today or an earlier date');
-  const report = await missingSubmissions(models, date, { at: date === now.date ? now.time : undefined });
+  const report = await missingSubmissions(models, date, { at: date === now.date ? now.time : undefined, enrolledOnly: false });
   const message = `<!channel> ${missingSubmissionText(report, date)}`;
   const previewVersion = createHash('sha256').update(date + '\n' + message).digest('hex');
   return { ...report, message, previewVersion };
