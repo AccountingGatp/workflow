@@ -625,17 +625,35 @@ function Missing({ date }) {
 export default function DailyWork() {
   const [params, setParams] = useSearchParams();
   const [date, setDate] = useState(today);
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const toast = useToast();
+  const [sendingMissing, setSendingMissing] = useState(false);
+  const [missingError, setMissingError] = useState(null);
   const tabs = [['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
   const requested = params.get('tab');
   const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
   const day = useApi(tab === 'entry' ? `${root}/day/${date}` : null);
   const choose = (id) => setParams(id === 'entry' ? {} : { tab: id });
+  const reportDate = ['entry', 'missing'].includes(tab) ? date : today();
+  async function sendMissing() {
+    setMissingError(null);
+    setSendingMissing(true);
+    try {
+      const result = await api(`${root}/missing/${reportDate}/slack`, { method: 'POST' });
+      toast(result.expected ? `Missing submissions report sent to Slack (${result.missing} missing).` : 'No submissions expected. Report sent to Slack.');
+    } catch (error) { setMissingError(error); }
+    finally { setSendingMissing(false); }
+  }
   return <div className="daily-work-page" data-entry={tab === 'entry' ? '' : undefined}>
     <PageHead title="Daily Work">
       {['entry', 'missing'].includes(tab) && <DateField value={date} onChange={setDate} />}
+      {can.super && <button type="button" className="btn btn-outline" disabled={sendingMissing || reportDate > today()}
+        onClick={sendMissing}><Send size={16} aria-hidden="true" />
+        {sendingMissing ? 'Sending…' : 'Send missing submissions to Slack'}
+      </button>}
     </PageHead>
+    <ErrorBox error={missingError} />
     <nav className="daily-tabs" aria-label="Daily Work">
       {tabs.map(([id, label]) => <button key={id} type="button" className={`daily-tab ${id === tab ? 'active' : ''}`}
         aria-current={id === tab ? 'page' : undefined} onClick={() => choose(id)}>{label}</button>)}

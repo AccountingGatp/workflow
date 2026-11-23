@@ -452,7 +452,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const callsBeforeSchedule = calls.length;
     const at = (day, time) => new Date(`${day}T${time}:00+05:30`);
     await runDailyWorkJobs(at(reportDate, '00:00'));
-    assert.match(calls.at(-1).text, /No incomplete tasks reported/);
+    assert.match(calls.at(-1).text, /No eligible Daily Work submissions to check/);
     await runDailyWorkJobs(at(reportDate, '09:55'));
     assert.equal(calls.length, callsBeforeSchedule + 1);
     await runDailyWorkJobs(at(reportDate, '10:00'));
@@ -471,7 +471,8 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(reportDate, '17:30'));
     assert.equal(calls.length, callsBeforeSchedule + 4);
     assert.match(calls.at(-1).text, /Weekly Submission Report.*2026-11-02 to 2026-11-06/);
-    assert.doesNotMatch(calls.at(-1).text, /manager \(morning\)|On leave/);
+    assert.doesNotMatch(calls.at(-1).text, /U123MANAGER|U123LEAVE/);
+    assert.match(calls.at(-1).text, /Saved after the deadline: 1\/1/);
     await Promise.all([runDailyWorkJobs(at(reportDate, '18:00')), runDailyWorkJobs(at(reportDate, '18:00'))]);
     await runDailyWorkJobs(at(reportDate, '18:05'));
     await runDailyWorkJobs(at(reportDate, '19:00'));
@@ -507,7 +508,16 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(completedDate, '10:00'));
     assert.equal(calls.at(-1).text, allSubmitted);
     await runDailyWorkJobs(at(completedDate, '15:30'));
-    assert.equal(calls.at(-1).text, allSubmitted);
+    assert.match(calls.at(-1).text, /No employees were expected to submit at this check/);
+    const missingSlackPath = `/missing/${reportDate}/slack`;
+    await request(lead, missingSlackPath, 'POST', undefined, 403);
+    await request(employee, missingSlackPath, 'POST', undefined, 403);
+    const manualReport = await request(owner, missingSlackPath, 'POST');
+    assert.equal(manualReport.missing, 3);
+    assert.match(calls.at(-1).text, /^<!channel> :clipboard:/);
+    assert.match(calls.at(-1).text, /<@U123EARLY>/);
+    assert.match(calls.at(-1).text, /<@U123LATE>/);
+    assert.doesNotMatch(calls.at(-1).text, /U123OWNER|U123MANAGER|U123LEAVE/);
     process.env.DAILY_WORK_SLACK_REPORTS = 'false';
     const callsBeforeCustom = calls.length;
 
