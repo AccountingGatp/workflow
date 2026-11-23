@@ -233,7 +233,7 @@ export function ClientProjects() {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingClient, setEditingClient] = useState(false);
-  const [creatingTask, setCreatingTask] = useState(null);
+  const [creatingRecurringTask, setCreatingRecurringTask] = useState(false);
   const [workView, setWorkView] = useState('due');
   const [openTask, setOpenTask] = useState(null);
   const tasks = usePaginatedTasks(`scope=all&client=${id}&project=${projectId || 'unassigned'}&view=${workView}`);
@@ -260,8 +260,7 @@ export function ClientProjects() {
       {projectId && canManage && p && <>
         <button className="btn btn-outline" onClick={() => setAssigning(true)}><UserPlus size={16}/>Assign people</button>
         <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>
-        <button className="btn btn-primary" onClick={() => setCreatingTask('once')}><Plus size={16}/>New task</button>
-        <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>
+        <button className="btn btn-outline" onClick={() => setCreatingRecurringTask(true)}><Plus size={16}/>Recurring task</button>
         {can.super && <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}>
           <Trash2 size={16} />Delete project
         </button>}
@@ -334,7 +333,8 @@ export function ClientProjects() {
       <TaskPagination {...tasks} />
     </section>}
     {openTask && <TaskDrawer id={openTask} onClose={() => setOpenTask(null)} onChanged={tasks.reload} />}
-    {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId} recurring={creatingTask === 'recurring'} onClose={() => setCreatingTask(null)} onSaved={() => { tasks.reload(); setCreatingTask(null); }} />}
+    {creatingRecurringTask && p && <TaskForm key={projectId} presetClient={id} presetProject={projectId} recurring
+      onClose={() => setCreatingRecurringTask(false)} onSaved={() => { tasks.reload(); setCreatingRecurringTask(false); }} />}
     {assigning && p && <ProjectAssignment project={p} onClose={() => setAssigning(false)} />}
     {adding && <NewProjectForm clientId={id} onClose={() => setAdding(false)}
       onSaved={() => { setAdding(false); projects.reload(); }} />}
