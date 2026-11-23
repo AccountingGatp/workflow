@@ -29,7 +29,7 @@ function App() {
 
 function WorkflowRoutes({ can }) {
   const [store] = useState(createWorkflowStore);
-  const mail = useApi('/settings/mail');
+  const mail = useApi(can.hr ? null : '/settings/mail');
   const mailEnabled = mail.data?.enabled === true;
   const { reload } = mail;
   useEffect(() => {
@@ -45,9 +45,9 @@ function WorkflowRoutes({ can }) {
     <Provider store={store}>
       <Routes>
         <Route element={<Layout mailEnabled={mailEnabled} />}>
-          <Route index element={can.super ? <Navigate to="/overview" replace /> : <MyWork />} />
+          <Route index element={can.super || can.hr ? <Navigate to="/overview" replace /> : <MyWork />} />
           <Route path="daily-work" element={<DailyWork />} />
-          <Route path="overview" element={guard(can.manage, <Overview />)} />
+          <Route path="overview" element={guard(can.manage || can.hr, <Overview />)} />
           <Route path="clients" element={<Clients />} />
           <Route path="clients/:id" element={<ClientDetail />} />
           <Route path="clients/:id/projects" element={<ClientProjects />} />
@@ -55,11 +55,11 @@ function WorkflowRoutes({ can }) {
           <Route path="mail" element={mail.loading ? <Skeleton /> : guard(mailEnabled, <Suspense fallback={<Skeleton />}><Mail /></Suspense>)} />
           <Route path="mail/inboxes" element={mail.loading ? <Skeleton /> : guard(can.manage && mailEnabled, <Suspense fallback={<Skeleton />}><MailInboxes /></Suspense>)} />
           <Route path="teams" element={<Navigate to="/clients" replace />} />
-          <Route path="recurring" element={guard(can.manage, <Recurring />)} />
-          <Route path="people" element={guard(can.super, <People />)} />
+          <Route path="recurring" element={guard(can.manage || can.hr, <Recurring />)} />
+          <Route path="people" element={guard(can.super || can.hr, <People />)} />
           <Route path="settings" element={guard(can.super, <Settings mail={mail} saveMail={saveMail} />)} />
           <Route path="access" element={guard(can.manage, <Access />)} />
-          <Route path="audit" element={guard(can.manage, <Audit />)} />
+          <Route path="audit" element={guard(can.manage || can.hr, <Audit />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

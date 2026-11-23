@@ -134,7 +134,7 @@ function GlobalOverview() {
 
   return (
     <>
-      <PageHead title="Overview" subtitle={can.super ? 'Workload across every client.' : 'Workload for the clients you manage.'} />
+      <PageHead title="Overview" subtitle="Workload across every client." />
       {!d ? <div className="card"><Skeleton /></div> : (
         <div className="split">
           <div className="stack" style={{ gap: 16 }}>
@@ -186,7 +186,7 @@ function GlobalOverview() {
                 {c.overdue > 0 && <Badge cls="b-danger">{c.overdue} overdue</Badge>}<span className="mono">{c.open} open</span>
               </div>)}
             </div></div>
-            <div className="card">
+            {can.super && <div className="card">
               <div className="card-head"><h3>Access expiring soon</h3><Clock size={16} className="muted" /></div>
               {d.expiringSoon.length === 0 ? <p className="small muted" style={{ padding: 20 }}>No temporary access ends in the next 7 days.</p> : (
                 <div className="list">{d.expiringSoon.map((p) => (
@@ -196,7 +196,7 @@ function GlobalOverview() {
                   </div>
                 ))}</div>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       )}
@@ -207,7 +207,7 @@ function GlobalOverview() {
 
 export function Overview() {
   const { can } = useAuth();
-  return can.super ? <GlobalOverview /> : <ManagerOverview />;
+  return can.super || can.hr ? <GlobalOverview /> : <ManagerOverview />;
 }
 
 export function useGoto() { const nav = useNavigate(); return (p) => () => nav(p); }

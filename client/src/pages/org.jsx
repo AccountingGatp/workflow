@@ -111,10 +111,10 @@ function TeamForm({ team, users, onClose, onSaved }) {
   );
 }
 
-/* ---------- People (Super Admin) ---------- */
+/* ---------- People ---------- */
 
 export function People() {
-  const { user: me } = useAuth();
+  const { user: me, can } = useAuth();
   const { data, error, loading, reload } = useApi('/users?dailyReport=1');
   const toast = useToast();
   const [search, setSearch] = useState('');
@@ -145,7 +145,7 @@ export function People() {
   return (
     <>
       <PageHead title="People" subtitle={data ? `Total people: ${data.length}` : undefined}>
-        <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Add person</button>
+        {can.super && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />Add person</button>}
       </PageHead>
       <div className="people-search" role="search" aria-label="People">
         <div className="search">
@@ -160,28 +160,28 @@ export function People() {
         {loading && !data ? <Skeleton /> : data && (!filtered.length
           ? <Empty icon={Users} title={query ? 'No people match your search' : 'No people yet'} /> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>Name</th><th>Role</th><th>Teams</th><th>Projects</th><th>Availability</th><th>Account</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>Role</th><th>Teams</th>{can.super && <th>Projects</th>}<th>Availability</th><th>Account</th>{can.super && <th />}</tr></thead>
             <tbody>{filtered.map((u) => (
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
                   {u.dailyReport?.enabled && <div className="small muted">Shift starts {u.dailyReport.shiftStart} IST</div>}
                 </div></div></td>
-                <td><select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
-                  {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
+                <td>{can.super ? <select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
+                  {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : ROLE_LABEL[u.role]}</td>
                 <td><div className="row-wrap">{u.teams.map((t) => <span key={t.team._id} className="badge"><span className="team-dot" style={{ background: t.team.color }} />{t.team.name}{t.teamRole === 'lead' && <><Crown size={12} />TL</>}</span>)}</div></td>
-                <td>{u.active && (u.role === 'super_admin' ? <span className="small muted">All projects</span> :
+                {can.super && <td>{u.active && (['super_admin', 'hr'].includes(u.role) ? <span className="small muted">All projects</span> :
                   <button type="button" className="btn btn-outline btn-sm" aria-label={`Assign projects to ${u.name}`}
-                    onClick={() => setAssigningPerson(u)}><Plus size={14} />Assign projects</button>)}</td>
+                    onClick={() => setAssigningPerson(u)}><Plus size={14} />Assign projects</button>)}</td>}
                 <td>{u.active && <div className="row-wrap">
                   <Badge cls={u.onLeave ? 'b-warning' : 'b-success'}>{u.onLeave ? 'On leave' : 'Active'}</Badge>
-                  <button type="button" className="btn btn-outline btn-sm" disabled={changingLeave !== null}
+                  {can.super && <button type="button" className="btn btn-outline btn-sm" disabled={changingLeave !== null}
                     aria-label={`${u.onLeave ? 'Mark active' : 'Mark on leave'} for ${u.name}`}
-                    onClick={() => changeLeave(u)}>{u.onLeave ? 'Mark active' : 'Mark on leave'}</button>
+                    onClick={() => changeLeave(u)}>{u.onLeave ? 'Mark active' : 'Mark on leave'}</button>}
                 </div>}</td>
-                <td>{u._id === me._id ? <Badge cls="b-primary">You</Badge> : (
+                <td>{!can.super ? <Badge>{u.active ? 'Enabled' : 'Deactivated'}</Badge> : u._id === me._id ? <Badge cls="b-primary">You</Badge> : (
                   <button className={`btn btn-sm ${u.active ? 'btn-outline' : 'btn-tonal'}`} onClick={() => update(u, { active: !u.active })}>{u.active ? 'Deactivate' : 'Reactivate'}</button>
                 )}</td>
-                <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}><button className="btn btn-outline btn-sm" onClick={() => setEditingPerson(u)}><Pencil size={14} />Edit</button>{u._id !== me._id && <button className="btn btn-danger btn-sm" onClick={() => remove(u)}><Trash2 size={14} />Remove</button>}</div></td>
+                {can.super && <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}><button className="btn btn-outline btn-sm" onClick={() => setEditingPerson(u)}><Pencil size={14} />Edit</button>{u._id !== me._id && <button className="btn btn-danger btn-sm" onClick={() => remove(u)}><Trash2 size={14} />Remove</button>}</div></td>}
               </tr>
             ))}</tbody>
           </table></div>

@@ -4,7 +4,7 @@ const { Schema, model, Types } = mongoose;
 const ref = (name) => ({ type: Types.ObjectId, ref: name });
 const opts = { timestamps: true };
 export const slackUserIdPattern = /^[UW][A-Z0-9]{1,63}$/;
-export const userRoles = ['super_admin', 'manager', 'admin', 'employee'];
+export const userRoles = ['super_admin', 'manager', 'admin', 'hr', 'employee'];
 
 /** One record per person. `role` is the global role; team-level roles live on TeamMembership. */
 export const User = model('User', new Schema({

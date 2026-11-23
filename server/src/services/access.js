@@ -8,12 +8,14 @@ import { HttpError } from '../middleware/auth.js';
  *
  *  super_admin  -> everything
  *  manager/admin -> clients they are assigned to manage (+ any explicit permission)
+ *  hr           -> workspace-wide work monitoring with read-only access
  *  employee     -> only clients with an active explicit ClientPermission
  *
  * Team membership alone never grants client access.
  */
 
 export const isSuper = (u) => u.role === 'super_admin';
+export const canMonitorAllWork = (user) => isSuper(user) || user.role === 'hr';
 export const canMaintainTasks = (user) => isSuper(user) || user.role === 'manager';
 
 export const activePermissionFilter = () => ({
@@ -41,7 +43,7 @@ export async function teamLeads(teamIds) {
 
 /** Client ids the user may see. null means "all". */
 export async function visibleClientIds(user) {
-  if (isSuper(user)) return null;
+  if (canMonitorAllWork(user)) return null;
   const perms = await ClientPermission.find({ user: user._id, ...activePermissionFilter() }).select('client');
   const ids = new Set(perms.map((p) => String(p.client)));
   for (const id of (await managedClientIds(user)) || []) ids.add(id);
@@ -50,7 +52,7 @@ export async function visibleClientIds(user) {
 
 /** Active grants that apply only to their own project. */
 export async function grantedProjectIds(user, { includeDefault = true } = {}) {
-  if (isSuper(user)) return [];
+  if (canMonitorAllWork(user)) return [];
   const ids = await ProjectPermission.distinct('project', { user: user._id });
   if (includeDefault && await allProjectsEnabled(user)) {
     const active = await activeProjectIds();
@@ -73,6 +75,7 @@ export async function canSeeProject(user, project, { includeDefault = true } = {
 }
 
 export async function taskPortfolio(user, grants) {
+  if (canMonitorAllWork(user)) return { clients: null, projects: [] };
   const clients = await managedClientIds(user);
   const projects = user.role === 'admin' ? await ClientProject.distinct('_id', { deletedAt: null }) :
     user.role === 'manager' ? [...new Set([
@@ -117,6 +120,7 @@ export async function canManageClient(user, clientId) {
 /** Teams where the user is lead (super admin: all). */
 export async function ledTeamIds(user) {
   if (isSuper(user)) return null;
+  if (user.role === 'hr') return [];
   const rows = await TeamMembership.find({ user: user._id, teamRole: 'lead', removedAt: null }).select('team');
   return rows.map((r) => String(r.team));
 }
@@ -177,7 +181,7 @@ export async function ensureAssigneeAccess(actor, clientId, person, projectId) {
 
 /** Mongo filter for tasks the user can see. */
 export async function taskScope(user) {
-  if (isSuper(user)) return { deletedAt: null };
+  if (canMonitorAllWork(user)) return { deletedAt: null };
   const [visible, grants] = await Promise.all([visibleClientIds(user), grantedProjectIds(user)]);
   const { clients, projects } = await taskPortfolio(user, grants);
   return {

@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
 import { ClientProject, Task, User } from '../models/index.js';
 import { applyTaskTransition } from '../services/task-review.js';
-import { canManageProject, isSuper } from '../services/access.js';
+import { canManageProject, canMonitorAllWork, isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, roster, validateProjectLink, workflowProjects } from './access.js';
@@ -110,6 +110,7 @@ function publicSubmission(doc, entries = doc.entries) {
 }
 
 r.get('/day/:date', route(async (req, res, models, scope) => {
+  enforce(!scope.readOnly);
   const date = dateValue(req.params.date);
   const memberId = scope.own;
   const names = await syncClientProjects(models, scope.visible, scope.projects);
@@ -297,7 +298,7 @@ function markUnsent(submission) {
 function statusEntry(entry, own, scope) {
   const { workflowAssignedToMember, workflowCompletedByActor, ...row } = entry;
   const manager = managedEntry(scope, row);
-  return { ...row, canUpdateStatus: workflowAssignedToMember !== false &&
+  return { ...row, canUpdateStatus: !scope.readOnly && workflowAssignedToMember !== false &&
     (manager || (own && (row.workflowStatus !== 'done' || workflowCompletedByActor))) };
 }
 
@@ -398,14 +399,14 @@ r.get('/reports', route(async (req, res, models, scope) => {
       }
     }
   }
-  res.json({ submissions, members: [...reportMembers.values()].sort((a, b) => a.name.localeCompare(b.name)), projects, slackEnabled: slackConfigured() });
+  res.json({ submissions, members: [...reportMembers.values()].sort((a, b) => a.name.localeCompare(b.name)), projects, slackEnabled: !scope.readOnly && slackConfigured() });
 }));
 
 r.get('/project-insights/:id', route(async (req, res, models) => {
   const id = idValue(req.params.id);
   const project = await ClientProject.findOne({ _id: id, deletedAt: null }).select('client').lean();
   if (!project) throw new HttpError(404, 'Project not found');
-  enforce(isSuper(req.user) || req.user.role === 'manager' && await canManageProject(req.user, project));
+  enforce(canMonitorAllWork(req.user) || req.user.role === 'manager' && await canManageProject(req.user, project));
   const date = dateValue(req.query.date || clock().date);
   await syncClientProjects(models, [], [id]);
   const dailyProject = await models.Project.findOne({ workflowProjectId: id }).select('_id').lean();
@@ -579,7 +580,7 @@ r.put('/members/:id/leave/:date', route(async (req, res, models, scope) => {
 
 r.get('/hubstaff/:date', route(async (req, res, models, scope) => {
   const settings = await models.Member.findById(scope.own).lean();
-  enforce(isSuper(req.user) || settings?.hubstaffAccess);
+  enforce(!scope.readOnly && (isSuper(req.user) || settings?.hubstaffAccess));
   if (!hubstaffConfigured()) throw new HttpError(503, 'Hubstaff is not configured');
   const date = dateValue(req.params.date);
   const members = (await roster(scope, models)).filter((member) => member.hubstaffUserId);
