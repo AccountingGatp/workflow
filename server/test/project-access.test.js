@@ -7,7 +7,7 @@ import app, { handleErrors } from '../src/app.js';
 import { clock } from '../src/daily-work/dates.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import {
-  Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission,
+  AuditLog, Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission,
   ProjectWorkItem, Task, Team, TeamMembership, User,
 } from '../src/models/index.js';
 
@@ -26,16 +26,16 @@ test('project assignment enables Daily Work without opening the rest of the clie
       name, role, email: `${name.toLowerCase().replaceAll(' ', '-')}@test.example`,
       active: true, passwordHash: 'fixture',
     });
-    const [admin, lead, employee, coworker] = await Promise.all([
+    const [admin, lead, employee, coworker, manager] = await Promise.all([
       createUser('Test Owner', 'super_admin'), createUser('Test Lead', 'admin'),
-      createUser('Test Employee', 'employee'), createUser('Test Coworker', 'employee'),
+      createUser('Test Employee', 'employee'), createUser('Test Coworker', 'employee'), createUser('Test Manager', 'manager'),
     ]);
     const client = await Client.create({ name: 'Fixture Client' });
     const [project, sibling] = await ClientProject.create([
       { name: 'First Project', client: client._id }, { name: 'Second Project', client: client._id },
     ]);
     const [item] = await ProjectWorkItem.create([
-      { title: 'First Work Item', project: project._id, client: client._id },
+      { title: 'First Work Item', project: project._id, client: client._id, weeklyHours: '3 hours daily' },
       { title: 'Second Work Item', project: sibling._id, client: client._id },
     ]);
     const team = await Team.create({ name: 'Fixture Team' });
@@ -116,7 +116,7 @@ test('project assignment enables Daily Work without opening the rest of the clie
     const register = projectPath + '/work-items';
     await Task.create({ title: 'Own entry', client: client._id, project: project._id, assignees: [assignedLead._id],
       createdBy: assignedLead._id, dueDate: new Date() });
-    assert.equal((await request(assignedLead, register + '/access')).canEdit, false);
+    assert.equal((await request(assignedLead, register + '/access')).canEdit, true);
     await Task.create({ title: 'Assigned project work', client: client._id, project: project._id,
       assignees: [assignedLead._id], dueDate: new Date() });
     assert.deepEqual(await request(assignedLead, register + '/access'), { canEdit: true, canArchive: false, role: 'admin' });
@@ -128,10 +128,73 @@ test('project assignment enables Daily Work without opening the rest of the clie
     }, 201);
     const updated = await request(assignedLead, register + '/' + added._id, 'PATCH', { title: 'Edit register task' });
     assert.equal(updated.title, 'Edit register task');
-    await request(assignedLead, siblingPath + '/work-items', 'POST', { title: 'Blocked' }, 403);
+    const newClient = await Client.create({ name: 'Unassigned Client' });
+    const elsewhere = await ClientProject.create({ name: 'Unassigned Project', client: newClient._id });
+    const elsewherePath = `/clients/${newClient._id}/projects/${elsewhere._id}`;
+    await request(assignedLead, `/clients/${newClient._id}`, 'GET', undefined, 403);
+    const otherItem = await request(assignedLead, elsewherePath + '/work-items', 'POST', { title: 'Added elsewhere' }, 201);
+    await request(assignedLead, elsewherePath + '/work-items/' + otherItem._id, 'PATCH', { title: 'Edited elsewhere' });
+    const dated = await request(assignedLead, '/tasks', 'POST', {
+      title: 'Dated task elsewhere', client: String(newClient._id), project: String(elsewhere._id), dueDate: new Date().toISOString(),
+    }, 201);
+    await request(assignedLead, '/tasks/' + dated._id, 'PATCH', { title: 'Dated task edited elsewhere' });
+    const scheduled = await request(assignedLead, '/templates', 'POST', {
+      title: 'Recurring elsewhere', client: String(newClient._id), project: String(elsewhere._id),
+      frequency: 'weekly', weekday: 1, startsOn: new Date().toISOString(),
+    }, 201);
+    await request(assignedLead, '/templates/' + scheduled.template._id + '/details', 'PATCH', {
+      title: 'Recurring edited elsewhere', frequency: 'weekly', weekday: 2, startsOn: new Date().toISOString(),
+    });
+    assert.ok((await request(assignedLead, '/templates')).some((row) => row._id === scheduled.template._id && row.canEdit && !row.canDelete));
     await request(assignedLead, register + '/' + added._id, 'DELETE', undefined, 403);
     const activity = await request(assignedLead, '/audit');
-    assert.deepEqual(new Set(activity.map(({ action }) => action)), new Set(['project.work.create', 'project.work.update']));
+    assert.deepEqual(new Set(activity.map(({ action }) => action)), new Set([
+      'project.work.create', 'project.work.update', 'task.create', 'task.update', 'template.create', 'template.edit',
+    ]));
+    assert.ok(activity.some((row) => row.actor?._id === String(lead._id) && row.entityId === byLead._id));
+
+    const statusPath = `${dayPath}/members/${employee._id}/entries/${saved.entries[0]._id}/status`;
+    await request(employee, statusPath, 'PATCH', { version: saved.version, status: 'incomplete', reason: 'Waiting for the statement' });
+    await request(admin, projectPath + '/people/' + manager._id, 'PUT');
+    const report = (projectId, person = '') => `/daily-work/reports?from=${date}&to=${date}&projectId=${projectId}&memberId=${person}`;
+    const assignedReport = await request(manager, report(dailyProject._id, employee._id));
+    assert.equal(assignedReport.submissions[0].entries[0].incompleteReason, 'Waiting for the statement');
+    assert.ok(assignedReport.members.some((row) => row.id === String(employee._id)));
+    const insights = await request(manager, '/daily-work/project-insights/' + project._id);
+    assert.equal(insights.projectId, dailyProject._id);
+    assert.deepEqual(insights.budgets.map(({ hours, loggedHours, remainingHours }) => [hours, loggedHours, remainingHours]), [[3, 1, 2]]);
+    await request(employee, '/daily-work/project-insights/' + project._id, 'GET', undefined, 403);
+    await request(manager, '/daily-work/project-insights/' + sibling._id, 'GET', undefined, 403);
+    await request(manager, '/tasks/' + hidden._id, 'GET', undefined, 404);
+    await request(manager, '/tasks/' + byLead._id, 'PATCH', { project: String(sibling._id) }, 403);
+    assert.equal((await request(manager, '/manager-workload?project=' + project._id)).totals.pending, await Task.countDocuments({ project: project._id, deletedAt: null, status: { $ne: 'done' } }));
+    await AuditLog.create({ action: 'task.create', entity: 'Task', entityId: hidden._id, client: client._id, actor: lead._id, summary: 'Old sibling log' });
+    await AuditLog.create({ action: 'task.create', entity: 'Task', entityId: byLead._id, client: client._id, actor: lead._id, summary: 'Old granted project log' });
+    const managerActivity = await request(manager, '/audit');
+    assert.ok(managerActivity.some((row) => row.summary === 'Old granted project log'));
+    assert.ok(!managerActivity.some((row) => row.summary === 'Old sibling log'));
+
+    const settings = '/settings/project-access';
+    assert.equal((await request(admin, settings)).enabled, false);
+    await request(manager, settings, 'PUT', { enabled: true }, 403);
+    const grantsBefore = await ProjectPermission.countDocuments();
+    await request(admin, settings, 'PUT', { enabled: true });
+    const after = await ClientProject.create({ name: 'Future Project', client: newClient._id });
+    const inactive = await Client.create({ name: 'Inactive Client', status: 'inactive' });
+    const inactiveProject = await ClientProject.create({ name: 'Inactive Project', client: inactive._id });
+    assert.deepEqual(new Set((await request(employee, '/projects')).map((row) => row._id)),
+      new Set([project, sibling, elsewhere, after].map((row) => String(row._id))));
+    await request(employee, `/clients/${inactive._id}/projects/${inactiveProject._id}`, 'GET', undefined, 403);
+    await request(employee, clientPath, 'GET', undefined, 403);
+    await request(employee, elsewherePath + '/work-items', 'POST', { title: 'Blocked' }, 403);
+    await request(manager, '/tasks/' + hidden._id);
+    await request(manager, '/daily-work/project-insights/' + sibling._id);
+    assert.equal((await request(manager, '/manager-workload?project=' + sibling._id)).totals.pending, 1);
+    assert.equal(await ProjectPermission.countDocuments(), grantsBefore);
+    await request(admin, settings, 'PUT', { enabled: false });
+    assert.deepEqual((await request(employee, '/projects')).map((row) => row._id), [String(project._id)]);
+    await request(manager, '/tasks/' + hidden._id, 'GET', undefined, 404);
+    assert.equal(await ProjectPermission.countDocuments(), grantsBefore);
 
     await request(admin, projectPath, 'DELETE');
     assert.deepEqual(await request(employee, '/projects'), []);

@@ -10,7 +10,7 @@ import { seedLoanReminders } from '../src/seed-loan-reminders.js';
 import { assignLoanTasks } from '../src/assign-loan-reviewers.js';
 import { importWorkflowProjects } from '../src/import-workflow-projects.js';
 import { dailyModels } from '../src/daily-work/models.js';
-import { generateRecurringTasks } from '../src/services/recurrence.js';
+import { generateRecurringTasks, materializeOccurrence } from '../src/services/recurrence.js';
 
 test('API roles, scheduling, reviewed completion, deletion and loan migration', async () => {
   const db = await MongoMemoryReplSet.create({ replSet: { count: 1, args: ['--nounixsocket', '--setParameter', 'diagnosticDataCollectionEnabled=false'] } });
@@ -41,7 +41,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     }
     const clientPath = `/clients/${client._id}`;
     await request(outsider, clientPath, 'GET', undefined, 403);
-    assert.deepEqual(await request(outsider, '/projects'), []);
+    assert.deepEqual((await request(outsider, '/projects')).map(({ _id, canManage }) => [_id, canManage]), [[String(project._id), false]]);
     await request(outsider, `${clientPath}/projects`, 'POST', { name: 'Unauthorized' }, 403);
     const managedProjects = await request(manager, '/projects');
     assert.deepEqual(managedProjects.map(({ name, clientName, openTasks }) => ({ name, clientName, openTasks })),
@@ -59,7 +59,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
 
     const draft={ title:'API fixture',client:String(client._id),project:String(project._id),assignees:[String(sathya._id)],dueDate:new Date().toISOString(),checklist:['Verify'] };
     await request(sathya,'/tasks','POST',draft,403);
-    await request(outsider,'/tasks','POST',draft,403);
+    await request(outsider,'/tasks','POST',draft,400);
     const task=await request(tl,'/tasks','POST',draft,201);
     await Task.updateOne({ _id: task._id }, { $set: { dueDate: new Date(Date.now() - 60000) } });
     const openProject = (await request(tl, '/projects')).find((row) => row._id === String(project._id));
@@ -71,7 +71,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     assert.equal(completed.status, 'done');
     assert.equal(completed.completedBy, String(sathya._id));
     assert.equal(completed.reviewer, undefined);
-    await request(outsider, `/tasks/${task._id}`, 'PATCH', { status: 'done' }, 404);
+    assert.equal((await request(outsider, `/tasks/${task._id}`)).canEdit, true);
     assert.deepEqual((await request(tl, `/tasks/${task._id}`)).activity.map((row) => row.action), ['task.create']);
     const projectPath = `${clientPath}/projects/${project._id}`;
     const people = await request(tl, `${clientPath}/assignees`);
@@ -130,8 +130,13 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     assert.equal((await assignLoanTasks()).alreadyApplied,true);
     const assignedLoans=await TaskTemplate.find({importKey:{$exists:true}});
     assert.ok(assignedLoans.every((item) => String(item.assignees[0]) === String(sathya._id) && !item.reviewer));
-    const loanTask = await Task.findOne({ template: { $in: assignedLoans.map((item) => item._id) } });
-    await request(krupali, `/tasks/${loanTask._id}`, 'GET', undefined, 404);
+    // Exercise a known date even when the next loan payment is beyond the scheduler's lookahead.
+    const templateToComplete = assignedLoans.find((item) => item.monthDay === 12);
+    const now = new Date();
+    const dueDate = new Date(now.getFullYear(), now.getMonth() + 1, templateToComplete.monthDay, 17);
+    await materializeOccurrence(templateToComplete, dueDate);
+    const loanTask = await Task.findOne({ template: templateToComplete._id, dueDate });
+    assert.equal((await request(krupali, `/tasks/${loanTask._id}`)).canEdit, true);
     await request(sathya, `/tasks/${loanTask._id}`, 'PATCH', { checklistItem: { id: loanTask.checklist[0]._id, done: true } });
     const paid = await request(sathya, `/tasks/${loanTask._id}`, 'PATCH', { status: 'done' });
     assert.equal(paid.status, 'done');
@@ -145,7 +150,7 @@ test('API roles, scheduling, reviewed completion, deletion and loan migration', 
     const standalonePath = `${workspacePath}/projects/${standalone._id}`;
     assert.equal((await request(tl, workspacePath)).canManage, true);
     assert.equal((await request(tl, '/projects')).find((row) => row._id === standalone._id).clientInfoId, undefined);
-    await request(outsider, standalonePath, 'GET', undefined, 403);
+    assert.equal((await request(outsider, standalonePath)).workspace.canEditTasks, true);
     const taskInStandalone = await request(tl, '/tasks', 'POST', {
       title: 'Project task', client: standalone.client, project: standalone._id, dueDate: new Date().toISOString(),
     }, 201);

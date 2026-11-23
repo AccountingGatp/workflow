@@ -283,7 +283,7 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
   const created = task.isNew;
   if (created || task.isModified()) await task.save({ session });
   if (created && !task.dailyWorkCustom) await AuditLog.create([{
-    actor: user._id, action: 'task.create', entity: 'Task', entityId: task._id, client: task.client,
+    actor: user._id, action: 'task.create', entity: 'Task', entityId: task._id, client: task.client, project: task.project,
     summary: `Created “${task.title}”`,
   }], { session });
   row.title = task.title;

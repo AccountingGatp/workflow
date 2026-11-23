@@ -4,11 +4,11 @@ import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
 import { ClientProject, Task, User } from '../models/index.js';
 import { applyTaskTransition } from '../services/task-review.js';
-import { isSuper } from '../services/access.js';
+import { canManageProject, isSuper } from '../services/access.js';
 import { dailyModels } from './models.js';
 import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, roster, validateProjectLink, workflowProjects } from './access.js';
-import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, taskName, validateBudgets, withClientBudgets } from './budgets.js';
+import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, projectBudgetUsage, taskName, validateBudgets, withClientBudgets } from './budgets.js';
 import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientProjects } from './workflow-links.js';
 import { clock, dateValue, shiftDate } from './dates.js';
 import { missingSubmissionText, missingSubmissions } from './jobs.js';
@@ -39,12 +39,17 @@ const visibleProjects = (scope) => scope.projects.length ? {
   $or: [scoped(scope.visible), { workflowProjectId: { $in: scope.projects } }],
 } : scoped(scope.visible);
 const visibleEntry = (scope, entry) => includes(scope.visible, entry.clientId) || scope.dailyProjectIds.has(entry.projectId);
+const managedEntry = (scope, entry) => includes(scope.managed, entry.clientId) || scope.managedDailyProjectIds.has(String(entry.projectId));
 const route = (handler, superOnly = false) => ah(async (req, res) => {
   if (superOnly) enforce(isSuper(req.user));
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
   const [models, scope] = await Promise.all([dailyModels(), dailyScope(req.user)]);
-  scope.dailyProjectIds = new Set(scope.projects.length
-    ? (await models.Project.distinct('_id', { workflowProjectId: { $in: scope.projects } })).map(String) : []);
+  const ids = [...new Set([...scope.projects, ...scope.managerProjects])];
+  const projects = ids.length ? await models.Project.find({ workflowProjectId: { $in: ids } }).select('workflowProjectId').lean() : [];
+  const granted = new Set(scope.projects);
+  const managed = new Set(scope.managerProjects);
+  scope.dailyProjectIds = new Set(projects.filter((project) => granted.has(project.workflowProjectId)).map(({ _id }) => String(_id)));
+  scope.managedDailyProjectIds = new Set(projects.filter((project) => managed.has(String(project.workflowProjectId))).map(({ _id }) => String(_id)));
   await handler(req, res, models, scope);
 });
 
@@ -291,7 +296,7 @@ function markUnsent(submission) {
 
 function statusEntry(entry, own, scope) {
   const { workflowAssignedToMember, workflowCompletedByActor, ...row } = entry;
-  const manager = includes(scope.managed, row.clientId);
+  const manager = managedEntry(scope, row);
   return { ...row, canUpdateStatus: workflowAssignedToMember !== false &&
     (manager || (own && (row.workflowStatus !== 'done' || workflowCompletedByActor))) };
 }
@@ -301,7 +306,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
   const memberId = idValue(req.params.memberId);
   const entryId = idValue(req.params.id);
   const own = scope.own === memberId;
-  enforce(own || includes(scope.members, memberId));
+  enforce(own || req.user.role === 'manager' || includes(scope.members, memberId));
   const { status, version } = req.body;
   if (!['incomplete', 'complete'].includes(status)) fail('Choose a valid status');
   const reason = status === 'incomplete' && req.body.reason !== undefined ? textValue(req.body.reason, 500) : undefined;
@@ -310,7 +315,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
     const doc = await models.Submission.findById(`${memberId}:${date}`).session(session);
     const entry = doc?.entries.id(entryId);
     if (!entry) throw new HttpError(404, 'Task entry not found');
-    enforce(own ? visibleEntry(scope, entry) : includes(scope.managed, entry.clientId));
+    enforce(own ? visibleEntry(scope, entry) : managedEntry(scope, entry));
     if (doc.__v !== version) throw new HttpError(409, 'This task changed. Refresh before saving again.');
     if (doc.delivery === 'sending') throw new HttpError(409, 'Slack delivery is in progress. Try again in a moment.');
 
@@ -328,7 +333,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
     if (status === 'incomplete' && reason === undefined && !wasComplete) fail('Enter an incomplete note');
     if (task) {
       applyTaskTransition(task, { status: status === 'complete' ? 'done' : 'in_progress' }, {
-        manager: includes(scope.managed, entry.clientId), isAssignee: own, actorId: req.user._id,
+        manager: managedEntry(scope, entry), isAssignee: own, actorId: req.user._id,
       });
       if (task.isModified()) await task.save({ session });
       entry.workflowStatus = task.status;
@@ -353,16 +358,24 @@ async function reportRows(req, models, scope) {
   const to = dateValue(req.query.to || from);
   if (to < from || to > shiftDate(from, 30)) fail('Select a date range of up to 31 days');
   const filter = { date: { $gte: from, $lte: to } };
+  const projectId = req.query.projectId ? idValue(req.query.projectId) : null;
+  if (projectId) filter['entries.projectId'] = projectId;
+  const manager = req.user.role === 'manager';
+  const entryScope = { $or: [
+    { clientId: { $in: scope.managed || [] } },
+    { projectId: { $in: [...scope.managedDailyProjectIds] } },
+  ] };
+  if (manager) filter.$or = [{ memberId: scope.own }, { entries: { $elemMatch: entryScope } }];
   if (req.query.memberId) {
     const memberId = idValue(req.query.memberId);
-    enforce(includes(scope.members, memberId));
+    if (!manager) enforce(includes(scope.members, memberId));
     filter.memberId = memberId;
-  } else if (scope.members !== null) filter.memberId = { $in: scope.members };
+  } else if (!manager && scope.members !== null) filter.memberId = { $in: scope.members };
   const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean(), req.user._id);
   return documents.flatMap((doc) => {
     const own = doc.memberId === scope.own;
-    const entries = doc.entries.filter((entry) => (own ? visibleEntry(scope, entry) : includes(scope.managed, entry.clientId)) &&
-      (!req.query.projectId || entry.projectId === req.query.projectId) &&
+    const entries = doc.entries.filter((entry) => (own ? visibleEntry(scope, entry) : managedEntry(scope, entry)) &&
+      (!projectId || entry.projectId === projectId) &&
       (!req.query.status || entry.status === req.query.status));
     return entries.length ? [publicSubmission(doc, entries.map((entry) => statusEntry(entry, own, scope)))] : [];
   });
@@ -373,7 +386,34 @@ r.get('/reports', route(async (req, res, models, scope) => {
     reportRows(req, models, scope), roster(scope, models, true),
     models.Project.find(visibleProjects(scope)).sort('name').lean(),
   ]);
-  res.json({ submissions, members: members.map(({ id, name }) => ({ id, name })), projects, slackEnabled: slackConfigured() });
+  const reportMembers = new Map(members.map(({ id, name }) => [id, { id, name }]));
+  if (req.user.role === 'manager') {
+    for (const { memberId, memberName } of submissions) {
+      if (!reportMembers.has(memberId)) reportMembers.set(memberId, { id: memberId, name: memberName });
+    }
+    if (req.query.memberId) {
+      const allMembers = await reportRows({ ...req, user: req.user, query: { ...req.query, memberId: '' } }, models, scope);
+      for (const { memberId, memberName } of allMembers) {
+        if (!reportMembers.has(memberId)) reportMembers.set(memberId, { id: memberId, name: memberName });
+      }
+    }
+  }
+  res.json({ submissions, members: [...reportMembers.values()].sort((a, b) => a.name.localeCompare(b.name)), projects, slackEnabled: slackConfigured() });
+}));
+
+r.get('/project-insights/:id', route(async (req, res, models) => {
+  const id = idValue(req.params.id);
+  const project = await ClientProject.findOne({ _id: id, deletedAt: null }).select('client').lean();
+  if (!project) throw new HttpError(404, 'Project not found');
+  enforce(isSuper(req.user) || req.user.role === 'manager' && await canManageProject(req.user, project));
+  const date = dateValue(req.query.date || clock().date);
+  await syncClientProjects(models, [], [id]);
+  const dailyProject = await models.Project.findOne({ workflowProjectId: id }).select('_id').lean();
+  if (!dailyProject) return res.json({ projectId: null, budgets: [] });
+  const catalog = await models.CatalogTask.find({ projectId: String(dailyProject._id), archived: false }).sort('title').lean();
+  const work = await listClientWork([{ ...dailyProject, workflowProjectId: id }], req.user, undefined, undefined, catalog);
+  const budgets = withClientBudgets(catalog, work).filter(({ title }) => !isReview(title));
+  res.json({ projectId: String(dailyProject._id), budgets: await projectBudgetUsage(models, date, budgets) });
 }));
 
 r.post('/reports/slack', route(async (req, res, models, scope) => {
