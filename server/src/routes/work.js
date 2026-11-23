@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Task, TaskTemplate, AuditLog, User, ClientPermission, ClientProject, ProjectWorkItem } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
-  audit, isSuper, canMaintainTasks, taskScope, canManageClient, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
+  audit, isSuper, canMaintainTasks, taskScope, canManageClient, canEditTaskInProject, taskPortfolio, portfolioFilter, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 import { scheduleFields } from '../services/schedule.js';
@@ -67,8 +67,7 @@ const taskFilters = async (req, dates, weeklyMonthly) => {
   if (scope === 'mine') clauses.push({ assignees: req.user._id });
   if (scope === 'managed') {
     if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
-    const managed = await managedClientIds(req.user);
-    if (managed !== null) clauses.push({ client: { $in: managed } });
+    clauses.push(portfolioFilter(await taskPortfolio(req.user)));
   }
   if (status) clauses.push({ status: { $in: String(status).split(',') } });
   if (client) {
@@ -118,19 +117,21 @@ r.get('/task-summary', ah(async (req, res) => {
 /* Manager totals aggregate the entire managed portfolio, not a 500-task sample. */
 r.get('/manager-workload', ah(async (req, res) => {
   if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
-  const managed = await managedClientIds(req.user);
+  const portfolio = await taskPortfolio(req.user);
   const clientId = req.query.client;
   const projectId = req.query.project;
-  if (clientId && (!mongoose.isValidObjectId(clientId) || !(await canManageClient(req.user, clientId)))) throw new HttpError(403, 'Client unavailable');
+  if (clientId && !mongoose.isValidObjectId(clientId)) throw new HttpError(400, 'Invalid client');
   if (projectId && projectId !== 'unassigned') {
     if (!mongoose.isValidObjectId(projectId)) throw new HttpError(400, 'Invalid project');
-    const project = await ClientProject.findById(projectId).select('client');
-    if (!project || (clientId && String(project.client) !== String(clientId)) || !(await canManageClient(req.user, project.client))) throw new HttpError(403, 'Project unavailable');
+    const project = await ClientProject.findOne({ _id: projectId, deletedAt: null }).select('client');
+    if (!project || (clientId && String(project.client) !== String(clientId)) || !(await canEditTaskInProject(req.user, project.client, projectId))) throw new HttpError(403, 'Project unavailable');
   }
   if (projectId === 'unassigned' && !clientId) throw new HttpError(400, 'Choose a client first');
-  const ids = clientId ? [clientId] : managed;
-  const match = { deletedAt: null, ...(ids === null ? {} : { client: { $in: ids.map(id => new mongoose.Types.ObjectId(String(id))) } }) };
-  if (projectId) match.project = projectId === 'unassigned' ? null : new mongoose.Types.ObjectId(projectId);
+  const selection = {
+    ...(clientId && { client: new mongoose.Types.ObjectId(clientId) }),
+    ...(projectId && { project: projectId === 'unassigned' ? null : new mongoose.Types.ObjectId(projectId) }),
+  };
+  const match = { ...portfolioFilter(portfolio), ...selection, deletedAt: null };
   const { start, end, week } = dayBounds();
   const done = { $eq: ['$status', 'done'] };
   const pending = { $ne: ['$status', 'done'] };
@@ -165,12 +166,10 @@ r.get('/manager-workload', ah(async (req, res) => {
     } },
   ]);
   const zero = { pending: 0, completed: 0, overdue: 0, today: 0, future: 0, dueNow: 0, completedRecent: 0 };
-  const projectQuery = projectId === 'unassigned' ? null : projectId;
-  const masterFilter = projectQuery ? { project: projectQuery, active: { $ne: false } } : (ids === null ? { active: { $ne: false } } : { client: { $in: ids }, active: { $ne: false } });
-  const templatesFilter = projectId ? { project: projectId === 'unassigned' ? null : projectId } : (ids === null ? {} : { client: { $in: ids } });
-  if (clientId) { masterFilter.client = clientId; templatesFilter.client = clientId; }
+  const templatesFilter = { ...portfolioFilter(portfolio), ...selection };
+  const masterFilter = { ...templatesFilter, active: { $ne: false } };
   const [masterItems, recurringSchedules, activeSchedules] = await Promise.all([
-    ProjectWorkItem.countDocuments(projectId === 'unassigned' ? { ...masterFilter, project: null } : masterFilter),
+    ProjectWorkItem.countDocuments(masterFilter),
     TaskTemplate.countDocuments(templatesFilter),
     TaskTemplate.countDocuments({ ...templatesFilter, active: true }),
   ]);
@@ -188,7 +187,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id, $or: taskActivity }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
-  const canEdit = await canManageClient(req.user, task.client._id);
+  const canEdit = await canEditTaskInProject(req.user, task.client._id, task.project?._id);
   const isAssignee = task.assignees.some((person) => String(person._id) === String(req.user._id));
   res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || (isAssignee &&
     (task.status !== 'done' || String(task.completedBy?._id) === String(req.user._id))),
@@ -198,21 +197,21 @@ r.get('/tasks/:id', ah(async (req, res) => {
 r.post('/tasks', ah(async (req, res) => {
   const { title, client, project, team, assignees = [], owner, dueDate, priority, sop, checklist = [] } = req.body || {};
   if (!title || !client || !dueDate) throw new HttpError(400, 'Title, client and due date are required');
-  if (!(await canManageClient(req.user, client))) throw new HttpError(403, 'You can only create work for clients you manage');
+  if (!(await canEditTaskInProject(req.user, client, project))) throw new HttpError(403, 'You can only create work for projects you manage');
   const validProject = await validateProject(client, project);
   await assertAssignable(req.user, client, assignees, validProject);
   const task = await Task.create({
     title, client, project: validProject, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
     checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: req.user._id,
   });
-  audit(req.user, 'task.create', { entity: 'Task', entityId: task._id, client, summary: `Created “${title}”` });
+  await audit(req.user, 'task.create', { entity: 'Task', entityId: task._id, client, project: task.project, summary: `Created “${title}”` });
   res.status(201).json(task);
 }));
 
 r.patch('/tasks/:id', ah(async (req, res) => {
   const task = await Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) });
   if (!task) throw new HttpError(404, 'Task not found');
-  const manager = await canManageClient(req.user, task.client);
+  const manager = await canEditTaskInProject(req.user, task.client, task.project);
   const isAssignee = task.assignees.some((a) => String(a) === String(req.user._id));
   if (!manager && !isAssignee) throw new HttpError(403, 'Only assignees or client managers can update this task');
   const body = req.body || {};
@@ -234,13 +233,18 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   }
   if (manager) {
     if (body.project !== undefined) {
-      task.project = await validateProject(task.client, body.project);
+      const project = await validateProject(task.client, body.project);
+      if (!await canEditTaskInProject(req.user, task.client, project)) throw new HttpError(403, 'You cannot move this task to that project');
+      task.project = project;
     }
     for (const k of ['title', 'dueDate', 'priority', 'sop', 'owner', 'team']) {
       if (body[k] !== undefined) {
         if (k === 'dueDate' && task.template && !task.scheduledDate) task.scheduledDate = task.dueDate;
         task[k] = body[k] || undefined;
       }
+    }
+    if (task.isModified('project') && body.assignees === undefined) {
+      await assertAssignable(req.user, task.client, task.assignees, task.project);
     }
     if (body.assignees !== undefined) {
       if (!Array.isArray(body.assignees) || body.assignees.some((id) => typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id))) {
@@ -257,7 +261,7 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   const status = body.status || (reopen ? 'in_progress' : undefined);
   if (status) applyTaskTransition(task, { status }, { manager, isAssignee, actorId: req.user._id });
   await task.save();
-  if (edited && !task.dailyWorkCustom) audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, summary: `Edited “${task.title}”` });
+  if (edited && !task.dailyWorkCustom) await audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Edited “${task.title}”` });
   res.json(task);
 }));
 
@@ -267,42 +271,43 @@ r.delete('/tasks/:id', ah(async (req, res) => {
   if (!task) throw new HttpError(404, 'Task not found');
   task.deletedAt = new Date(); task.status = 'cancelled';
   await task.save();
-  await audit(req.user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, summary: `Deleted task occurrence “${task.title}”` });
+  await audit(req.user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Deleted task occurrence “${task.title}”` });
   res.json({ ok: true });
 }));
 
 /* ---------- Recurring templates ---------- */
 
 r.get('/templates', ah(async (req, res) => {
-  const managed = await managedClientIds(req.user);
-  const filter = managed === null ? {} : { client: { $in: managed } };
+  const portfolio = await taskPortfolio(req.user);
+  const { clients: managed } = portfolio;
+  const filter = portfolioFilter(portfolio);
   const templates = await TaskTemplate.find(filter).sort({ createdAt: -1 })
     .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name role').select('-reviewer').lean();
-  res.json(templates.map((template) => ({ ...template, canEdit: true })));
+  res.json(templates.map((template) => ({ ...template, canEdit: true, canDelete: canMaintainTasks(req.user) && (managed === null || managed.includes(String(template.client?._id))) })));
 }));
 
 r.post('/templates', ah(async (req, res) => {
   const b = req.body || {};
   if (!b.title || !b.client || !b.frequency) throw new HttpError(400, 'Title, client and frequency are required');
-  if (!(await canManageClient(req.user, b.client))) throw new HttpError(403, 'You can only schedule work for clients you manage');
+  if (!(await canEditTaskInProject(req.user, b.client, b.project))) throw new HttpError(403, 'You can only schedule work for projects you manage');
   const validProject = await validateProject(b.client, b.project);
   await assertAssignable(req.user, b.client, b.assignees || [], validProject);
   const schedule = scheduleFields(b);
   const tpl = await TaskTemplate.create({ title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined, assignees: b.assignees || [], owner: (b.assignees || []).includes(b.owner) ? b.owner : b.assignees?.[0], priority: b.priority, sop: b.sop, ...schedule, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
   const created = await generateRecurringTasks(tpl._id);
-  audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });
+  await audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, project: tpl.project, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });
   res.status(201).json({ template: tpl, created });
 }));
 
 r.patch('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
-  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
+  if (!(await canEditTaskInProject(req.user, tpl.client, tpl.project))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
   if (req.body.active === true && tpl.project) await validateProject(tpl.client, tpl.project);
   if (typeof req.body.active === 'boolean') tpl.active = req.body.active;
   await tpl.save();
   if (tpl.active) await generateRecurringTasks(tpl._id);
-  audit(req.user, 'template.update', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `${tpl.active ? 'Resumed' : 'Paused'} “${tpl.title}”` });
+  audit(req.user, 'template.update', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, project: tpl.project, summary: `${tpl.active ? 'Resumed' : 'Paused'} “${tpl.title}”` });
   res.json(tpl);
 }));
 
@@ -310,12 +315,13 @@ r.patch('/templates/:id', ah(async (req, res) => {
 r.patch('/templates/:id/details', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);
   if (!tpl) throw new HttpError(404, 'Template not found');
-  if (!(await canManageClient(req.user, tpl.client))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
+  if (!(await canEditTaskInProject(req.user, tpl.client, tpl.project))) throw new HttpError(403, 'You do not have permission to edit this recurring task');
   const b = req.body || {};
   if (!String(b.title || '').trim()) throw new HttpError(400, 'Task name is required');
   const schedule = scheduleFields(b);
   const assignees = Array.isArray(b.assignees) ? b.assignees : [];
   const validProject = await validateProject(tpl.client, b.project ?? tpl.project);
+  if (!await canEditTaskInProject(req.user, tpl.client, validProject)) throw new HttpError(403, 'You cannot move this schedule to that project');
   await assertAssignable(req.user, tpl.client, assignees, validProject);
   tpl.project = validProject;
   tpl.title = String(b.title).trim();
@@ -334,7 +340,7 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
     'checklist.done': { $ne: true },
   });
   const created = tpl.active ? await generateRecurringTasks(tpl._id) : 0;
-  audit(req.user, 'template.edit', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, summary: `Edited recurring task “${tpl.title}”: ${cleared.deletedCount} future untouched occurrences replaced, ${created} scheduled` });
+  await audit(req.user, 'template.edit', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, project: tpl.project, summary: `Edited recurring task “${tpl.title}”: ${cleared.deletedCount} future untouched occurrences replaced, ${created} scheduled` });
   res.json({ template: tpl, cleared: cleared.deletedCount, created });
 }));
 
@@ -403,10 +409,29 @@ r.get('/dashboard', ah(async (req, res) => {
 
 r.get('/audit', ah(async (req, res) => {
   if (req.user.role === 'employee') throw new HttpError(403, 'Not available');
-  const managed = await managedClientIds(req.user);
-  const filter = managed === null ? {} : { $or: [{ client: { $in: managed } }, { actor: req.user._id }] };
-  const taskChanges = { $or: [...taskActivity, { action: { $in: ['project.work.create', 'project.work.update', 'template.create', 'template.edit'] } }] };
-  res.json(await AuditLog.find({ $and: [filter, taskChanges] }).sort({ createdAt: -1 }).limit(200).populate('actor', 'name role').populate('client', 'name').lean());
+  const changes = { $or: [...taskActivity, { action: { $in: ['project.work.create', 'project.work.update', 'template.create', 'template.edit'] } }] };
+  const pipeline = [{ $match: changes }];
+  if (req.user.role === 'manager') {
+    const portfolio = await taskPortfolio(req.user);
+    const scope = portfolioFilter(portfolio);
+    // Older entries predate the project field. Look up their project from the recorded work item.
+    for (const [model, entity] of [[Task, 'Task'], [TaskTemplate, 'TaskTemplate'], [ProjectWorkItem, 'ProjectWorkItem']]) {
+      pipeline.push({ $lookup: {
+        from: model.collection.name, localField: 'entityId', foreignField: '_id',
+        let: { entity: '$entity', loggedProject: '$project' },
+        pipeline: [{ $match: { $expr: { $and: [{ $eq: ['$$entity', entity] }, { $eq: [{ $ifNull: ['$$loggedProject', null] }, null] }] } } }, { $project: { project: 1 } }],
+        as: entity,
+      } });
+    }
+    pipeline.push({ $set: { project: { $ifNull: ['$project', { $first: '$Task.project' }, { $first: '$TaskTemplate.project' }, { $first: '$ProjectWorkItem.project' }] } } },
+      { $match: { $or: [...scope.$or, { actor: req.user._id }] } },
+      { $unset: ['Task', 'TaskTemplate', 'ProjectWorkItem'] });
+  }
+  pipeline.push({ $sort: { createdAt: -1 } }, { $limit: 200 });
+  const activity = await AuditLog.aggregate(pipeline);
+  res.json(await AuditLog.populate(activity, [
+    { path: 'actor', select: 'name role' }, { path: 'client', select: 'name' }, { path: 'project', select: 'name' },
+  ]));
 }));
 
 export default r;

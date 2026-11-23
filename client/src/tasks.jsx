@@ -137,6 +137,12 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                 <EditAssignees key={task.assignees.map((person) => person._id).join(',')} task={task} busy={busy} onSave={patch} />
                 <Field label="Task name"><input key={task.title} className="input" defaultValue={task.title} onBlur={e => { if (e.target.value.trim() && e.target.value !== task.title) patch({ title: e.target.value.trim() }); }} /></Field>
                 <Field label="Due date"><input type="date" className="input" value={toInputDate(task.dueDate)} disabled={busy} onChange={e => { if (e.target.value) patch({ dueDate: new Date(`${e.target.value}T17:00:00`).toISOString() }); }} /></Field>
+                <Field label="Priority"><select className="select" value={task.priority} disabled={busy} onChange={event => patch({ priority: event.target.value })}>
+                  <option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option>
+                </select></Field>
+                <Field label="SOP / instructions"><textarea key={task.sop} className="textarea" defaultValue={task.sop || ''} disabled={busy}
+                  onBlur={event => { if (event.target.value !== (task.sop || '')) patch({ sop: event.target.value }); }} /></Field>
+
               </div>}
               <div className="section-title">Status</div>
               <div className="chips" role="radiogroup" aria-label="Status">
@@ -161,7 +167,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                   <p className="small muted">These links come from the project master task list and remain available with each scheduled occurrence.</p>
                 </div>
               </>}
-              {task.sop && <>
+              {task.sop && !task.canEdit && <>
                 <div className="section-title"><BookOpen size={14} />Standard operating procedure</div>
                 <div className="sop">{task.sop}</div>
               </>}
@@ -217,7 +223,7 @@ export function TaskDrawer({ id, onClose, onChanged }) {
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-export function TaskForm({ recurring = false, presetClient, presetProject, template = null, onClose, onSaved }) {
+export function TaskForm({ recurring = false, presetClient, presetProject, presetClientName, presetProjectName, template = null, onClose, onSaved }) {
   const clients = useApi('/clients');
   const toast = useToast();
   const [f, setF] = useState({
@@ -226,11 +232,15 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
   });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
-  const projectOptions = useApi(f.client ? `/clients/${f.client}/projects` : null, [f.client]);
+  const projectOptions = useApi(f.client && !presetProject ? `/clients/${f.client}/projects` : null, [f.client]);
   const projects = projectOptions.data || [];
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e?.target ? e.target.value : e }));
 
   const manageable = (clients.data || []).filter((c) => c.canManage);
+  if (f.client && !manageable.some((client) => client._id === f.client) && (presetClientName || template?.client)) {
+    manageable.push({ _id: f.client, name: presetClientName || template.client.name });
+  }
+  const projectChoices = presetProject ? [{ _id: presetProject, name: presetProjectName }] : projects;
   const assignees = useApi(f.client ? `/clients/${f.client}/assignees${f.project ? '?project=' + f.project : ''}` : null);
   const people = (assignees.loading ? [] : assignees.data || []).filter((person) => person.role !== 'super_admin');
 
@@ -265,8 +275,8 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
         {template && <div className="form-note">Saving changes replaces unstarted future occurrences with the updated schedule. Completed, in-progress, and past tasks are preserved.</div>}
         <Field label="Task name"><input className="input" value={f.title} onChange={set('title')} placeholder="e.g. Weekly Bill Updation" required autoFocus /></Field>
         <Field label="Client"><select className="select" value={f.client} onChange={e => setF(v => ({ ...v, client: e.target.value, project: '', assignees: [], owner: '' }))} required disabled={!!template || !!presetProject}><option value="">Select client…</option>{manageable.map((c) => <option key={c._id} value={c._id}>{c.name}</option>)}</select></Field>
-        {projects.length > 0 && <Field label="Project" hint="Tasks are organized separately under each project."><select className="select" required value={f.project} onChange={set('project')} disabled={!!presetProject}>
-          <option value="">Select project…</option>{projects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+        {projectChoices.length > 0 && <Field label="Project" hint="Tasks are organized separately under each project."><select className="select" required value={f.project} onChange={set('project')} disabled={!!presetProject}>
+          <option value="">Select project…</option>{projectChoices.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
         </select></Field>}
         {recurring ? (
           <div className="grid grid-2">
@@ -292,7 +302,7 @@ export function TaskForm({ recurring = false, presetClient, presetProject, templ
           </div>
         )}
         <ErrorBox error={assignees.error} />
-        <Field label="Assign to" hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'They get access to this client automatically.'}>
+        <Field label="Assign to" hint={f.assignees.length > 1 ? 'Click the crown to choose who owns the task.' : 'Choose from people available for this project.'}>
           <div className="chips">
             {people.map((p) => {
               const on = f.assignees.includes(p._id);

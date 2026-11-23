@@ -529,12 +529,40 @@ function TaskStatusTable({ entries }) {
   </div>;
 }
 
-export function DailyTaskStatus({ date = today() }) {
-  return <DailyReports tab="status" date={date} />;
+export function DailyTaskStatus({ date = today(), projectId }) {
+  return <DailyReports tab="status" date={date} fixedProjectId={projectId} />;
+}
+
+export function ProjectInsights({ projectId }) {
+  const [date, setDate] = useState(today);
+  const { data, loading, error } = useApi(`${root}/project-insights/${projectId}?date=${date}`);
+  return <section className="stack" style={{ marginBottom: 24 }} aria-label="Project insights">
+    <div className="row-wrap reminder-section-head">
+      <h2>Project insights</h2>
+      <DateField label="Budget date" value={date} onChange={setDate} />
+    </div>
+    <ErrorBox error={error} />
+    {loading ? <Skeleton rows={2} /> : data && !error && <>
+      <div className="card table-wrap">
+        <table className="table">
+          <caption className="card-pad"><strong>Task hour budgets</strong></caption>
+          <thead><tr><th scope="col">Task</th><th scope="col">Budget period</th><th scope="col">Budgeted</th><th scope="col">Logged</th><th scope="col">Remaining</th></tr></thead>
+          <tbody>{data.budgets.length ? data.budgets.map((budget) => <tr key={budget.id}>
+            <td>{budget.title}</td><td>{budget.period} · {budget.start}{budget.end !== budget.start && ` to ${budget.end}`}</td>
+            <td>{hours(budget.hours)} h</td><td>{hours(budget.loggedHours)} h</td><td>{hours(budget.remainingHours)} h</td>
+          </tr>) : <tr><td colSpan={5}>No shared task hour budgets are configured for this project.</td></tr>}</tbody>
+        </table>
+      </div>
+      {data.projectId && <>
+        <h3>Daily Work status and notes</h3>
+        <DailyTaskStatus key={data.projectId} projectId={data.projectId} />
+      </>}
+    </>}
+  </section>;
 }
 
 const reportViews = ['member', 'summary'];
-function DailyReports({ tab, date, setDate, openEntry, me }) {
+function DailyReports({ tab, date, setDate, openEntry, me, fixedProjectId }) {
   const [from, setFrom] = useState(date);
   const [to, setTo] = useState(date);
   const [memberId, setMember] = useState('');
@@ -543,7 +571,7 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
   const [sending, setSending] = useState(false);
   const [slackError, setSlackError] = useState(null);
   const toast = useToast();
-  const query = new URLSearchParams({ from, to, memberId, projectId, status: tab === 'status' ? status : '' }).toString();
+  const query = new URLSearchParams({ from, to, memberId, projectId: fixedProjectId || projectId, status: tab === 'status' ? status : '' }).toString();
   const report = useDailyWorkReportQuery(query, { refetchOnMountOrArgChange: true });
   const { error } = report;
   const allowed = ![401, 403].includes(error?.status);
@@ -575,9 +603,9 @@ function DailyReports({ tab, date, setDate, openEntry, me }) {
         <label className="field"><span>Member</span><select className="select" value={memberId} onChange={(event) => setMember(event.target.value)}>
           <option value="">All available members</option>{filterOptions?.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
         </select></label>
-        <label className="field"><span>Project</span><select className="select" value={projectId} onChange={(event) => setProject(event.target.value)}>
+        {!fixedProjectId && <label className="field"><span>Project</span><select className="select" value={projectId} onChange={(event) => setProject(event.target.value)}>
           <option value="">All projects</option>{filterOptions?.projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}
-        </select></label>
+        </select></label>}
         {tab === 'status' && <label className="field"><span>Status</span><select className="select" aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}>
           <option value="">All statuses</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option>
         </select></label>}

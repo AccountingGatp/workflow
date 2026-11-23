@@ -293,7 +293,11 @@ export function Recurring() {
   const [creating, setCreating] = useState(null);
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [search, setSearch] = useState('');
-  const availableClients = (clients.data || []).filter((c) => c.canManage).sort((a, b) => a.name.localeCompare(b.name));
+  const clientsById = new Map((clients.data || []).filter((client) => client.canManage).map((client) => [client._id, client]));
+  for (const { client } of data || []) {
+    if (client && !clientsById.has(client._id)) clientsById.set(client._id, client);
+  }
+  const availableClients = [...clientsById.values()].sort((a, b) => a.name.localeCompare(b.name));
   const shownClients = availableClients.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
   const selected = availableClients.find((c) => c._id === selectedClient);
   const templates = (data || []).filter((t) => t.client?._id === selectedClient);
@@ -335,8 +339,8 @@ export function Recurring() {
           <div className="row-wrap" style={{ marginBottom: 20 }}>
             <button className="btn btn-ghost" onClick={() => setSelectedClient(null)}>← All clients</button>
             <h2>{selected.name}</h2><div className="spacer" />
-            <button className="btn btn-primary" onClick={() => setCreating('recurring')}><Plus size={18} />Add recurring task</button>
-            <button className="btn btn-outline" onClick={() => setCreating('once')}><Plus size={18} />Add one-time task</button>
+            {selected.canManage && <><button className="btn btn-primary" onClick={() => setCreating('recurring')}><Plus size={18} />Add recurring task</button>
+            <button className="btn btn-outline" onClick={() => setCreating('once')}><Plus size={18} />Add one-time task</button></>}
           </div>
           <div className="card" style={{ overflow: 'hidden' }}>
             {loading && !data ? <Skeleton /> : templates.length === 0 ? <Empty icon={Repeat} title="No recurring tasks for this client yet" /> : (
@@ -344,13 +348,13 @@ export function Recurring() {
                 <thead><tr><th>Task</th><th>Schedule</th><th>Assigned</th><th>Status</th><th /></tr></thead>
                 <tbody>{templates.map((t) => (
                   <tr key={t._id} style={!t.active ? { opacity: .55 } : undefined}>
-                    <td><strong>{t.title}</strong><div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
+                    <td><strong>{t.title}</strong>{t.project && <div className="small muted">{t.project.name}</div>}<div className="small muted">{t.checklist.length} checklist steps{t.sop ? ' · SOP attached' : ''}</div></td>
                     <td><span className="row"><CalendarCheck size={16} className="muted" />{FREQ(t)}</span></td>
                     <td><Avatars people={t.assignees} /></td>
                     <td>{t.active ? 'Active' : 'Paused'}</td>
                     <td style={{ textAlign: 'right' }}><div className="row-wrap" style={{ justifyContent: 'flex-end' }}>{t.canEdit && <>
                       <button className="btn btn-outline btn-sm" onClick={() => setEditingTemplate(t)}>Edit future occurrences</button>
-                      {can.editTasks && <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Cancel future occurrences</button>}
+                      {t.canDelete && can.editTasks && <button className="btn btn-outline btn-sm" onClick={() => removeTemplate(t)}>Cancel future occurrences</button>}
                       <button className="btn btn-outline btn-sm" onClick={() => toggle(t)}>{t.active ? <><Pause size={14} />Pause</> : <><Play size={14} />Resume</>}</button>
                     </>}</div></td>
                   </tr>
@@ -492,13 +496,13 @@ export function Audit() {
       <div className="card" style={{ overflow: 'hidden' }}>
         {error ? <ErrorBox error={error} /> : loading && !data ? <Skeleton /> : !data?.length ? <Empty icon={History} title="No activity yet" /> : (
           <div className="table-wrap"><table>
-            <thead><tr><th>When</th><th>Who</th><th>What</th><th>Client</th></tr></thead>
+            <thead><tr><th>When</th><th>Who</th><th>What</th><th>Project</th><th>Client</th></tr></thead>
             <tbody>{data.map((a) => (
               <tr key={a._id}>
                 <td className="small muted" style={{ whiteSpace: 'nowrap' }}>{fmtTime(a.createdAt)}</td>
                 <td><span className="row"><Avatar name={a.actor?.name || 'System'} size="sm" />{a.actor?.name || 'System'}</span></td>
                 <td><Badge>{addedTaskActions.has(a.action) ? 'Task added' : 'Task edited'}</Badge> <span style={{ marginLeft: 6 }}>{a.summary}</span></td>
-                <td>{a.client?.name || '—'}</td>
+                <td>{a.project?.name || '—'}</td><td>{a.client?.name || '—'}</td>
               </tr>
             ))}</tbody>
           </table></div>

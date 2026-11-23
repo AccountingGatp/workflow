@@ -101,6 +101,40 @@ function MailSettings({ mail, saveMail }) {
   </section>;
 }
 
+function ProjectAccessSettings() {
+  const endpoint = '/settings/project-access';
+  const { data, error, reload } = useApi(endpoint);
+  const [saved, setSaved] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const toast = useToast();
+
+  async function toggle(event) {
+    const enabled = event.target.checked;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      setSaved(await api(endpoint, { method: 'PUT', body: { enabled } }));
+      toast(enabled ? 'Access to all projects enabled.' : 'Workspace-wide project access turned off.');
+    } catch (error) {
+      setSaveError(error);
+      reload();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <section className="card card-pad stack" style={{ marginBottom: 20 }} aria-labelledby="project-access-settings">
+    <div className="row-wrap reminder-section-head">
+      <div><h2 id="project-access-settings">Project access</h2>
+        <p className="small muted" id="project-access-hint">Give active staff access to all current and future active projects. Your individual assignments are saved when you turn this on or off.</p></div>
+      <label className="row"><input type="checkbox" role="switch" checked={(saved || data)?.enabled === true}
+        disabled={saving || !(saved || data)} onChange={toggle} aria-describedby="project-access-hint" /> Give everyone access to all projects</label>
+    </div>
+    <ErrorBox error={saveError || error} />
+  </section>;
+}
+
 export default function Settings({ mail, saveMail }) {
   const { data, error, loading, reload } = useApi(path);
   const [saved, setSaved] = useState(null);
@@ -128,6 +162,7 @@ export default function Settings({ mail, saveMail }) {
 
   return <>
     <PageHead title="Settings" />
+    <ProjectAccessSettings />
     <MailSettings mail={mail} saveMail={saveMail} />
     <section className="stack" aria-labelledby="slack-reminders">
       <div className="row-wrap reminder-section-head">

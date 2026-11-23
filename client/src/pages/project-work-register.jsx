@@ -103,7 +103,7 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
     </form>
   </Modal>;
 }
-export default function ProjectWorkRegister({ clientId, projectId, canManage, canArchive = canManage }) {
+export default function ProjectWorkRegister({ clientId, projectId }) {
   const url = basePath(clientId, projectId);
   const register = useApi(url, [clientId, projectId]);
   const access = useApi(url.replace(/\/work-items$/, '/work-items/access'), [clientId, projectId]);

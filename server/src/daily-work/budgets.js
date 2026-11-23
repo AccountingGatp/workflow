@@ -87,7 +87,7 @@ async function periodUsage(models, memberId, date, catalog, keys, session) {
   const end = [...budgets.values()].map((budget) => budget.end).sort().at(-1);
   const rows = await models.Submission.find({
     date: { $gte: start, $lte: end },
-    $nor: [{ memberId, date }],
+    ...(memberId != null && { $nor: [{ memberId, date }] }),
     'entries.projectId': { $in: projectIds },
   }).select('date entries').session(session || null).lean();
   for (const row of rows) {
@@ -114,6 +114,13 @@ export async function catalogAvailability(models, memberId, date, catalog) {
     return { ...task, period, hours, remainingHours: Math.max(0, cents(hours) - spent) / 100,
       periodStart: start, periodEnd: end, review: isReview(task.title) };
   });
+}
+
+export async function projectBudgetUsage(models, date, catalog) {
+  const budgets = await periodUsage(models, null, date, catalog, budgetKeys(catalog));
+  return [...budgets.values()].map(({ key, spent, hours, ...budget }) => ({
+    id: key, ...budget, hours, loggedHours: spent / 100, remainingHours: Math.max(0, cents(hours) - spent) / 100,
+  }));
 }
 
 export async function validateBudgets(models, memberId, date, catalog, saved, prior, session) {

@@ -244,6 +244,7 @@ const auditSchema = new Schema({
   entity: String,
   entityId: Types.ObjectId,
   client: ref('Client'),
+  project: ref('ClientProject'),
   summary: String,
 }, { timestamps: { createdAt: true, updatedAt: false } });
 export const ACTIVITY_RETENTION_SECONDS = 7 * 24 * 60 * 60;

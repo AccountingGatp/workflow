@@ -1,4 +1,6 @@
-import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, TeamMembership, User, Task, AuditLog } from '../models/index.js';
+import { Types } from 'mongoose';
+import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, TeamMembership, User, AuditLog } from '../models/index.js';
+import { allProjectsEnabled } from './project-access-settings.js';
 import { HttpError } from '../middleware/auth.js';
 
 /**
@@ -47,28 +49,59 @@ export async function visibleClientIds(user) {
 }
 
 /** Active grants that apply only to their own project. */
-export async function grantedProjectIds(user) {
+export async function grantedProjectIds(user, { includeDefault = true } = {}) {
   if (isSuper(user)) return [];
   const ids = await ProjectPermission.distinct('project', { user: user._id });
+  if (includeDefault && await allProjectsEnabled(user)) {
+    const active = await activeProjectIds();
+    const direct = ids.length ? await ClientProject.distinct('_id', { _id: { $in: ids }, deletedAt: null }) : [];
+    return [...new Map([...active, ...direct].map((id) => [String(id), id])).values()];
+  }
   return ids.length ? ClientProject.distinct('_id', { _id: { $in: ids }, deletedAt: null }) : [];
 }
 
-export async function canSeeProject(user, project) {
-  return await canSeeClient(user, project.client) ||
-    !!await ProjectPermission.exists({ project: project._id, user: user._id });
+async function activeProjectIds() {
+  const clients = await Client.distinct('_id', { status: { $ne: 'inactive' } });
+  return ClientProject.distinct('_id', { client: { $in: clients }, deletedAt: null });
+}
+
+export async function canSeeProject(user, project, { includeDefault = true } = {}) {
+  if (await canSeeClient(user, project.client) ||
+      await ProjectPermission.exists({ project: project._id, user: user._id })) return true;
+  return includeDefault && !project.deletedAt && await allProjectsEnabled(user) &&
+    !!await Client.exists({ _id: project.client, status: { $ne: 'inactive' } });
+}
+
+export async function taskPortfolio(user, grants) {
+  const clients = await managedClientIds(user);
+  const projects = user.role === 'admin' ? await ClientProject.distinct('_id', { deletedAt: null }) :
+    user.role === 'manager' ? [...new Set([
+      ...(grants ?? await grantedProjectIds(user)).map(String),
+      ...(await ClientProject.distinct('_id', { client: { $in: await visibleClientIds(user) }, deletedAt: null })).map(String),
+    ])] : [];
+  return { clients, projects };
+}
+
+const objectIds = (ids) => ids.map((id) => new Types.ObjectId(String(id)));
+
+export function portfolioFilter({ clients, projects }) {
+  return clients === null ? {} : { $or: [{ client: { $in: objectIds(clients) } }, { project: { $in: objectIds(projects) } }] };
+}
+
+export async function canManageProject(user, project) {
+  return await canManageClient(user, project.client) ||
+    (user.role === 'manager' && !project.deletedAt && await canSeeProject(user, project));
 }
 
 export async function canEditProjectWork(user, project) {
-  if (await canManageClient(user, project.client)) return true;
-  if (user.role !== 'admin') return false;
-  if (await ProjectPermission.exists({ project: project._id, user: user._id })) return true;
-  if (!await canSeeClient(user, project.client)) return false;
-  return !!await Task.exists({
-    project: project._id, client: project.client, assignees: user._id, deletedAt: null,
-    status: { $nin: ['cancelled', 'done'] },
-    // A lead's own Daily Work entries must not grant editing access.
-    dailyWorkCustom: { $exists: false }, createdBy: { $ne: user._id },
-  });
+  return user.role === 'admin' || await canManageProject(user, project);
+}
+
+export async function canEditTaskInProject(user, clientId, projectId) {
+  if (await canManageClient(user, clientId)) return true;
+  if (!projectId || !['admin', 'manager'].includes(user.role)) return false;
+  const project = await ClientProject.findOne({ _id: projectId, client: clientId, deletedAt: null }).select('client').lean();
+  return !!project && await canEditProjectWork(user, project);
 }
 
 export async function canSeeClient(user, clientId) {
@@ -109,7 +142,8 @@ export async function canGrantDirectly(actor, clientId, targetUserId) {
 /** People the actor can assign to this client, including team members who get access on assignment. */
 export async function clientAssignees(actor, clientId, projectId, { existingAccessOnly = false } = {}) {
   const filter = { active: true, deletedAt: null };
-  if (!isSuper(actor)) {
+  if (!isSuper(actor) && !(projectId && await allProjectsEnabled(actor) &&
+      await Client.exists({ _id: clientId, status: { $ne: 'inactive' } }))) {
     const [assignments, grants, led, projectGrants] = await Promise.all([
       ClientAssignment.find({ client: clientId, endedAt: null }).select('team admin').lean(),
       ClientPermission.distinct('user', { client: clientId, ...activePermissionFilter() }),
@@ -144,18 +178,17 @@ export async function ensureAssigneeAccess(actor, clientId, person, projectId) {
 /** Mongo filter for tasks the user can see. */
 export async function taskScope(user) {
   if (isSuper(user)) return { deletedAt: null };
-  const [managed, visible, projects] = await Promise.all([managedClientIds(user), visibleClientIds(user), grantedProjectIds(user)]);
-  // Admins see every task on clients they manage; anyone sees their own assigned tasks
-  // provided they still have access to that client.
+  const [visible, grants] = await Promise.all([visibleClientIds(user), grantedProjectIds(user)]);
+  const { clients, projects } = await taskPortfolio(user, grants);
   return {
     deletedAt: null,
     $or: [
-      { client: { $in: managed } },
-      { assignees: user._id, $or: [{ client: { $in: visible } }, { project: { $in: projects } }] },
+      ...portfolioFilter({ clients, projects }).$or,
+      { assignees: user._id, $or: [{ client: { $in: objectIds(visible) } }, { project: { $in: objectIds(grants) } }] },
     ],
   };
 }
 
-export function audit(actor, action, { entity, entityId, client, summary } = {}) {
-  return AuditLog.create({ actor: actor?._id, action, entity, entityId, client, summary }).catch(() => {});
+export function audit(actor, action, { entity, entityId, client, project, summary } = {}) {
+  return AuditLog.create({ actor: actor?._id, action, entity, entityId, client, project, summary }).catch(() => {});
 }

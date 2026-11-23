@@ -15,7 +15,7 @@ function cleanEmailMatches(list) {
 }
 import {
   audit, isSuper, clientAssignees, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
-  canGrantDirectly, activePermissionFilter, teamLeads,
+  canGrantDirectly, canEditTaskInProject, activePermissionFilter, teamLeads,
 } from '../services/access.js';
 
 const r = Router();
@@ -88,7 +88,6 @@ r.get('/clients/:id', ah(async (req, res) => {
 }));
 
 r.get('/clients/:id/assignees', ah(async (req, res) => {
-  if (!(await canManageClient(req.user, req.params.id))) throw new HttpError(403, 'Only managing admins can assign work');
   const client = await Client.findById(req.params.id).select('_id');
   if (!client) throw new HttpError(404, 'Client not found');
   const projectId = req.query.project;
@@ -96,7 +95,10 @@ r.get('/clients/:id/assignees', ah(async (req, res) => {
     !(await ClientProject.exists({ _id: projectId, client: client._id, deletedAt: null })))) {
     throw new HttpError(404, 'Project not found');
   }
-  res.json(await clientAssignees(req.user, client._id, projectId));
+  if (!await canEditTaskInProject(req.user, client._id, projectId)) throw new HttpError(403, 'You cannot assign work for this project');
+  res.json(await clientAssignees(req.user, client._id, projectId, {
+    existingAccessOnly: !await canManageClient(req.user, client._id),
+  }));
 }));
 
 r.patch('/clients/:id', ah(async (req, res) => {

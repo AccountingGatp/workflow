@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, Task, TaskTemplate, TeamMembership, User } from '../models/index.js';
+import { allProjectsEnabled, setAllProjectsEnabled } from '../services/project-access-settings.js';
 import { ah, HttpError, requireRole } from '../middleware/auth.js';
-import { canSeeClient, canSeeProject, canManageClient, canGrantDirectly, clientAssignees, grantedProjectIds, managedClientIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
+import { canSeeClient, canSeeProject, canManageClient, canManageProject, taskPortfolio, taskScope, canGrantDirectly, clientAssignees, grantedProjectIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
 
 const r = Router();
 const valid = (id) => mongoose.isValidObjectId(id);
@@ -32,12 +33,20 @@ async function findProject(clientId, id) {
   return project;
 }
 
+r.get('/settings/project-access', requireRole('super_admin'), ah(async (_req, res) => {
+  res.json({ enabled: await allProjectsEnabled() });
+}));
+
+r.put('/settings/project-access', requireRole('super_admin'), ah(async (req, res) => {
+  res.json({ enabled: await setAllProjectsEnabled(req.body?.enabled) });
+}));
+
 r.get('/users/:id/projects', requireRole('super_admin'), ah(async (req, res) => {
   const person = valid(req.params.id) && await User.findOne({ _id: req.params.id, active: true, deletedAt: null }).select('role');
   if (!person) throw new HttpError(404, 'Active person not found');
   const [clients, granted, visible] = await Promise.all([
     Client.find({ status: { $ne: 'inactive' } }).select('name standaloneProject').lean(),
-    grantedProjectIds(person),
+    grantedProjectIds(person, { includeDefault: false }),
     visibleClientIds(person),
   ]);
   const names = new Map(clients.filter((client) => !client.standaloneProject).map((client) => [String(client._id), client.name]));
@@ -76,7 +85,7 @@ r.put('/clients/:clientId/projects/:id/people/:userId', ah(async (req, res) => {
   if (!(await Client.exists({ _id: clientId, status: { $ne: 'inactive' } }))) throw new HttpError(400, 'This project is inactive');
   const person = valid(userId) && await User.findOne({ _id: userId, active: true, deletedAt: null }).select('name role');
   if (!person) throw new HttpError(404, 'Active person not found');
-  if (await canSeeProject(person, project)) return res.json({ ok: true });
+  if (await canSeeProject(person, project, { includeDefault: false })) return res.json({ ok: true });
   if (!(await canGrantDirectly(req.user, clientId, userId))) throw new HttpError(403, 'A Super Admin can assign this project to people outside your team');
   const filter = { project: project._id, user: person._id };
   try {
@@ -92,17 +101,20 @@ r.put('/clients/:clientId/projects/:id/people/:userId', ah(async (req, res) => {
 }));
 
 r.get('/projects', ah(async (req, res) => {
-  const [ids, granted, managed] = await Promise.all([visibleClientIds(req.user), grantedProjectIds(req.user), managedClientIds(req.user)]);
+  const [ids, granted] = await Promise.all([visibleClientIds(req.user), grantedProjectIds(req.user)]);
+  const { clients: managed, projects: portfolio } = await taskPortfolio(req.user, granted);
+  const portfolioIds = new Set(portfolio.map(String));
   const clients = await Client.find(ids === null ? {} : { _id: { $in: ids } }).select('name standaloneProject').lean();
   const clientInfo = new Map(clients.map((client) => [String(client._id), client]));
   const clientIds = clients.map(({ _id }) => _id);
   const projects = await ClientProject.find(ids === null ? { deletedAt: null } : {
-    deletedAt: null, $or: [{ client: { $in: clientIds } }, { _id: { $in: granted } }],
+    deletedAt: null, $or: [{ client: { $in: clientIds } }, { _id: { $in: [...granted, ...portfolio] } }],
   }).select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
   if (!projects.length) return res.json([]);
   const now = new Date();
+  const scope = await taskScope(req.user);
   const counts = await Task.aggregate([
-    { $match: { $or: [{ client: { $in: clientIds } }, { project: { $in: granted }, assignees: req.user._id }], project: { $in: projects.map(({ _id }) => _id) }, deletedAt: null, status: { $ne: 'done' } } },
+    { $match: { ...scope, project: { $in: projects.map(({ _id }) => _id) }, status: { $ne: 'done' } } },
     { $group: { _id: '$project', open: { $sum: 1 }, overdue: {
       $sum: { $cond: [{ $and: [{ $ne: [{ $ifNull: ['$dueDate', null] }, null] }, { $lt: ['$dueDate', now] }] }, 1, 0] },
     } } },
@@ -115,7 +127,7 @@ r.get('/projects', ah(async (req, res) => {
     return {
       ...project,
       clientName: reference?.name,
-      canManage: managed === null || managed.includes(String(project.client)),
+      canManage: managed === null || managed.includes(String(project.client)) || (req.user.role === 'manager' && portfolioIds.has(String(project._id))),
       clientInfoId: reference?._id,
       openTasks: tasks?.open || 0,
       overdueTasks: tasks?.overdue || 0,
@@ -139,16 +151,21 @@ r.post('/projects', requireRole('super_admin', 'manager', 'admin'), ah(async (re
 }));
 
 r.get('/clients/:clientId/projects', ah(async (req, res) => {
-  await check(req, req.params.clientId);
-  const manager = await canManageClient(req.user, req.params.clientId);
-  const projects = await ClientProject.find({ client: req.params.clientId, deletedAt: null }).sort({ name: 1 }).lean();
-  res.json(projects.map(p => safeProject(p, manager)));
+  const { clientId } = req.params;
+  if (!valid(clientId)) throw new HttpError(404, 'Client not found');
+  const seesClient = await canSeeClient(req.user, clientId);
+  const grants = seesClient || req.user.role === 'admin' ? null : await grantedProjectIds(req.user);
+  const projects = await ClientProject.find({ client: clientId, deletedAt: null, ...(grants && { _id: { $in: grants } }) }).sort({ name: 1 }).lean();
+  if (!seesClient && !projects.length) throw new HttpError(403, 'Client access denied');
+  const manager = await canManageClient(req.user, clientId);
+  res.json(projects.map(p => safeProject(p, manager || req.user.role === 'manager')));
 }));
 r.get('/clients/:clientId/projects/:id', ah(async (req, res) => {
   const { clientId, id } = req.params;
   const project = await findProject(clientId, id);
-  if (!(await canSeeProject(req.user, project))) throw new HttpError(403, 'Project access denied');
-  const [manager, clientReference, clientVisible, client] = await Promise.all([
+  if (req.user.role !== 'admin' && !(await canSeeProject(req.user, project))) throw new HttpError(403, 'Project access denied');
+  const [manager, clientManager, clientReference, clientVisible, client] = await Promise.all([
+    canManageProject(req.user, project),
     canManageClient(req.user, clientId),
     visibleReference(req.user, project.referenceClient),
     canSeeClient(req.user, clientId),
@@ -156,7 +173,7 @@ r.get('/clients/:clientId/projects/:id', ah(async (req, res) => {
   ]);
   if (!client) throw new HttpError(404, 'Project not found');
   res.json({ ...safeProject(project, manager), clientReference, workspace: {
-    name: client.name, standaloneProject: !!client.standaloneProject, canManage: manager, canSeeClient: clientVisible,
+    name: client.name, standaloneProject: !!client.standaloneProject, canManage: manager, canManageClient: clientManager, canEditTasks: manager || req.user.role === 'admin', canSeeClient: clientVisible,
   } });
 }));
 r.post('/clients/:clientId/projects', ah(async (req, res) => {
@@ -192,8 +209,8 @@ r.patch('/clients/:clientId/projects/:id/client-reference', ah(async (req, res) 
 }));
 
 r.patch('/clients/:clientId/projects/:id', ah(async (req, res) => {
-  await check(req, req.params.clientId, true);
-  if (!valid(req.params.id)) throw new HttpError(404, 'Project not found');
+  const existing = await findProject(req.params.clientId, req.params.id);
+  if (!await canManageProject(req.user, existing)) throw new HttpError(403, 'Project management access denied');
   const keys = ['name', 'description', 'businessType', 'website', 'contacts', 'team', 'scope', 'excluded', 'links', 'tools', 'automations', 'quality', 'guarantees', 'notes'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => keys.includes(k)));
   if (update.name !== undefined && !String(update.name).trim()) throw new HttpError(400, 'Name required');

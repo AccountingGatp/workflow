@@ -1,17 +1,18 @@
 import { User, TeamMembership, Client, ClientProject } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
-import { isSuper, ledTeamIds, managedClientIds, visibleClientIds, grantedProjectIds } from '../services/access.js';
+import { isSuper, ledTeamIds, managedClientIds, visibleClientIds, grantedProjectIds, taskPortfolio } from '../services/access.js';
 
 import { dailyReportSettings } from './settings.js';
 
 export async function dailyScope(user) {
   const own = String(user._id);
-  if (isSuper(user)) return { own, managed: null, visible: null, members: null, projects: [] };
+  if (isSuper(user)) return { own, managed: null, visible: null, members: null, projects: [], managerProjects: [] };
   const [managed, visible, teams, projects] = await Promise.all([managedClientIds(user), visibleClientIds(user), ledTeamIds(user), grantedProjectIds(user)]);
   const teamMembers = teams.length
     ? await TeamMembership.distinct('user', { team: { $in: teams }, removedAt: null })
     : [];
-  return { own, managed, visible, projects: projects.map(String), members: [...new Set([own, ...teamMembers.map(String)])] };
+  const managerProjects = user.role === 'manager' ? (await taskPortfolio(user, projects)).projects : [];
+  return { own, managed, visible, managerProjects, projects: projects.map(String), members: [...new Set([own, ...teamMembers.map(String)])] };
 }
 
 export const includes = (scope, id) => scope === null || scope.includes(String(id));

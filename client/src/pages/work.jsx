@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Users, Clock } from 'lucide-react';
 import { useApi, usePaginatedTasks, useAuth, STATUS, fmtDate } from '../lib.jsx';
-import { Avatar, Badge, Empty, PageHead, Skeleton } from '../ui.jsx';
+import { Avatar, Badge, Empty, ErrorBox, PageHead, Skeleton } from '../ui.jsx';
 import { TaskDrawer, TaskListCard, TaskPagination } from '../tasks.jsx';
 import { DailyTaskStatus } from './daily-work.jsx';
 
@@ -24,13 +24,17 @@ export function MyWork() {
 
 function ManagerOverview() {
   const clients = useApi('/clients');
+  const projects = useApi('/projects');
   const [clientId, setClientId] = useState('');
   const [projectId, setProjectId] = useState('');
   const [personId, setPersonId] = useState('');
   const [statusFilter, setStatusFilter] = useState('due');
   const [openId, setOpenId] = useState(null);
   const managed = (clients.data || []).filter(c => c.canManage);
-  const projectData = useApi(clientId ? `/clients/${clientId}/projects` : null, [clientId]);
+  const { user } = useAuth();
+  const availableProjects = (projects.data || []).filter((project) =>
+    (user.role === 'admin' || project.canManage) && (!clientId || project.client === clientId));
+  const selectedProject = availableProjects.find((project) => project._id === projectId);
   const workload = useApi(`/manager-workload?client=${clientId}&project=${projectId}`, [clientId, projectId]);
   const people = workload.data?.people || [];
   const totals = workload.data?.totals || {};
@@ -41,19 +45,20 @@ function ManagerOverview() {
   const selectedName = people.find(p => p._id === personId)?.name;
   const number = key => workload.data ? totals[key] || 0 : '—';
   return <>
-    <PageHead title="Manager overview" subtitle="Current deadlines, employee progress and project workload for the clients you manage." />
+    <PageHead title="Manager overview" subtitle="Deadlines, employee progress and workload for the projects you can manage." />
     <div className="row-wrap" style={{ marginBottom: 18, gap: 12 }}>
       <select className="select" aria-label="Select client" style={{ maxWidth: 360 }} value={clientId} onChange={e => { setClientId(e.target.value); setProjectId(''); setPersonId(''); }}>
-        <option value="">All my clients</option>
+        <option value="">All clients</option>
         {managed.map(c => <option key={c._id} value={c._id}>{c.name}</option>)}
       </select>
-      {clientId && <select className="select" aria-label="Select project" style={{ maxWidth: 310 }} value={projectId} onChange={e => { setProjectId(e.target.value); setPersonId(''); }}>
+      <select className="select" aria-label="Select project" style={{ maxWidth: 310 }} value={projectId} onChange={e => { setProjectId(e.target.value); setPersonId(''); }}>
         <option value="">All projects</option>
-        {(projectData.data || []).map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
-        <option value="unassigned">Needs project assignment</option>
-      </select>}
-      <span className="small muted">{managed.length} managed client{managed.length === 1 ? '' : 's'}</span>
+        {availableProjects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
+        {clientId && <option value="unassigned">Needs project assignment</option>}
+      </select>
+      {user.role === 'manager' && selectedProject && <Link className="btn" to={`/clients/${selectedProject.client}/projects/${selectedProject._id}?insights=1`}>View project insights</Link>}
     </div>
+    <ErrorBox error={workload.error || projects.error} />
     <div className="grid grid-4" style={{ marginBottom: 12 }}>
       <div className="card card-pad"><div className="small muted">Due now (today + overdue)</div><h2>{number('dueNow')}</h2></div>
       <div className="card card-pad"><div className="small muted">Due today</div><h2>{number('today')}</h2></div>
