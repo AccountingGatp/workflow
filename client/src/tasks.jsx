@@ -1,20 +1,23 @@
 import { useState } from 'react';
-import { Check, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2, ExternalLink, Link2 } from 'lucide-react';
-import { api, useApi, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
+import { Check, RotateCcw, X, BookOpen, ListChecks, History, Building2, Calendar, Flag, Crown, Repeat, Plus, Trash2, ExternalLink, Link2 } from 'lucide-react';
+import { api, useApi, useAuth, useToast, dueInfo, fmtDate, fmtTime, STATUS, toInputDate } from './lib.jsx';
 import { Avatar, Avatars, Badge, Drawer, Empty, Field, Modal, Skeleton, StatusBadge, ErrorBox } from './ui.jsx';
 
 /* ---------- List ---------- */
 
-export function TaskRow({ task, onOpen, onToggle, showPeople }) {
+export function TaskRow({ task, onOpen, onToggle, showPeople, canManage }) {
+  const { user } = useAuth();
+  const completed = task.status === 'done';
+  const canReopen = onToggle && (canManage || (!!user?._id && task.completedBy?._id === user._id));
   const due = dueInfo(task);
   const doneCount = task.checklist?.filter((c) => c.done).length || 0;
   return (
-    <div className="list-item" role="button" tabIndex={0} onClick={() => onOpen(task)} onKeyDown={(e) => e.key === 'Enter' && onOpen(task)}>
-      <button
+    <div className="list-item" role="button" tabIndex={0} onClick={() => onOpen(task)} onKeyDown={(e) => e.target === e.currentTarget && e.key === 'Enter' && onOpen(task)}>
+      {completed ? <span className="check done" aria-hidden="true"><Check size={14} strokeWidth={3} /></span> : <button
         className={`check ${task.status === 'done' ? 'done' : ''}`}
-        aria-label={task.status === 'done' ? 'Reopen task' : 'Complete task'}
+        aria-label="Complete task"
         onClick={(e) => { e.stopPropagation(); onToggle?.(task); }}
-      ><Check size={14} strokeWidth={3} /></button>
+      ><Check size={14} strokeWidth={3} /></button>}
       <div className="li-main">
         <div className="title" style={task.status === 'done' ? { textDecoration: 'line-through', color: 'var(--text-3)' } : undefined}>
           {task.title}{task.template && <Repeat size={12} style={{ marginLeft: 6, verticalAlign: -1, color: 'var(--text-3)' }} aria-label="Recurring" />}
@@ -33,6 +36,8 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
       {task.status !== 'todo' && task.status !== 'done' && <StatusBadge status={task.status} />}
       <Badge cls={due.cls}>{due.label}</Badge>
       <Avatars people={task.assignees} />
+      {completed && canReopen && <button type="button" className="btn btn-outline btn-sm"
+        onClick={(event) => { event.stopPropagation(); onToggle(task); }}><RotateCcw size={14} />Mark incomplete</button>}
     </div>
   );
 }
@@ -40,7 +45,7 @@ export function TaskRow({ task, onOpen, onToggle, showPeople }) {
 export function useTaskToggle(reload) {
   const toast = useToast();
   return async (task) => {
-    const status = task.status === 'done' ? 'todo' : 'done';
+    const status = task.status === 'done' ? 'in_progress' : 'done';
     try { await api(`/tasks/${task._id}`, { method: 'PATCH', body: { status } }); toast(status === 'done' ? 'Task completed' : 'Task reopened'); reload(); }
     catch (e) { toast(e.message); }
   };
@@ -139,6 +144,11 @@ export function TaskDrawer({ id, onClose, onChanged }) {
                   <button key={k} className={`chip ${task.status === k ? 'on' : ''}`} role="radio" aria-checked={(task.status === 'pending_review' ? 'in_progress' : task.status) === k} disabled={busy || !task.canChangeStatus} onClick={() => patch({ status: k })}>{v.label}</button>
                 ))}
               </div>
+
+              {task.status === 'done' && task.canChangeStatus && <button type="button" className="btn btn-outline btn-sm"
+                style={{ marginTop: 10 }} disabled={busy} onClick={() => patch({ status: 'in_progress' })}>
+                <RotateCcw size={14} />Mark incomplete
+              </button>}
 
               {(task.masterItem?.links || []).length > 0 && <>
                 <div className="section-title"><Link2 size={14}/>Task-specific references</div>
@@ -330,10 +340,10 @@ export function TaskPagination({ page, totalPages, total, pageSize, setPage }) {
   </div>;
 }
 
-export function TaskListCard({ tasks, loading, onOpen, onToggle, groups = true, showPeople, emptyTitle = 'Nothing here' }) {
+export function TaskListCard({ tasks, loading, onOpen, onToggle, groups = true, showPeople, canManage, emptyTitle = 'Nothing here' }) {
   if (loading && !tasks) return <div className="card"><Skeleton /></div>;
   if (!tasks?.length) return <div className="card"><Empty icon={ListChecks} title={emptyTitle} /></div>;
-  if (!groups) return <div className="card list">{tasks.map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} showPeople={showPeople} />)}</div>;
+  if (!groups) return <div className="card list">{tasks.map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} showPeople={showPeople} canManage={canManage} />)}</div>;
   const order = [['overdue', 'Overdue'], ['today', 'Today'], ['upcoming', 'Upcoming'], ['done', 'Recently completed']];
   const by = Object.groupBy ? Object.groupBy(tasks, (t) => dueInfo(t).bucket) : tasks.reduce((a, t) => ((a[dueInfo(t).bucket] ||= []).push(t), a), {});
   return (
@@ -341,7 +351,7 @@ export function TaskListCard({ tasks, loading, onOpen, onToggle, groups = true, 
       {order.filter(([k]) => by[k]?.length).map(([k, label]) => (
         <div key={k}>
           <div className="group-label"><span>{label}</span><span className="mono">{by[k].length}</span></div>
-          {by[k].map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} showPeople={showPeople} />)}
+          {by[k].map((t) => <TaskRow key={t._id} task={t} onOpen={onOpen} onToggle={onToggle} showPeople={showPeople} canManage={canManage} />)}
         </div>
       ))}
     </div>

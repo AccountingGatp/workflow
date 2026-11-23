@@ -304,7 +304,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
   enforce(own || includes(scope.members, memberId));
   const { status, version } = req.body;
   if (!['incomplete', 'complete'].includes(status)) fail('Choose a valid status');
-  const reason = status === 'incomplete' ? textValue(req.body.reason, 500) : undefined;
+  const reason = status === 'incomplete' && req.body.reason !== undefined ? textValue(req.body.reason, 500) : undefined;
 
   const submission = await models.Submission.db.transaction(async (session) => {
     const doc = await models.Submission.findById(`${memberId}:${date}`).session(session);
@@ -324,6 +324,8 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
       // Keep the saved Daily Work entry editable when its linked occurrence was removed.
       if (!task) entry.workflowStatus = 'unavailable';
     }
+    const wasComplete = task ? task.status === 'done' : entry.status === 'complete';
+    if (status === 'incomplete' && reason === undefined && !wasComplete) fail('Enter an incomplete note');
     if (task) {
       applyTaskTransition(task, { status: status === 'complete' ? 'done' : 'in_progress' }, {
         manager: includes(scope.managed, entry.clientId), isAssignee: own, actorId: req.user._id,
