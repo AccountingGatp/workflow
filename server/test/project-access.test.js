@@ -111,6 +111,28 @@ test('project assignment enables Daily Work without opening the rest of the clie
       projectId: siblingDaily._id, title: 'Blocked', hours: 1, priority: 'normal', status: 'incomplete',
     }] }, 403);
 
+    const assignedLead = await createUser('Project Lead', 'admin');
+    await ClientPermission.create({ client: client._id, user: assignedLead._id, grantedBy: admin._id });
+    const register = projectPath + '/work-items';
+    await Task.create({ title: 'Own entry', client: client._id, project: project._id, assignees: [assignedLead._id],
+      createdBy: assignedLead._id, dueDate: new Date() });
+    assert.equal((await request(assignedLead, register + '/access')).canEdit, false);
+    await Task.create({ title: 'Assigned project work', client: client._id, project: project._id,
+      assignees: [assignedLead._id], dueDate: new Date() });
+    assert.deepEqual(await request(assignedLead, register + '/access'), { canEdit: true, canArchive: false, role: 'admin' });
+    const people = await request(assignedLead, register + '/assignees');
+    assert.ok(people.some(({ _id }) => _id === String(employee._id)));
+    assert.ok(!people.some(({ _id }) => _id === String(coworker._id)));
+    const added = await request(assignedLead, register, 'POST', {
+      title: 'Add to register', responsibleUser: String(employee._id),
+    }, 201);
+    const updated = await request(assignedLead, register + '/' + added._id, 'PATCH', { title: 'Edit register task' });
+    assert.equal(updated.title, 'Edit register task');
+    await request(assignedLead, siblingPath + '/work-items', 'POST', { title: 'Blocked' }, 403);
+    await request(assignedLead, register + '/' + added._id, 'DELETE', undefined, 403);
+    const activity = await request(assignedLead, '/audit');
+    assert.deepEqual(new Set(activity.map(({ action }) => action)), new Set(['project.work.create', 'project.work.update']));
+
     await request(admin, projectPath, 'DELETE');
     assert.deepEqual(await request(employee, '/projects'), []);
     assert.deepEqual((await request(employee, dayPath)).projects, []);
