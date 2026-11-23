@@ -4,11 +4,12 @@ import { api, useApi, useToast } from '../lib.jsx';
 import { ErrorBox, Modal, Skeleton } from '../ui.jsx';
 
 const initial = {
-  title: '', category: 'Bookkeeping & Operations', frequency: '', executionDay: '',
+  title: '', category: '', frequency: '', executionDay: '',
   responsibleUser: '',
   responsible: '', weeklyHours: '', software: '', automationStatus: null, reminder: '', notes: '',
   links: [],
 };
+const frequencies = ['Daily', 'Weekly', 'Biweekly', 'Twice monthly', 'Monthly', 'Quarterly', 'Annually', 'As needed'];
 const basePath = (clientId, projectId) => `/clients/${clientId}/projects/${projectId}/work-items`;
 const validUrl = value => {
   try { const parsed = new URL(value); return parsed.protocol === 'https:'; } catch { return false; }
@@ -49,10 +50,10 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
     footer={<><button className="btn btn-ghost" onClick={onClose}>Cancel</button><button className="btn btn-primary" form="project-work-editor" disabled={saving || !f.title.trim()}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Add task'}</button></>}>
     <form id="project-work-editor" className="stack" style={{ gap: 16 }} onSubmit={save}>
       <ErrorBox error={error || people.error}/>
-      <div className="form-note">This task register documents scope, responsibilities and reference links. To assign dated work to employees, use New task or Recurring task on the project page.</div>
+      <div className="form-note">This task register documents scope, responsibilities and reference links. Use Recurring task on the project page to create a dated schedule.</div>
       {field('title','Task name','e.g. Weekly AP / AR review')}
       <div className="grid grid-2">
-        {field('category','Category')}
+        {field('category','Category (optional)')}
         <label className="stack" style={{ gap: 4 }}>
           <strong className="small">Assigned employee (existing Workflow account)</strong>
           <select className="select" value={f.responsibleUser || ''} onChange={e => set('responsibleUser', e.target.value)}>
@@ -63,7 +64,15 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
           </select>
           <span className="small muted">Source owner: {f.responsible || 'Not specified'}. Changing this register does not change an existing recurring schedule; edit the schedule separately.</span>
         </label>
-        {field('frequency','Frequency','Daily, Weekly, Monthly, As needed')}
+        <label className="stack" style={{ gap: 4 }}>
+          <strong className="small">Frequency</strong>
+          <select className="select" value={f.frequency || ''} onChange={e => set('frequency', e.target.value)}>
+            <option value="">Not specified</option>
+            {item?.frequency && !frequencies.includes(item.frequency) &&
+              <option value={item.frequency}>{item.frequency}</option>}
+            {frequencies.map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
         {field('executionDay','Execution day','e.g. Friday')}
         {field('weeklyHours','Estimated hours','e.g. 1 hour')}
         {field('software','Software','e.g. QBD, Gusto')}
@@ -122,7 +131,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
   return <section style={{ marginBottom: 28 }}>
     <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div><h2>Master task list</h2><p className="small muted">Original source frequency and execution day are shown in separate columns. Master records do not always have a dated employee schedule.</p></div>
-      {canEdit && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add master task</button>}
+      {canEdit && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
     </div>
     <div className="row-wrap" style={{ marginBottom: 14 }}>
       <div className="search" style={{ flex: '1 1 220px', maxWidth: 390 }}><Search size={16}/><input className="input" placeholder="Search project tasks, software or person..." value={q} onChange={e => setQ(e.target.value)}/></div>
@@ -133,7 +142,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
     </div>
     {register.error && <ErrorBox error={register.error}/>}
     {register.loading && !register.data ? <div className="card card-pad"><Skeleton rows={4}/></div> :
-    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit ? 'Use Add master task to add one.' : ''}</p></div> :
+    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit ? 'Use Add important task to add one.' : ''}</p></div> :
     <div className="card" style={{ overflow: 'hidden' }}><div className="table-wrap">
       <table>
         <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Source frequency</th><th>Execution day (source)</th><th>Software & time</th><th>References</th>{canEdit && <th>Manage</th>}</tr></thead>
