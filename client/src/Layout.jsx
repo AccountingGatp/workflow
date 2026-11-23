@@ -54,17 +54,17 @@ export default function Layout({ mailEnabled }) {
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
       <nav className={`sidebar ${open ? 'open' : ''}`} aria-label="Main">
         <div className="brand"><BrandName /></div>
-        {!can.super && item('/', CheckSquare, 'My work')}
+        {!can.super && !can.hr && item('/', CheckSquare, 'My work')}
         {item('/daily-work', CalendarCheck, 'Daily Work')}
-        {can.manage && item('/overview', LayoutDashboard, 'Overview')}
+        {(can.manage || can.hr) && item('/overview', LayoutDashboard, 'Overview')}
         {mailEnabled && item('/mail', MailIcon, 'Mail')}
         {item('/clients', FolderKanban, 'Projects')}
-        {can.manage && item('/recurring', Repeat, 'Recurring work')}
+        {(can.manage || can.hr) && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>
-        {can.super && item('/people', Users, 'People')}
+        {(can.super || can.hr) && item('/people', Users, 'People')}
         {can.super && item('/settings', Settings, 'Settings')}
         {can.manage && item('/access', ShieldCheck, 'Access', pending ? <span className="count">{pending}</span> : null)}
-        {can.manage && item('/audit', History, 'Activity log')}
+        {(can.manage || can.hr) && item('/audit', History, 'Activity log')}
         <div className="sidebar-foot">
           <div className="me">
             <Avatar name={user.name} />

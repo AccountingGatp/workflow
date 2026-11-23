@@ -123,7 +123,7 @@ r.post('/clients/:id/assignments', requireRole('super_admin'), ah(async (req, re
   if (!teamId && !adminId) throw new HttpError(400, 'Pick a team or an admin');
   if (adminId) {
     const admin = await User.findById(adminId);
-    if (!admin || admin.role === 'employee') throw new HttpError(400, 'Only Admins can manage clients');
+    if (!admin || !['super_admin', 'manager', 'admin'].includes(admin.role)) throw new HttpError(400, 'Only Admins can manage clients');
   }
   const filter = { client: req.params.id, endedAt: null, ...(teamId ? { team: teamId } : { admin: adminId }) };
   const a = (await ClientAssignment.findOne(filter)) || (await ClientAssignment.create(filter));

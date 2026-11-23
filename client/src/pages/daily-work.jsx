@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ClipboardList, Plus, Search, Send, StickyNote, Trash2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
 import { useDailyWorkReportQuery, useSaveDailyTaskStatusMutation } from '../daily-work-data.js';
-import { Badge, Empty, ErrorBox, PageHead, Skeleton } from '../ui.jsx';
+import { Avatar, Badge, Empty, ErrorBox, PageHead, Skeleton } from '../ui.jsx';
 
 const root = '/daily-work';
 const today = () => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' }).format(new Date());
@@ -504,11 +504,12 @@ function TaskStatusActions({ entry }) {
   </div>;
 }
 
-function TaskStatusTable({ entries }) {
+function TaskStatusTable({ entries, showMember = true }) {
+  const { can } = useAuth();
   return <div className="card table-wrap" role="region" aria-label="Daily task completion" tabIndex={0}>
     <table className="table daily-status-table">
-      <thead><tr><th scope="col">Task</th><th scope="col">Project</th><th scope="col">Member</th><th scope="col">Date</th>
-        <th scope="col">Hours</th><th scope="col">Priority</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+      <thead><tr><th scope="col">Task</th><th scope="col">Project</th>{showMember && <th scope="col">Member</th>}<th scope="col">Date</th>
+        <th scope="col">Hours</th><th scope="col">Priority</th><th scope="col">Status</th>{!can.hr && <th scope="col">Actions</th>}</tr></thead>
       <tbody>{entries.map((entry) => {
         const { date, memberId, memberName } = entry.submission;
         return <tr key={`${memberId}:${date}:${entry._id}`}>
@@ -518,15 +519,38 @@ function TaskStatusTable({ entries }) {
             {entry.status === 'incomplete' && entry.incompleteReason &&
               <p className="small daily-task-description"><strong>Incomplete note</strong> {entry.incompleteReason}</p>}
           </td>
-          <td>{entry.projectName}</td><td>{memberName}</td>
+          <td>{entry.projectName}</td>{showMember && <td>{memberName}</td>}
           <td><time dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></td>
           <td className="mono">{hours(entry.hours)}</td><td className="daily-status">{entry.priority}</td>
           <td><StatusBadge entry={entry} /></td>
-          <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} />}</td>
+          {!can.hr && <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} />}</td>}
         </tr>;
       })}</tbody>
     </table>
   </div>;
+}
+
+function IncompleteByEmployee({ entries }) {
+  const groups = new Map();
+  for (const entry of entries) {
+    const { memberId, memberName } = entry.submission;
+    if (!groups.has(memberId)) groups.set(memberId, { memberId, memberName, tasks: [] });
+    groups.get(memberId).tasks.push(entry);
+  }
+  const employees = [...groups.values()].sort((a, b) => a.memberName.localeCompare(b.memberName));
+
+  return <section className="stack" aria-label="Employees with incomplete tasks">
+    {employees.map(({ memberId, memberName, tasks }) => <details className="card incomplete-employee" key={memberId}>
+      <summary className="row-wrap">
+        <Avatar name={memberName} size="sm" />
+        <strong>{memberName}</strong>
+        <span className="spacer" />
+        <Badge cls="b-warning">{tasks.length} incomplete</Badge>
+        <ChevronDown size={16} aria-hidden="true" />
+      </summary>
+      <TaskStatusTable entries={tasks} showMember={false} />
+    </details>)}
+  </section>;
 }
 
 export function DailyTaskStatus({ date = today(), projectId }) {
@@ -616,7 +640,7 @@ function DailyReports({ tab, date, setDate, openEntry, me, fixedProjectId }) {
       <ErrorBox error={error || slackError} />
     </div>
     {loading ? <Skeleton /> : data && (!entries.length ? <div className="card"><Empty title="No daily work matches these filters" /></div> :
-      tab === 'status' ? <TaskStatusTable entries={entries} /> : tab === 'summary' ? <>
+      tab === 'status' ? (status === 'incomplete' ? <IncompleteByEmployee entries={entries} /> : <TaskStatusTable entries={entries} />) : tab === 'summary' ? <>
         <div className="daily-metrics">
           <div className="card daily-card"><span>Logged hours</span><strong>{totalHours(entries)}</strong></div>
           <div className="card daily-card"><span>Tasks</span><strong>{entries.length}</strong></div>
@@ -659,10 +683,11 @@ export default function DailyWork() {
   const toast = useToast();
   const [sendingMissing, setSendingMissing] = useState(false);
   const [missingError, setMissingError] = useState(null);
-  const tabs = [['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
+  const tabs = [
+    ...(!can.hr ? [['entry', 'Add Projects']] : []), ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
   const requested = params.get('tab');
-  const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
+  const tab = tabs.some(([id]) => id === requested) ? requested : can.hr ? 'status' : 'entry';
   const day = useApi(tab === 'entry' ? `${root}/day/${date}` : null);
   const choose = (id) => setParams(id === 'entry' ? {} : { tab: id });
   const reportDate = ['entry', 'missing'].includes(tab) ? date : today();
@@ -729,7 +754,7 @@ export default function DailyWork() {
     {tab === 'entry' && (day.error ? <ErrorBox error={day.error} /> : day.loading || day.data?.date !== date ? <Skeleton /> :
       <EntryEditor key={date} date={date} data={day.data} />)}
     {tab === 'status' && <DailyTaskStatus date={date} />}
-    {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
+    {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={can.hr ? undefined : user._id} />}
     {tab === 'missing' && <Missing date={date} preview={can.super ? preview : undefined} />}
   </div>;
 }

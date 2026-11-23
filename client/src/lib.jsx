@@ -115,6 +115,7 @@ export function AuthProvider({ children }) {
   };
   const can = {
     super: user?.role === 'super_admin',
+    hr: user?.role === 'hr',
     manage: ['super_admin', 'manager', 'admin'].includes(user?.role),
     editTasks: ['super_admin', 'manager'].includes(user?.role),
   };
@@ -131,7 +132,7 @@ export function ToastProvider({ children }) {
 }
 
 /* ---------- Formatting ---------- */
-export const ROLE_LABEL = { super_admin: 'Super Admin', manager: 'Admin / Manager', admin: 'Admin / TL', employee: 'Employee' };
+export const ROLE_LABEL = { super_admin: 'Super Admin', manager: 'Admin / Manager', admin: 'Admin / TL', hr: 'HR', employee: 'Employee' };
 export const STATUS = {
   todo: { label: 'To do', cls: '' },
   in_progress: { label: 'In progress', cls: 'b-info' },

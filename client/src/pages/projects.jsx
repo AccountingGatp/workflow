@@ -249,7 +249,7 @@ export function ClientProjects() {
   const seeClient = !projectId || workspace?.canSeeClient;
   const canManage = !!workspace?.canManage;
   const canEditTasks = !!workspace?.canEditTasks;
-  const canViewInsights = canManage && (can.super || user.role === 'manager');
+  const canViewInsights = can.hr || (canManage && (can.super || user.role === 'manager'));
   return <>
     <div className="row-wrap small" style={{ marginBottom: 12 }}>
       <Link to="/clients">Projects</Link><span className="muted">/</span>
@@ -270,7 +270,7 @@ export function ClientProjects() {
         </button>}
       </>}
       {projectId && canEditTasks && <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>}
-      {projectId && canViewInsights && <button className="btn btn-outline" aria-expanded={showInsights} onClick={() => setSearchParams(showInsights ? {} : { insights: '1' }, { replace: true })}>
+      {projectId && p && canViewInsights && <button className="btn btn-outline" aria-expanded={showInsights} onClick={() => setSearchParams(showInsights ? {} : { insights: '1' }, { replace: true })}>
         {showInsights ? 'Hide insights' : 'Project insights'}
       </button>}
     </PageHead>
@@ -312,7 +312,7 @@ export function ClientProjects() {
             <button key={v} className={`chip ${workView === v ? 'on' : ''}`} onClick={() => setWorkView(v)}>{l}</button>
           )}</div>
         </div>
-        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenTask(t._id)} onToggle={toggleTask} canManage={canEditTasks} showPeople emptyTitle="No tasks for this project yet" />
+        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenTask(t._id)} onToggle={can.hr ? undefined : toggleTask} canManage={canEditTasks} showPeople emptyTitle="No tasks for this project yet" />
         <TaskPagination {...tasks} />
       </section>
       <div className="grid grid-2">

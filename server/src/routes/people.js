@@ -59,9 +59,9 @@ r.post('/sign-in-requests/:email/:decision', requireRole('super_admin'), ah(asyn
 r.get('/users', ah(async (req, res) => {
   // Everyone signed in may look up colleagues by name (needed for assigning work);
   // memberships are attached so the UI can show which teams each person is in.
-  const includeReport = isSuper(req.user) && req.query.dailyReport === '1';
+  const includeReport = (isSuper(req.user) || req.user.role === 'hr') && req.query.dailyReport === '1';
   const users = await User.find({ deletedAt: null })
-    .select(includeReport ? '+slackUserId +dailyReport' : isSuper(req.user) ? '+slackUserId' : '').sort({ name: 1 }).lean();
+    .select([isSuper(req.user) && '+slackUserId', includeReport && '+dailyReport'].filter(Boolean).join(' ')).sort({ name: 1 }).lean();
   const memberships = await TeamMembership.find({ removedAt: null }).populate('team', 'name color').lean();
   const byUser = {};
   for (const m of memberships) (byUser[m.user] ||= []).push({ team: m.team, teamRole: m.teamRole });

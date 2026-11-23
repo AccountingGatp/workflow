@@ -62,7 +62,10 @@ mailPublic.get('/mail/oauth/callback', ah(async (req, res) => {
   }
 }));
 
-r.use(requireAuth);
+r.use('/mail', requireAuth, (req, res, next) => {
+  if (req.user.role === 'hr') return res.status(403).json({ error: 'Mail access denied' });
+  next();
+});
 
 r.get('/mail/accounts', requireRole('super_admin', 'manager', 'admin'), ah(async (req, res) => {
   const led = await ledTeamIds(req.user);

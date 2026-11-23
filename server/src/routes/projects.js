@@ -127,7 +127,8 @@ r.get('/projects', ah(async (req, res) => {
     return {
       ...project,
       clientName: reference?.name,
-      canManage: managed === null || managed.includes(String(project.client)) || (req.user.role === 'manager' && portfolioIds.has(String(project._id))),
+      canManage: req.user.role !== 'hr' && (managed === null || managed.includes(String(project.client)) ||
+        (req.user.role === 'manager' && portfolioIds.has(String(project._id)))),
       clientInfoId: reference?._id,
       openTasks: tasks?.open || 0,
       overdueTasks: tasks?.overdue || 0,

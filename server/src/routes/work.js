@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Task, TaskTemplate, AuditLog, User, ClientPermission, ClientProject, ProjectWorkItem } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
-  audit, isSuper, canMaintainTasks, taskScope, canManageClient, canEditTaskInProject, taskPortfolio, portfolioFilter, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
+  audit, isSuper, canMonitorAllWork, canMaintainTasks, taskScope, canManageClient, canEditTaskInProject, taskPortfolio, portfolioFilter, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 import { scheduleFields } from '../services/schedule.js';
@@ -124,7 +124,7 @@ r.get('/manager-workload', ah(async (req, res) => {
   if (projectId && projectId !== 'unassigned') {
     if (!mongoose.isValidObjectId(projectId)) throw new HttpError(400, 'Invalid project');
     const project = await ClientProject.findOne({ _id: projectId, deletedAt: null }).select('client');
-    if (!project || (clientId && String(project.client) !== String(clientId)) || !(await canEditTaskInProject(req.user, project.client, projectId))) throw new HttpError(403, 'Project unavailable');
+    if (!project || (clientId && String(project.client) !== String(clientId)) || (!canMonitorAllWork(req.user) && !(await canEditTaskInProject(req.user, project.client, projectId)))) throw new HttpError(403, 'Project unavailable');
   }
   if (projectId === 'unassigned' && !clientId) throw new HttpError(400, 'Choose a client first');
   const selection = {
@@ -188,7 +188,7 @@ r.get('/tasks/:id', ah(async (req, res) => {
   if (!task) throw new HttpError(404, 'Task not found');
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id, $or: taskActivity }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
   const canEdit = await canEditTaskInProject(req.user, task.client._id, task.project?._id);
-  const isAssignee = task.assignees.some((person) => String(person._id) === String(req.user._id));
+  const isAssignee = req.user.role !== 'hr' && task.assignees.some((person) => String(person._id) === String(req.user._id));
   res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || (isAssignee &&
     (task.status !== 'done' || String(task.completedBy?._id) === String(req.user._id))),
     canChangeChecklist: canEdit || (task.status !== 'done' && isAssignee), canDelete: isSuper(req.user) });
@@ -283,7 +283,7 @@ r.get('/templates', ah(async (req, res) => {
   const filter = portfolioFilter(portfolio);
   const templates = await TaskTemplate.find(filter).sort({ createdAt: -1 })
     .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name role').select('-reviewer').lean();
-  res.json(templates.map((template) => ({ ...template, canEdit: true, canDelete: canMaintainTasks(req.user) && (managed === null || managed.includes(String(template.client?._id))) })));
+  res.json(templates.map((template) => ({ ...template, canEdit: req.user.role !== 'hr', canDelete: canMaintainTasks(req.user) && (managed === null || managed.includes(String(template.client?._id))) })));
 }));
 
 r.post('/templates', ah(async (req, res) => {

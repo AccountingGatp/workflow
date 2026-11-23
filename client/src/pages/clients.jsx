@@ -122,6 +122,7 @@ function ClientForm({ onClose, onSaved }) {
 }
 
 export function ClientDetail() {
+  const { can } = useAuth();
   const { id } = useParams();
   const { data: c, error, reload } = useApi(`/clients/${id}`, [id]);
   const [show, setShow] = useState('open');
@@ -218,7 +219,7 @@ export function ClientDetail() {
             <button key={k} className={`chip ${show === k ? 'on' : ''}`} onClick={() => setShow(k)}>{l}</button>
           )}</div>
         </div>
-        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenId(t._id)} onToggle={toggle} emptyTitle="No tasks for this client" />
+        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenId(t._id)} onToggle={can.hr ? undefined : toggle} emptyTitle="No tasks for this client" />
         <TaskPagination {...tasks} />
       </div>}
       {openId && <TaskDrawer id={openId} onClose={() => setOpenId(null)} onChanged={tasks.reload} />}
@@ -303,7 +304,7 @@ function AssignManager({ client, onClose, onSaved }) {
       <Field label="Add a team"><div className="chips">{(teams.data || []).filter((t) => !hasTeam.has(t._id)).map((t) => (
         <button key={t._id} className="chip" onClick={() => assign({ teamId: t._id })}><span className="team-dot" style={{ background: t.color }} />{t.name}</button>
       ))}</div></Field>
-      <Field label="Add an extra manager" hint="The team’s TL already manages the client. Add someone here only if another Admin / TL should too."><div className="chips">{(users.data || []).filter((u) => u.role !== 'employee' && !hasAdmin.has(u._id)).map((u) => (
+      <Field label="Add an extra manager" hint="The team’s TL already manages the client. Add someone here only if another Admin / TL should too."><div className="chips">{(users.data || []).filter((u) => ['super_admin', 'manager', 'admin'].includes(u.role) && !hasAdmin.has(u._id)).map((u) => (
         <button key={u._id} className="chip" style={{ paddingLeft: 4 }} onClick={() => assign({ adminId: u._id })}><Avatar name={u.name} size="sm" />{u.name}<span className="muted small">{ROLE_LABEL[u.role]}</span></button>
       ))}</div></Field>
     </Modal>

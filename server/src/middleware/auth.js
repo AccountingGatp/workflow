@@ -62,6 +62,13 @@ export async function requireAuth(req, res, next) {
   }
 }
 
+export function enforceWorkReadOnly(req, res, next) {
+  if (req.user.role === 'hr' && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return res.status(403).json({ error: 'HR has read-only Workflow access' });
+  }
+  next();
+}
+
 export const requireRole = (...roles) => (req, res, next) =>
   roles.includes(req.user.role) ? next() : res.status(403).json({ error: 'You do not have permission for this' });
 

@@ -494,3 +494,18 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .assignment-list li:last-child { border-bottom: 0; }
 .assignment-list li > div { min-width: 0; overflow-wrap: anywhere; }
 .assignment-list li > :last-child { flex-shrink: 0; }
+
+.incomplete-employee > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 16px;
+}
+.incomplete-employee > summary::-webkit-details-marker { display: none; }
+.incomplete-employee > summary:focus-visible { outline-offset: -3px; }
+.incomplete-employee[open] > summary > svg:last-child { transform: rotate(180deg); }
+.incomplete-employee > .table-wrap {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}

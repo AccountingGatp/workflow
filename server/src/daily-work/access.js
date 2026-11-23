@@ -1,12 +1,12 @@
 import { User, TeamMembership, Client, ClientProject } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
-import { isSuper, ledTeamIds, managedClientIds, visibleClientIds, grantedProjectIds, taskPortfolio } from '../services/access.js';
+import { canMonitorAllWork, ledTeamIds, managedClientIds, visibleClientIds, grantedProjectIds, taskPortfolio } from '../services/access.js';
 
 import { dailyReportSettings } from './settings.js';
 
 export async function dailyScope(user) {
   const own = String(user._id);
-  if (isSuper(user)) return { own, managed: null, visible: null, members: null, projects: [], managerProjects: [] };
+  if (canMonitorAllWork(user)) return { own, managed: null, visible: null, members: null, projects: [], managerProjects: [], readOnly: user.role === 'hr' };
   const [managed, visible, teams, projects] = await Promise.all([managedClientIds(user), visibleClientIds(user), ledTeamIds(user), grantedProjectIds(user)]);
   const teamMembers = teams.length
     ? await TeamMembership.distinct('user', { team: { $in: teams }, removedAt: null })
