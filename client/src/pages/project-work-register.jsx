@@ -122,7 +122,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
   return <section style={{ marginBottom: 28 }}>
     <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div><h2>Master task list</h2><p className="small muted">Original source frequency and execution day are shown in separate columns. Master records do not always have a dated employee schedule.</p></div>
-      {canEdit && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
+      {canEdit && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add master task</button>}
     </div>
     <div className="row-wrap" style={{ marginBottom: 14 }}>
       <div className="search" style={{ flex: '1 1 220px', maxWidth: 390 }}><Search size={16}/><input className="input" placeholder="Search project tasks, software or person..." value={q} onChange={e => setQ(e.target.value)}/></div>
@@ -133,7 +133,7 @@ export default function ProjectWorkRegister({ clientId, projectId, canManage, ca
     </div>
     {register.error && <ErrorBox error={register.error}/>}
     {register.loading && !register.data ? <div className="card card-pad"><Skeleton rows={4}/></div> :
-    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit ? 'Use Add important task to add one.' : ''}</p></div> :
+    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit ? 'Use Add master task to add one.' : ''}</p></div> :
     <div className="card" style={{ overflow: 'hidden' }}><div className="table-wrap">
       <table>
         <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Source frequency</th><th>Execution day (source)</th><th>Software & time</th><th>References</th>{canEdit && <th>Manage</th>}</tr></thead>

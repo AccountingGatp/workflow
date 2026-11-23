@@ -190,7 +190,8 @@ r.get('/tasks/:id', ah(async (req, res) => {
   const activity = await AuditLog.find({ entity: 'Task', entityId: task._id, $or: taskActivity }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
   const canEdit = await canManageClient(req.user, task.client._id);
   const isAssignee = task.assignees.some((person) => String(person._id) === String(req.user._id));
-  res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || isAssignee,
+  res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || (isAssignee &&
+    (task.status !== 'done' || String(task.completedBy?._id) === String(req.user._id))),
     canChangeChecklist: canEdit || (task.status !== 'done' && isAssignee), canDelete: isSuper(req.user) });
 }));
 

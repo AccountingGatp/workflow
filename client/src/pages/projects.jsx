@@ -303,7 +303,7 @@ export function ClientProjects() {
             <button key={v} className={`chip ${workView === v ? 'on' : ''}`} onClick={() => setWorkView(v)}>{l}</button>
           )}</div>
         </div>
-        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenTask(t._id)} onToggle={toggleTask} showPeople emptyTitle="No tasks for this project yet" />
+        <TaskListCard tasks={tasks.data} loading={tasks.loading} onOpen={t => setOpenTask(t._id)} onToggle={toggleTask} canManage={canManage} showPeople emptyTitle="No tasks for this project yet" />
         <TaskPagination {...tasks} />
       </section>
       <div className="grid grid-2">

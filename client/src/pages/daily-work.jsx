@@ -467,10 +467,10 @@ function TaskStatusActions({ entry }) {
     try {
       await saveStatus({
         date: submission.date, memberId: submission.memberId, entryId: entry._id,
-        status, reason, version: submission.version,
+        status, reason: showReason ? reason : undefined, version: submission.version,
       }).unwrap();
       setShowReason(false);
-      toast('Task status saved.');
+      toast(status === 'complete' ? 'Task completed.' : 'Task marked incomplete.');
     } catch (error) {
       setError(error);
     }
@@ -488,12 +488,17 @@ function TaskStatusActions({ entry }) {
         </div>
       </form>
       : <div className="row-wrap">
-        {entry.status !== 'complete' &&
-          <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save('complete')}>{busy ? 'Saving…' : 'Mark completed'}</button>}
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
-          setReason(entry.incompleteReason || '');
-          setShowReason(true);
-        }}>{entry.status === 'complete' ? 'Mark incomplete' : entry.incompleteReason ? 'Edit incomplete note' : 'Add incomplete note'}</button>
+        {entry.status === 'complete'
+          ? <button type="button" className="btn btn-outline btn-sm" disabled={busy}
+              onClick={() => save('incomplete')}>{busy ? 'Saving…' : 'Mark incomplete'}</button>
+          : <>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy}
+              onClick={() => save('complete')}>{busy ? 'Saving…' : 'Mark completed'}</button>
+            <button type="button" className="btn btn-sm" disabled={busy} onClick={() => {
+              setReason(entry.incompleteReason || '');
+              setShowReason(true);
+            }}>{entry.incompleteReason ? 'Edit incomplete note' : 'Add incomplete note'}</button>
+          </>}
       </div>}
     <ErrorBox error={error} />
   </div>;
