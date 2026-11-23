@@ -683,10 +683,10 @@ export default function DailyWork() {
       <ErrorBox error={preview.error} />
       {preview.loading ? <p role="status" className="small muted">Checking submissions…</p> : preview.data && <>
         <p className="small muted">
-          {!preview.data.expected ? 'No employees are expected to submit at this check.'
+          {!preview.data.expected ? 'No staff to check yet.'
             : preview.data.missing.length
-              ? `${preview.data.missing.length} of ${preview.data.expected} expected employees haven’t submitted. Slack will list the people below.`
-              : `All ${preview.data.expected} expected employees have submitted.`}
+              ? `${preview.data.missing.length} haven’t submitted`
+              : 'Everyone has submitted.'}
         </p>
         {!preview.data.slackEnabled && <p className="small muted">Slack is not configured.</p>}
         {!!preview.data.missing.length && <ul className="missing-slack-names" aria-label="Employees who haven’t submitted">
