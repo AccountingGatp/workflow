@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { workflowMcpRouter } from './mcp/index.js';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import { ah, enforceWorkReadOnly, requireAuth, requireRole } from './middleware/auth.js';
@@ -57,6 +58,7 @@ export function ready() {
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
+app.use(workflowMcpRouter());
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 app.get('/api/config', (_req, res) => res.json({ demo: demoLoginEnabled(), emailLoginConfigured: emailLoginConfigured(), googleSignInClientId: process.env.GOOGLE_SIGN_IN_CLIENT_ID || null }));

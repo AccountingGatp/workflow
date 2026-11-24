@@ -10,6 +10,12 @@
     }
   },
   "rewrites": [
+    { "source": "/authorize", "destination": "/api" },
+    { "source": "/token", "destination": "/api" },
+    { "source": "/register", "destination": "/api" },
+    { "source": "/revoke", "destination": "/api" },
+    { "source": "/.well-known/oauth-authorization-server", "destination": "/api" },
+    { "source": "/.well-known/oauth-protected-resource/api/mcp", "destination": "/api" },
     {
       "source": "/api/(.*)",
       "destination": "/api"

@@ -92,19 +92,21 @@ const taskFilters = async (req, dates, weeklyMonthly) => {
 };
 
 /* Lists are paginated in MongoDB; counts never depend on the number of tasks returned. */
-r.get('/tasks', ah(async (req, res) => {
-  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(req.query.pageSize, 10) || 25));
+export async function listTasks(user, query) {
+  const page = Math.max(1, Number.parseInt(query.page, 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize, 10) || 25));
   if (page > 100000) throw new HttpError(400, 'Page out of range');
   const dates = dayBounds();
   const weeklyMonthly = await upcomingTemplateIds();
-  const filter = await taskFilters(req, dates, weeklyMonthly);
+  const filter = await taskFilters({ user, query }, dates, weeklyMonthly);
   const [total, items] = await Promise.all([
     Task.countDocuments(filter),
-    populateTask(Task.find(filter).sort(['completed', 'done'].includes(req.query.view) ? { completedAt: -1, _id: -1 } : { dueDate: 1, _id: 1 }).skip((page - 1) * pageSize).limit(pageSize)).lean(),
+    populateTask(Task.find(filter).sort(['completed', 'done'].includes(query.view) ? { completedAt: -1, _id: -1 } : { dueDate: 1, _id: 1 }).skip((page - 1) * pageSize).limit(pageSize)).lean(),
   ]);
-  res.json({ items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) });
-}));
+  return { items, page, pageSize, total, totalPages: Math.ceil(total / pageSize) };
+}
+
+r.get('/tasks', ah(async (req, res) => res.json(await listTasks(req.user, req.query))));
 
 r.get('/task-summary', ah(async (req, res) => {
   const dates = dayBounds();
@@ -194,27 +196,27 @@ r.get('/tasks/:id', ah(async (req, res) => {
     canChangeChecklist: canEdit || (task.status !== 'done' && isAssignee), canDelete: isSuper(req.user) });
 }));
 
-r.post('/tasks', ah(async (req, res) => {
-  const { title, client, project, team, assignees = [], owner, dueDate, priority, sop, checklist = [] } = req.body || {};
+export async function createTask(user, body) {
+  const { title, client, project, team, assignees = [], owner, dueDate, priority, sop, checklist = [] } = body || {};
   if (!title || !client || !dueDate) throw new HttpError(400, 'Title, client and due date are required');
-  if (!(await canEditTaskInProject(req.user, client, project))) throw new HttpError(403, 'You can only create work for projects you manage');
+  if (!(await canEditTaskInProject(user, client, project))) throw new HttpError(403, 'You can only create work for projects you manage');
   const validProject = await validateProject(client, project);
-  await assertAssignable(req.user, client, assignees, validProject);
+  await assertAssignable(user, client, assignees, validProject);
   const task = await Task.create({
     title, client, project: validProject, team: team || undefined, assignees, owner: owner || assignees[0], dueDate, priority, sop,
-    checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: req.user._id,
+    checklist: checklist.filter(Boolean).map((text) => ({ text })), createdBy: user._id,
   });
-  await audit(req.user, 'task.create', { entity: 'Task', entityId: task._id, client, project: task.project, summary: `Created “${title}”` });
-  res.status(201).json(task);
-}));
+  await audit(user, 'task.create', { entity: 'Task', entityId: task._id, client, project: task.project, summary: `Created “${title}”` });
+  return task;
+}
 
-r.patch('/tasks/:id', ah(async (req, res) => {
-  const task = await Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) });
+export async function updateTask(user, id, body) {
+  const task = await Task.findOne({ _id: id, ...(await taskScope(user)) });
   if (!task) throw new HttpError(404, 'Task not found');
-  const manager = await canEditTaskInProject(req.user, task.client, task.project);
-  const isAssignee = task.assignees.some((a) => String(a) === String(req.user._id));
+  body ??= {};
+  const manager = await canEditTaskInProject(user, task.client, task.project);
+  const isAssignee = task.assignees.some((a) => String(a) === String(user._id));
   if (!manager && !isAssignee) throw new HttpError(403, 'Only assignees or client managers can update this task');
-  const body = req.body || {};
   if (!manager && taskDetailFields.some((field) => body[field] !== undefined)) {
     throw new HttpError(403, 'You do not have permission to edit this task');
   }
@@ -228,13 +230,13 @@ r.patch('/tasks/:id', ah(async (req, res) => {
     const item = task.checklist.id(body.checklistItem.id);
     if (!item) throw new HttpError(404, 'Checklist item not found');
     item.done = !!body.checklistItem.done;
-    item.doneBy = item.done ? req.user._id : undefined;
+    item.doneBy = item.done ? user._id : undefined;
     item.doneAt = item.done ? new Date() : undefined;
   }
   if (manager) {
     if (body.project !== undefined) {
       const project = await validateProject(task.client, body.project);
-      if (!await canEditTaskInProject(req.user, task.client, project)) throw new HttpError(403, 'You cannot move this task to that project');
+      if (!await canEditTaskInProject(user, task.client, project)) throw new HttpError(403, 'You cannot move this task to that project');
       task.project = project;
     }
     for (const k of ['title', 'dueDate', 'priority', 'sop', 'owner', 'team']) {
@@ -244,13 +246,13 @@ r.patch('/tasks/:id', ah(async (req, res) => {
       }
     }
     if (task.isModified('project') && body.assignees === undefined) {
-      await assertAssignable(req.user, task.client, task.assignees, task.project);
+      await assertAssignable(user, task.client, task.assignees, task.project);
     }
     if (body.assignees !== undefined) {
       if (!Array.isArray(body.assignees) || body.assignees.some((id) => typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id))) {
         throw new HttpError(400, 'Select valid assignees');
       }
-      await assertAssignable(req.user, task.client, body.assignees, task.project);
+      await assertAssignable(user, task.client, body.assignees, task.project);
       task.assignees = body.assignees;
       if (!body.assignees.some((a) => String(a) === String(task.owner))) task.owner = body.assignees[0];
     }
@@ -259,21 +261,25 @@ r.patch('/tasks/:id', ah(async (req, res) => {
   const reopen = (task.status === 'done' || task.status === 'pending_review') &&
     (task.isModified('checklist') || ['title', 'dueDate', 'sop', 'assignees', 'project'].some((field) => task.isModified(field)));
   const status = body.status || (reopen ? 'in_progress' : undefined);
-  if (status) applyTaskTransition(task, { status }, { manager, isAssignee, actorId: req.user._id });
+  if (status) applyTaskTransition(task, { status }, { manager, isAssignee, actorId: user._id });
   await task.save();
-  if (edited && !task.dailyWorkCustom) await audit(req.user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Edited “${task.title}”` });
-  res.json(task);
-}));
+  if (edited && !task.dailyWorkCustom) await audit(user, 'task.update', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Edited “${task.title}”` });
+  return task;
+}
 
-r.delete('/tasks/:id', ah(async (req, res) => {
-  if (!isSuper(req.user)) throw new HttpError(403, 'Only Super Admins can delete tasks');
-  const task = await Task.findOne({ _id: req.params.id, deletedAt: null });
+export async function deleteTask(user, id) {
+  if (!isSuper(user)) throw new HttpError(403, 'Only Super Admins can delete tasks');
+  const task = await Task.findOne({ _id: id, deletedAt: null });
   if (!task) throw new HttpError(404, 'Task not found');
   task.deletedAt = new Date(); task.status = 'cancelled';
   await task.save();
-  await audit(req.user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Deleted task occurrence “${task.title}”` });
-  res.json({ ok: true });
-}));
+  await audit(user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Deleted task occurrence “${task.title}”` });
+  return { ok: true };
+}
+
+r.post('/tasks', ah(async (req, res) => res.status(201).json(await createTask(req.user, req.body))));
+r.patch('/tasks/:id', ah(async (req, res) => res.json(await updateTask(req.user, req.params.id, req.body))));
+r.delete('/tasks/:id', ah(async (req, res) => res.json(await deleteTask(req.user, req.params.id))));
 
 /* ---------- Recurring templates ---------- */
 
