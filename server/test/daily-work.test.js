@@ -10,6 +10,7 @@ import { dailyModels } from '../src/daily-work/models.js';
 import { setCurrentLeave } from '../src/daily-work/leave.js';
 import { clock, shiftDate } from '../src/daily-work/dates.js';
 import { runDailyWorkJobs } from '../src/daily-work/jobs.js';
+import { generateRecurringTasks } from '../src/services/recurrence.js';
 import { dailySubmissionText } from '../src/daily-work/slack.js';
 
 test('daily Slack text groups numbered tasks and matches the requested layout', () => {
@@ -585,6 +586,42 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '18:35'));
     await runDailyWorkJobs(at(shiftDate(reminderDay, 2), '19:00'));
     assert.equal(calls.length, callsBeforeCustom + 2);
+
+    const picker = await person('Self selector', 'employee');
+    await ClientPermission.create({ client: client._id, user: picker._id, grantedBy: owner._id });
+    const old = await Task.create({ client: client._id, project: project._id, title: 'Old direct assignment',
+      assignees: [picker._id], createdBy: owner._id, dueDate: new Date(date) });
+    assert.equal((await request(picker, '/tasks?scope=mine')).total, 1);
+    await request(picker, `/users/${picker._id}`, 'PATCH', { directAssignmentsPaused: true }, 403);
+    await request(owner, `/users/${picker._id}`, 'PATCH', { directAssignmentsPaused: 'true' }, 400);
+    await request(owner, `/users/${picker._id}`, 'PATCH', { directAssignmentsPaused: true });
+    assert.equal((await request(picker, '/tasks?scope=mine')).total, 0);
+    assert.ok(!(await request(picker, '/tasks?scope=all')).items.some((item) => item._id === String(old._id)));
+    const newAssignment = { client: String(client._id), project: String(project._id), title: 'New direct assignment',
+      assignees: [String(picker._id)], dueDate: date };
+    await request(owner, '/tasks', 'POST', newAssignment, 400);
+    const schedule = { client: client._id, project: project._id, assignees: [picker._id], frequency: 'daily', startsOn: new Date() };
+    const onlyPaused = await TaskTemplate.create({ ...schedule, title: 'Paused schedule' });
+    const sharedSchedule = await TaskTemplate.create({ ...schedule, title: 'Shared schedule', assignees: [picker._id, employee._id], owner: picker._id });
+    assert.equal(await generateRecurringTasks(onlyPaused._id), 0);
+    assert.ok(await generateRecurringTasks(sharedSchedule._id) > 0);
+    assert.equal((await Task.findOne({ template: sharedSchedule._id })).assignees.map(String).join(), String(employee._id));
+    assert.deepEqual((await TaskTemplate.findById(sharedSchedule._id)).assignees.map(String), [String(picker._id), String(employee._id)]);
+    const pickingDay = await request(picker, `/day/${date}`);
+    const pick = pickingDay.workItems.find((row) => row.id === String(master._id));
+    assert.equal(pick.canLog, true);
+    assert.equal(pick.suggested, false);
+    assert.equal(pick.occurrence, undefined);
+    const selected = await put(picker, date, [{ projectId: daily._id, workItemId: pick.id,
+      title: pick.title, hours: 0.01, status: 'incomplete', priority: 'normal' }]);
+    assert.equal(selected.entries[0].workItemId, pick.id);
+    assert.notEqual(selected.entries[0].workflowTaskId, String(source._id));
+    assert.equal((await request(picker, '/tasks?scope=mine')).total, 1);
+    assert.ok(await Task.exists({ _id: old._id, assignees: picker._id }));
+    assert.equal((await send(picker, date, selected.version)).delivery, 'sent');
+    await request(owner, `/users/${picker._id}`, 'PATCH', { directAssignmentsPaused: false });
+    assert.ok(await generateRecurringTasks(onlyPaused._id) > 0);
+    assert.ok((await request(picker, '/tasks?scope=mine')).items.some((item) => item._id === String(old._id)));
 
     const dailyBeforeDelete = await request(employee, `/day/${reportDate}`);
     assert.ok(dailyBeforeDelete.projects.some((row) => row._id === daily._id));

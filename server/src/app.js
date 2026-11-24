@@ -23,7 +23,7 @@ import { importWorkflowProjects } from './import-workflow-projects.js';
 import { importProjectAssignments } from './import-project-assignments.js';
 import { importTaskAutomation } from './import-task-automation.js';
 import { importProjectTaskList } from './import-project-task-list.js';
-import { ensureActivityRetention } from './models/index.js';
+import { User, ensureActivityRetention } from './models/index.js';
 import { demoLoginEnabled, emailLoginConfigured } from './services/email-login.js';
 
 async function connect() {
@@ -46,6 +46,10 @@ async function connect() {
   const loanImport = await seedLoanReminders();
   console.info('Bluntd loan reminder import:', loanImport);
   console.info('Bluntd loan assignments:', await assignLoanTasks());
+  await User.updateMany({
+    email: { $in: ['krupali.s@gatpsolutions.com', 'sathya.p@gatpsolutions.com'] },
+    deletedAt: null, directAssignmentsPaused: { $exists: false },
+  }, { $set: { directAssignmentsPaused: true } });
 }
 
 // Connect once per process; serverless invocations reuse the same connection while warm.

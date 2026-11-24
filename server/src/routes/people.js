@@ -105,7 +105,7 @@ export const updatePersonLeave = ah(async (req, res) => {
 });
 
 r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
-  const allowed = ['name', 'email', 'role', 'title', 'active', 'slackUserId', 'dailyReport'];
+  const allowed = ['name', 'email', 'role', 'title', 'active', 'slackUserId', 'dailyReport', 'directAssignmentsPaused'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => allowed.includes(k)));
   const user = await User.findOne({ _id: req.params.id, deletedAt: null }).select('+slackUserId +dailyReport');
   if (!user) throw new HttpError(404, 'User not found');
@@ -126,8 +126,11 @@ r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   if (update.role !== undefined && !userRoles.includes(update.role)) throw new HttpError(400, 'Invalid role');
   if (update.slackUserId !== undefined) update.slackUserId = parseSlackUserId(update.slackUserId);
   if (update.dailyReport !== undefined) update.dailyReport = parseDailyReport(update.dailyReport);
+  if (update.directAssignmentsPaused !== undefined && typeof update.directAssignmentsPaused !== 'boolean') {
+    throw new HttpError(400, 'Choose whether to pause direct assignments');
+  }
   const previous = { name: user.name, email: user.email, role: user.role, title: user.title || '',
-    active: user.active, slackUserId: user.slackUserId || null, dailyReport: user.dailyReport?.toObject() };
+    active: user.active, directAssignmentsPaused: !!user.directAssignmentsPaused, slackUserId: user.slackUserId || null, dailyReport: user.dailyReport?.toObject() };
   if (update.email !== undefined && update.email !== user.email) {
     user.googleSubject = undefined;
     user.markModified('googleSubject');
