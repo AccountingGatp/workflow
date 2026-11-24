@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, Task, TaskTemplate, TeamMembership, User } from '../models/index.js';
 import { allProjectsEnabled, setAllProjectsEnabled } from '../services/project-access-settings.js';
 import { ah, HttpError, requireRole } from '../middleware/auth.js';
-import { canSeeClient, canSeeProject, canManageClient, canManageProject, taskPortfolio, taskScope, canGrantDirectly, clientAssignees, grantedProjectIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
+import { canSeeClient, canSeeProject, canManageClient, canManageProject, taskPortfolio, taskScope, staffTaskFilter, superAdminIds, canGrantDirectly, clientAssignees, grantedProjectIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
 
 const r = Router();
 const valid = (id) => mongoose.isValidObjectId(id);
@@ -112,9 +112,9 @@ export async function listProjects(user) {
   }).select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
   if (!projects.length) return [];
   const now = new Date();
-  const scope = await taskScope(user);
+  const [scope, adminIds] = await Promise.all([taskScope(user), superAdminIds()]);
   const counts = await Task.aggregate([
-    { $match: { ...scope, project: { $in: projects.map(({ _id }) => _id) }, status: { $ne: 'done' } } },
+    { $match: { $and: [scope, staffTaskFilter(adminIds)], project: { $in: projects.map(({ _id }) => _id) }, status: { $ne: 'done' } } },
     { $group: { _id: '$project', open: { $sum: 1 }, overdue: {
       $sum: { $cond: [{ $and: [{ $ne: [{ $ifNull: ['$dueDate', null] }, null] }, { $lt: ['$dueDate', now] }] }, 1, 0] },
     } } },

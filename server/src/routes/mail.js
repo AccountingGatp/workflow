@@ -188,6 +188,7 @@ r.post('/mail/threads/:id/comments', ah(async (req, res) => {
 
 /** Anyone handling the client can turn an email into a task for themselves. */
 r.post('/mail/threads/:id/task', ah(async (req, res) => {
+  if (isSuper(req.user)) throw new HttpError(403, 'Super Admins cannot create personal tasks');
   const thread = await loadThread(req.user, req.params.id);
   if (!thread.client) throw new HttpError(400, 'Tag a client first');
   const assignment = await ClientAssignment.findOne({ client: thread.client, team: { $ne: null }, endedAt: null });

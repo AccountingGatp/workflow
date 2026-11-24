@@ -174,6 +174,23 @@ test('project assignment enables Daily Work without opening the rest of the clie
     assert.ok(managerActivity.some((row) => row.summary === 'Old granted project log'));
     assert.ok(!managerActivity.some((row) => row.summary === 'Old sibling log'));
 
+    const adminOnly = await Task.create({ title: 'Past Super Admin work', project: sibling._id,
+      client: client._id, assignees: [admin._id], dueDate: new Date() });
+    const mixed = await Task.create({ title: 'Shared staff work', project: sibling._id, client: client._id,
+      assignees: [admin._id, employee._id], dueDate: new Date() });
+    const staffTasks = await request(admin, '/tasks?scope=all&project=' + sibling._id);
+    assert.ok(!staffTasks.items.some((row) => row._id === String(adminOnly._id)));
+    assert.deepEqual(staffTasks.items.find((row) => row._id === String(mixed._id)).assignees.map((person) => person._id), [String(employee._id)]);
+    assert.equal((await request(admin, '/tasks?scope=all&assignee=' + admin._id)).total, 0);
+    assert.ok(!(await request(admin, '/dashboard')).byPerson.some((person) => person._id === String(admin._id)));
+    assert.ok(!(await request(admin, '/manager-workload')).people.some((person) => person._id === String(admin._id)));
+    assert.ok(!(await request(admin, clientPath + '/assignees')).some((person) => person._id === String(admin._id)));
+    await request(admin, '/tasks/' + mixed._id, 'PATCH', { assignees: [String(admin._id)] }, 400);
+    await request(admin, dayPath, 'GET', undefined, 403);
+    await request(admin, dayPath, 'PUT', { entries: [] }, 403);
+    assert.ok(!(await request(admin, report(dailyProject._id))).members.some((person) => person.id === String(admin._id)));
+    await Task.deleteMany({ _id: { $in: [adminOnly._id, mixed._id] } });
+
     const settings = '/settings/project-access';
     assert.equal((await request(admin, settings)).enabled, false);
     await request(manager, settings, 'PUT', { enabled: true }, 403);

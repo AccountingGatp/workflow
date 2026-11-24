@@ -339,7 +339,7 @@ export function Recurring() {
           <div className="row-wrap" style={{ marginBottom: 20 }}>
             <button className="btn btn-ghost" onClick={() => setSelectedClient(null)}>← All clients</button>
             <h2>{selected.name}</h2><div className="spacer" />
-            {selected.canManage && <><button className="btn btn-primary" onClick={() => setCreating('recurring')}><Plus size={18} />Add recurring task</button>
+            {selected.canManage && !can.super && <><button className="btn btn-primary" onClick={() => setCreating('recurring')}><Plus size={18} />Add recurring task</button>
             <button className="btn btn-outline" onClick={() => setCreating('once')}><Plus size={18} />Add one-time task</button></>}
           </div>
           <div className="card" style={{ overflow: 'hidden' }}>

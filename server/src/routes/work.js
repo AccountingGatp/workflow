@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { Task, TaskTemplate, AuditLog, User, ClientPermission, ClientProject, ProjectWorkItem } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import {
-  audit, isSuper, canMonitorAllWork, canMaintainTasks, taskScope, canManageClient, canEditTaskInProject, taskPortfolio, portfolioFilter, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
+  audit, isSuper, canMonitorAllWork, canMaintainTasks, taskScope, staffTaskFilter, superAdminIds, canManageClient, canEditTaskInProject, taskPortfolio, portfolioFilter, managedClientIds, activePermissionFilter, ensureAssigneeAccess,
 } from '../services/access.js';
 import { generateRecurringTasks } from '../services/recurrence.js';
 import { scheduleFields } from '../services/schedule.js';
@@ -23,7 +23,7 @@ const validateProject = async (clientId, projectId) => {
 };
 
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate('assignees', 'name role').populate('owner', 'name').populate('completedBy', 'name').select('-reviewer -submittedBy -submittedAt -reviewedBy -reviewedAt');
+  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).populate({ path: 'owner', select: 'name', match: { role: { $ne: 'super_admin' } } }).populate('completedBy', 'name').select('-reviewer -submittedBy -submittedAt -reviewedBy -reviewedAt');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
@@ -61,10 +61,10 @@ const viewFilter = (view, dates, weeklyMonthly) => {
   if (view === 'open') return { status: { $ne: 'done' } };
   return {};
 };
-const taskFilters = async (req, dates, weeklyMonthly) => {
+const taskFilters = async (req, dates, weeklyMonthly, adminIds) => {
   const { scope = 'mine', status, client, project, team, assignee, from, to, view = 'all', q } = req.query;
-  const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly)];
-  if (scope === 'mine') clauses.push({ assignees: req.user._id });
+  const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly), staffTaskFilter(adminIds)];
+  if (scope === 'mine') clauses.push({ assignees: isSuper(req.user) ? { $in: [] } : req.user._id });
   if (scope === 'managed') {
     if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
     clauses.push(portfolioFilter(await taskPortfolio(req.user)));
@@ -84,7 +84,7 @@ const taskFilters = async (req, dates, weeklyMonthly) => {
   if (team) clauses.push({ team });
   if (assignee) {
     if (!mongoose.isValidObjectId(assignee)) throw new HttpError(400, 'Invalid assignee');
-    clauses.push({ assignees: assignee });
+    clauses.push({ assignees: adminIds.some((id) => String(id) === String(assignee).toLowerCase()) ? { $in: [] } : assignee });
   }
   if (from || to) clauses.push({ dueDate: { ...(from && { $gte: new Date(from) }), ...(to && { $lte: new Date(to) }) } });
   if (q && String(q).trim()) clauses.push({ title: { $regex: String(q).trim().slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } });
@@ -97,8 +97,8 @@ export async function listTasks(user, query) {
   const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize, 10) || 25));
   if (page > 100000) throw new HttpError(400, 'Page out of range');
   const dates = dayBounds();
-  const weeklyMonthly = await upcomingTemplateIds();
-  const filter = await taskFilters({ user, query }, dates, weeklyMonthly);
+  const [weeklyMonthly, adminIds] = await Promise.all([upcomingTemplateIds(), superAdminIds()]);
+  const filter = await taskFilters({ user, query }, dates, weeklyMonthly, adminIds);
   const [total, items] = await Promise.all([
     Task.countDocuments(filter),
     populateTask(Task.find(filter).sort(['completed', 'done'].includes(query.view) ? { completedAt: -1, _id: -1 } : { dueDate: 1, _id: 1 }).skip((page - 1) * pageSize).limit(pageSize)).lean(),
@@ -110,8 +110,8 @@ r.get('/tasks', ah(async (req, res) => res.json(await listTasks(req.user, req.qu
 
 r.get('/task-summary', ah(async (req, res) => {
   const dates = dayBounds();
-  const weeklyMonthly = await upcomingTemplateIds();
-  const count = async (view) => Task.countDocuments(await taskFilters({ ...req, query: { ...req.query, view } }, dates, weeklyMonthly));
+  const [weeklyMonthly, adminIds] = await Promise.all([upcomingTemplateIds(), superAdminIds()]);
+  const count = async (view) => Task.countDocuments(await taskFilters({ ...req, query: { ...req.query, view } }, dates, weeklyMonthly, adminIds));
   const [today, overdue, upcoming, done, pending] = await Promise.all(['today', 'overdue', 'upcoming', 'done', 'pending'].map(count));
   res.json({ today, overdue, upcoming, done, pending });
 }));
@@ -133,7 +133,8 @@ r.get('/manager-workload', ah(async (req, res) => {
     ...(clientId && { client: new mongoose.Types.ObjectId(clientId) }),
     ...(projectId && { project: projectId === 'unassigned' ? null : new mongoose.Types.ObjectId(projectId) }),
   };
-  const match = { ...portfolioFilter(portfolio), ...selection, deletedAt: null };
+  const adminIds = await superAdminIds();
+  const match = { $and: [portfolioFilter(portfolio), staffTaskFilter(adminIds)], ...selection, deletedAt: null };
   const { start, end, week } = dayBounds();
   const done = { $eq: ['$status', 'done'] };
   const pending = { $ne: ['$status', 'done'] };
@@ -152,7 +153,8 @@ r.get('/manager-workload', ah(async (req, res) => {
     { $facet: {
       totals: [{ $group: { _id: null, ...metrics } }],
       people: [
-        { $unwind: '$assignees' }, { $group: { _id: '$assignees', ...metrics } },
+        { $unwind: '$assignees' }, { $match: { assignees: { $nin: adminIds } } },
+        { $group: { _id: '$assignees', ...metrics } },
         { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'person' } },
         { $project: { pending: 1, completed: 1, overdue: 1, today: 1, future: 1, dueNow: 1, completedRecent: 1,
           name: { $ifNull: [{ $first: '$person.name' }, 'Unknown employee'] } } },
@@ -284,13 +286,14 @@ r.delete('/tasks/:id', ah(async (req, res) => res.json(await deleteTask(req.user
 /* ---------- Recurring templates ---------- */
 
 export async function listRecurringTasks(user, { client, project, assignee, page = 1, pageSize = 25 } = {}) {
+  const adminIds = assignee ? await superAdminIds() : [];
   const filter = { $and: [portfolioFilter(await taskPortfolio(user)), {
-    ...(client && { client }), ...(project && { project }), ...(assignee && { assignees: assignee }),
+    ...(client && { client }), ...(project && { project }), ...(assignee && { assignees: adminIds.some((id) => String(id) === String(assignee).toLowerCase()) ? { $in: [] } : assignee }),
   }] };
   const [total, items] = await Promise.all([
     TaskTemplate.countDocuments(filter),
     TaskTemplate.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * pageSize).limit(pageSize)
-      .populate('client', 'name').populate('project', 'name client').populate('assignees', 'name role').select('-reviewer').lean(),
+      .populate('client', 'name').populate('project', 'name client').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).select('-reviewer').lean(),
   ]);
   return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
 }
@@ -328,7 +331,7 @@ r.get('/templates', ah(async (req, res) => {
   const { clients: managed } = portfolio;
   const filter = portfolioFilter(portfolio);
   const templates = await TaskTemplate.find(filter).sort({ createdAt: -1 })
-    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate('assignees', 'name role').select('-reviewer').lean();
+    .populate('client', 'name').populate('project', 'name client').populate('team', 'name color').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).select('-reviewer').lean();
   res.json(templates.map((template) => ({ ...template, canEdit: req.user.role !== 'hr', canDelete: canMaintainTasks(req.user) && (managed === null || managed.includes(String(template.client?._id))) })));
 }));
 
@@ -412,8 +415,9 @@ r.get('/dashboard', ah(async (req, res) => {
   const now = new Date();
   const sod = new Date(now); sod.setHours(0, 0, 0, 0);
   const eod = new Date(now); eod.setHours(23, 59, 59, 999);
-  const scope = await taskScope(req.user);
-  const mine = { $and: [scope, { assignees: req.user._id }], status: { $ne: 'done' } };
+  const [access, adminIds] = await Promise.all([taskScope(req.user), superAdminIds()]);
+  const scope = { $and: [access, staffTaskFilter(adminIds)] };
+  const mine = { $and: [scope, { assignees: isSuper(req.user) ? { $in: [] } : req.user._id }], status: { $ne: 'done' } };
   const [dueToday, overdue, upcoming] = await Promise.all([
     Task.countDocuments({ ...mine, dueDate: { $gte: sod, $lte: eod } }),
     Task.countDocuments({ ...mine, dueDate: { $lt: sod } }),
@@ -425,7 +429,7 @@ r.get('/dashboard', ah(async (req, res) => {
     // Workload across everything this user manages
     const open = { ...scope, status: { $ne: 'done' } };
     const byPerson = await Task.aggregate([
-      { $match: open }, { $unwind: '$assignees' },
+      { $match: open }, { $unwind: '$assignees' }, { $match: { assignees: { $nin: adminIds } } },
       { $group: {
         _id: '$assignees',
         open: { $sum: 1 },

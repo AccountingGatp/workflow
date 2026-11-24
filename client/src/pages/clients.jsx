@@ -155,8 +155,8 @@ export function ClientDetail() {
       <Link to="/clients?view=clients" className="row small" style={{ color: 'var(--text-3)', marginBottom: 8 }}><ArrowLeft size={16} />Clients</Link>
       <PageHead title={c.name} subtitle={<span className="row-wrap"><Badge cls={STATUS_CLS[c.status]} dot>{c.status}</Badge></span>}>
         {c.canManage && <button className="btn btn-outline" onClick={() => setEditingClient(true)}>Edit client / company</button>}
-        {c.canManage && !hasProjects && <button className="btn btn-outline" onClick={() => setRecurring(true)}>Recurring task</button>}
-        {c.canManage && !hasProjects && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
+        {c.canManage && !can.super && !hasProjects && <button className="btn btn-outline" onClick={() => setRecurring(true)}>Recurring task</button>}
+        {c.canManage && !can.super && !hasProjects && <button className="btn btn-primary" onClick={() => setCreating(true)}><Plus size={18} />New task</button>}
       </PageHead>
       <div className="grid grid-2" style={{ marginBottom: 20 }}>
           <div className="card card-pad stack" style={{ gap: 10 }}>

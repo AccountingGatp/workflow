@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
 import { ClientProject, Task, User } from '../models/index.js';
 import { applyTaskTransition } from '../services/task-review.js';
-import { canManageProject, canMonitorAllWork, isSuper } from '../services/access.js';
+import { canManageProject, canMonitorAllWork, isSuper, superAdminIds } from '../services/access.js';
 import { dailyModels, sharedBudgetId } from './models.js';
 import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, roster, validateProjectLink, workflowProjects } from './access.js';
@@ -117,6 +117,7 @@ function publicSubmission(doc, entries = doc.entries) {
 }
 
 r.get('/day/:date', route(async (req, res, models, scope) => {
+  enforce(!isSuper(req.user));
   const date = dateValue(req.params.date);
   const memberId = scope.own;
   const names = await syncClientProjects(models, scope.visible, scope.projects);
@@ -146,6 +147,7 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
 }));
 
 r.put('/day/:date', route(async (req, res, models, scope) => {
+  enforce(!isSuper(req.user));
   const date = dateValue(req.params.date);
   if (date > clock().date) fail('Daily work cannot be submitted for a future date');
   const { entries, version } = req.body;
@@ -167,6 +169,7 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
 }, false, true));
 
 r.post('/day/:date/slack', route(async (req, res, models, scope) => {
+  enforce(!isSuper(req.user));
   const date = dateValue(req.params.date);
   const key = `${scope.own}:${date}`;
   if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
@@ -310,6 +313,7 @@ function statusEntry(entry, own, scope) {
 r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
   const memberId = idValue(req.params.memberId);
+  enforce(!(await User.exists({ _id: memberId, role: 'super_admin' })));
   const entryId = idValue(req.params.id);
   const own = scope.own === memberId;
   enforce(own || (!scope.monitorOnly && (req.user.role === 'manager' || includes(scope.members, memberId))));
@@ -363,7 +367,8 @@ async function reportRows(req, models, scope) {
   const from = dateValue(req.query.from || clock().date);
   const to = dateValue(req.query.to || from);
   if (to < from || to > shiftDate(from, 30)) fail('Select a date range of up to 31 days');
-  const filter = { date: { $gte: from, $lte: to } };
+  const adminIds = (await superAdminIds()).map(String);
+  const filter = { date: { $gte: from, $lte: to }, memberId: { $nin: adminIds } };
   const projectId = req.query.projectId ? idValue(req.query.projectId) : null;
   if (projectId) filter['entries.projectId'] = projectId;
   const manager = req.user.role === 'manager';
@@ -375,8 +380,9 @@ async function reportRows(req, models, scope) {
   if (req.query.memberId) {
     const memberId = idValue(req.query.memberId);
     if (!manager) enforce(includes(scope.members, memberId));
+    if (adminIds.includes(memberId.toLowerCase())) return [];
     filter.memberId = memberId;
-  } else if (!manager && scope.members !== null) filter.memberId = { $in: scope.members };
+  } else if (!manager && scope.members !== null) filter.memberId.$in = scope.members;
   const documents = await projectWorkflowStatuses(await models.Submission.find(filter).sort({ date: -1, memberName: 1 }).lean(), req.user._id);
   return documents.flatMap((doc) => {
     const own = doc.memberId === scope.own;
@@ -397,7 +403,7 @@ r.get('/reports', route(async (req, res, models, scope) => {
     reportRows(req, models, scope), roster(scope, models, true),
     models.Project.find(visibleProjects(scope)).sort('name').lean(),
   ]);
-  const reportMembers = new Map(members.map(({ id, name }) => [id, { id, name }]));
+  const reportMembers = new Map(members.filter((member) => !isSuper(member)).map(({ id, name }) => [id, { id, name }]));
   if (req.user.role === 'manager') {
     for (const { memberId, memberName } of submissions) {
       if (!reportMembers.has(memberId)) reportMembers.set(memberId, { id: memberId, name: memberName });

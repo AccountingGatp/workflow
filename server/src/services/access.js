@@ -15,6 +15,15 @@ import { HttpError } from '../middleware/auth.js';
  */
 
 export const isSuper = (u) => u.role === 'super_admin';
+export const superAdminIds = () => User.distinct('_id', { role: 'super_admin' });
+export const staffTaskFilter = (adminIds) => ({
+  $or: [
+    { assignees: { $exists: false } },
+    { assignees: { $size: 0 } },
+    { assignees: { $elemMatch: { $nin: adminIds } } },
+  ],
+});
+
 export const canMonitorAllWork = (user) => isSuper(user) || user.role === 'hr';
 export const canMaintainTasks = (user) => isSuper(user) || user.role === 'manager';
 
@@ -145,7 +154,7 @@ export async function canGrantDirectly(actor, clientId, targetUserId) {
 
 /** People the actor can assign to this client, including team members who get access on assignment. */
 export async function clientAssignees(actor, clientId, projectId, { existingAccessOnly = false } = {}) {
-  const filter = { active: true, deletedAt: null };
+  const filter = { active: true, deletedAt: null, role: { $ne: 'super_admin' } };
   if (!isSuper(actor) && !(projectId && await allProjectsEnabled(actor) &&
       await Client.exists({ _id: clientId, status: { $ne: 'inactive' } }))) {
     const [assignments, grants, led, projectGrants] = await Promise.all([
@@ -162,13 +171,13 @@ export async function clientAssignees(actor, clientId, projectId, { existingAcce
     filter.$or = [
       { _id: { $in: [...grants, ...memberships, ...projectGrants] } },
       { _id: { $in: assignments.map((row) => row.admin).filter(Boolean) }, role: { $in: ['manager', 'admin'] } },
-      { role: 'super_admin' },
     ];
   }
   return User.find(filter).select('name email role').sort('name').lean();
 }
 
 export async function ensureAssigneeAccess(actor, clientId, person, projectId) {
+  if (isSuper(person)) throw new HttpError(400, 'Super Admins cannot be assigned work');
   if (projectId ? await canSeeProject(person, { _id: projectId, client: clientId }) : await canSeeClient(person, clientId)) return;
   if (!(await canGrantDirectly(actor, clientId, person._id))) {
     throw new HttpError(400, `${person.name} is outside your team and needs access to this client before you can assign work.`);

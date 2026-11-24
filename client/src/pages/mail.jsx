@@ -64,7 +64,7 @@ function Thread({ id, onChanged }) {
   const clients = useApi('/clients');
   const users = useApi('/users');
   const toast = useToast();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   const [comment, setComment] = useState('');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
@@ -87,7 +87,7 @@ function Thread({ id, onChanged }) {
       <div className="card-pad stack" style={{ borderBottom: '1px solid var(--border)' }}>
         <div className="row-wrap"><h2 style={{ flex: 1, minWidth: 200 }}>{t.subject}</h2>
           <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => patch({ status: t.status === 'done' ? 'open' : 'done' })}>{t.status === 'done' ? <><RotateCcw size={14} />Reopen</> : <><Check size={14} />Mark done</>}</button>
-          <button className="btn btn-outline btn-sm" disabled={busy || !t.client} onClick={() => run(() => api(`/mail/threads/${id}/task`, { method: 'POST', body: {} }), 'Task created and added to your work')}><ListPlus size={14} />Make task</button>
+          {!can.super && <button className="btn btn-outline btn-sm" disabled={busy || !t.client} onClick={() => run(() => api(`/mail/threads/${id}/task`, { method: 'POST', body: {} }), 'Task created and added to your work')}><ListPlus size={14} />Make task</button>}
         </div>
         <p className="small muted">Inbox: {t.account?.email}</p>
         <div className="grid grid-2">
