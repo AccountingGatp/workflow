@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ChevronDown, ClipboardList, Plus, Search, Send, StickyNote, Trash2 } from 'lucide-react';
 import { api, useApi, useAuth, useToast } from '../lib.jsx';
@@ -106,9 +106,7 @@ function DailyTaskCard({ entry, onOpen, children }) {
       <Badge cls={entry.priority === 'high' ? 'b-danger' : 'b-primary'}>{entry.priority}</Badge>
       <ChevronDown size={16} aria-hidden="true" />
     </button>}
-    <div id={detailsId} className="daily-reveal" data-open={!entry.collapsed}>
-      <div inert={!!entry.collapsed}>{children}</div>
-    </div>
+    <div id={detailsId} hidden={entry.collapsed}>{!entry.collapsed && children}</div>
   </article>;
 }
 
@@ -120,6 +118,8 @@ function EntryEditor({ date, data }) {
   const [taskSearch, setTaskSearch] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState('');
+  const inFlight = useRef(false);
+  const availabilityRequest = useRef(0);
   const editor = useRef(null);
   const newEntry = useRef(null);
   const toast = useToast();
@@ -131,23 +131,49 @@ function EntryEditor({ date, data }) {
     field?.focus({ preventScroll: true });
     row?.scrollIntoView?.({ block: 'nearest' });
   }, [rows]);
+  const limit = data.entryLimit || 40;
+  const atLimit = rows.length >= limit;
+  const pendingCount = rows.filter((row) => !row.collapsed).length;
+  const originalById = new Map(submission?.entries.map((entry) => [entry._id, entry]));
   const selected = data.projects.find((item) => item._id === project);
   const update = (key, patch) => setRows((old) => old.map((row) => row.key === key ? { ...row, ...patch } : row));
 
+  const catalogIndex = useMemo(() => {
+    const ids = new Map();
+    const names = new Map();
+    for (const task of catalog) {
+      ids.set(task._id, task);
+      if (task.workItemId) ids.set(task.workItemId, task);
+      names.set(`${task.projectId}:${nameKey(task.title)}`, task);
+    }
+    return { ids, names };
+  }, [catalog]);
+
   function taskFor(row) {
-    const tasks = catalog.filter((task) => task.projectId === row.projectId);
-    return tasks.find((task) => task._id === row.catalogId || (task.workItemId && task.workItemId === row.workItemId)) ||
-      tasks.find((task) => nameKey(task.title) === nameKey(row.title));
+    const byId = catalogIndex.ids.get(row.catalogId || row.workItemId);
+    return byId?.projectId === row.projectId ? byId : catalogIndex.names.get(`${row.projectId}:${nameKey(row.title)}`);
+  }
+
+  function budgetKey(row) {
+    return nameKey(row.title) === 'review' ? 'review' : taskFor(row)?._id;
+  }
+
+  function spentBy(row) {
+    return Math.round(Number(originalById.get(row._id)?.hours ?? row.hours ?? 0) * 100);
+  }
+
+  const usedByBudget = new Map();
+  const rowByKey = new Map();
+  for (const row of rows) {
+    rowByKey.set(row.key, row);
+    const key = budgetKey(row);
+    if (key) usedByBudget.set(key, (usedByBudget.get(key) || 0) + spentBy(row));
   }
 
   function available(task, excludedKey) {
-    const used = rows.reduce((sum, row) => {
-      if (row.key === excludedKey) return sum;
-      const matches = task.review ? nameKey(row.title) === 'review' : taskFor(row)?._id === task._id;
-      if (!matches) return sum;
-      const saved = row._id && submission?.entries.find((entry) => entry._id === row._id);
-      return sum + Math.round(Number(saved?.hours ?? row.hours ?? 0) * 100);
-    }, 0);
+    const key = task.review ? 'review' : task._id;
+    const excluded = rowByKey.get(excludedKey);
+    const used = (usedByBudget.get(key) || 0) - (excluded && budgetKey(excluded) === key ? spentBy(excluded) : 0);
     return Math.max(0, Math.round(task.remainingHours * 100) - used) / 100;
   }
 
@@ -176,7 +202,7 @@ function EntryEditor({ date, data }) {
   function add(item, saveImmediately = false) {
     const source = data.projects.find((entry) => entry._id === item.projectId);
     const plannedHours = assignedHours(item);
-    if (!source || busy || rows.length >= 40 || plannedHours === 0) return;
+    if (!source || inFlight.current || atLimit || plannedHours === 0) return;
     const occurrence = item.occurrence;
     const key = crypto.randomUUID();
     const row = {
@@ -188,17 +214,18 @@ function EntryEditor({ date, data }) {
       priority: occurrence?.priority || 'normal', status: occurrence?.status === 'done' ? 'complete' : 'incomplete',
     };
     if (saveImmediately && plannedHours !== undefined) {
-      saveRow(row, false, true);
+      saveRows([row], { suggested: true });
       return;
     }
-    newEntry.current = key;
-    setRows((old) => [...old, row]);
+    if (!item.title) newEntry.current = key;
+    setRows((old) => old.length < limit ? [...old, row] : old);
   }
 
   const refreshAvailability = useCallback(async () => {
+    const request = ++availabilityRequest.current;
     try {
       const day = await api(`${root}/day/${date}`);
-      setCatalog(day.catalog);
+      if (availabilityRequest.current === request) setCatalog(day.catalog);
     } catch { /* Keep the current balance visible if the connection drops. */ }
   }, [date]);
   useEffect(() => {
@@ -206,40 +233,63 @@ function EntryEditor({ date, data }) {
     return () => window.removeEventListener('focus', refreshAvailability);
   }, [refreshAvailability]);
 
-  async function saveRow(row, remove = false, fromSuggestion = false) {
-    if (remove && !row._id) {
-      setRows((old) => old.filter((item) => item.key !== row.key));
+  async function saveRows(changes, { remove = false, suggested = false, all = false } = {}) {
+    const first = changes[0];
+    if (!first || inFlight.current) return;
+    if (remove && !first._id) {
+      setRows((old) => old.filter((item) => item.key !== first.key));
       return;
     }
-    setBusy(row.key);
+    inFlight.current = true;
+    setBusy(all ? 'all' : first.key);
     setError(null);
     try {
-      const saved = submission?.entries || [];
-      const entries = row._id
-        ? saved.flatMap((entry) => entry._id !== row._id ? [entry] : remove ? [] : [entryPayload(row)])
-        : [...saved, entryPayload(row)];
+      const changed = new Map(changes.filter((row) => row._id).map((row) => [row._id, row]));
+      const additions = changes.filter((row) => !row._id);
+      const entries = [
+        ...(submission?.entries || []).flatMap((entry) => {
+          const row = changed.get(entry._id);
+          return row ? (remove ? [] : [entryPayload(row)]) : [entry];
+        }),
+        ...additions.map(entryPayload),
+      ];
       const response = await api(`${root}/day/${date}`, { method: 'PUT', body: { entries, version: submission?.version } });
       setSubmission(response);
       if (remove) {
-        setRows((old) => old.filter((item) => item.key !== row.key));
+        setRows((old) => old.filter((item) => item.key !== first.key));
       } else {
-        const entry = row._id ? response.entries.find((item) => item._id === row._id) :
-          response.entries.find((item) => !saved.some((previous) => previous._id === item._id));
-        if (entry) {
-          newEntry.current = row.key;
-          const collapsed = savedRow(entry, row.key);
-          setRows((old) => fromSuggestion ? [...old, collapsed] : old.map((item) => item.key === row.key ? collapsed : item));
-          if (fromSuggestion) toast('Task saved.');
-        }
+        const byId = new Map(response.entries.map((entry) => [entry._id, entry]));
+        const inserted = response.entries.filter((entry) => !originalById.has(entry._id));
+        const saved = new Map(changes.filter((row) => row._id).map((row) => [row.key, byId.get(row._id)]));
+        additions.forEach((row, index) => saved.set(row.key, inserted[index]));
+        if (!all && !suggested) newEntry.current = first.key;
+        setRows((old) => {
+          const current = suggested ? [...old, first] : old;
+          return current.map((row) => saved.get(row.key) ? savedRow(saved.get(row.key), row.key) : row);
+        });
+        if (all || suggested) toast(all ? 'Tasks saved.' : 'Task saved.');
       }
-      await refreshAvailability();
+      void refreshAvailability();
     } catch (error) {
       setError(error);
-      if (error.status === 400) await refreshAvailability();
-    } finally { setBusy(''); }
+      if (error.status === 400) void refreshAvailability();
+    } finally {
+      inFlight.current = false;
+      setBusy('');
+    }
+  }
+
+  function saveAll() {
+    const forms = editor.current.querySelectorAll('.daily-entry form');
+    for (const form of forms) {
+      if (!form.reportValidity()) return;
+    }
+    void saveRows(rows.filter((row) => !row.collapsed), { all: true });
   }
 
   async function sendToSlack() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy('slack');
     setError(null);
     try {
@@ -247,7 +297,7 @@ function EntryEditor({ date, data }) {
       setSubmission(response);
       toast(deliveryLabel[response.delivery] || 'Slack delivery is queued.');
     } catch (error) { setError(error); }
-    finally { setBusy(''); }
+    finally { inFlight.current = false; setBusy(''); }
   }
 
   const suggestions = [
@@ -280,7 +330,7 @@ function EntryEditor({ date, data }) {
                 <span className="small muted">{plannedHours === undefined ? 'Enter hours' : `${hours(plannedHours)} h · Saves on add`}</span>
               </div>
               <button type="button" className="btn btn-tonal btn-sm" aria-label={`Add suggested ${item.title} from ${source?.name}`}
-                disabled={!!busy || rows.length >= 40} onClick={() => add(item, true)}><Plus size={15} /> Add</button>
+                disabled={!!busy || atLimit} onClick={() => add(item, true)}><Plus size={15} /> Add</button>
             </li>;
           })}
         </ul>
@@ -311,7 +361,7 @@ function EntryEditor({ date, data }) {
                 {!item.canLog && <span className="small muted">Assigned to {item.responsible || 'another employee'}</span>}
               </div>
               <button type="button" className="btn btn-tonal btn-sm" aria-label={`Add ${item.title}`}
-                disabled={!item.canLog || busy || rows.length >= 40 || remaining === 0} onClick={() => add(item)}>
+                disabled={!item.canLog || busy || atLimit || remaining === 0} onClick={() => add(item)}>
                 <Plus size={15} /> Add
               </button>
             </li>;
@@ -319,19 +369,25 @@ function EntryEditor({ date, data }) {
         </ul>)}
       {canAddCustom && <div className="row-wrap daily-header daily-task-search">
         <p className="small muted">This project has no predefined tasks.</p>
-        <button type="button" className="btn btn-tonal btn-sm" disabled={!!busy || rows.length >= 40}
+        <button type="button" className="btn btn-tonal btn-sm" disabled={!!busy || atLimit}
           onClick={() => add({ projectId: selected._id, title: '' })}><Plus size={15} /> Add custom task</button>
       </div>}
     </section>}
     <section ref={editor} className="card daily-task-editor" aria-labelledby="daily-selected-heading">
       <div className="row-wrap daily-header daily-editor-bar">
-        <div><h2 id="daily-selected-heading">Selected tasks</h2><time className="small muted" dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></div>
+        <div className="daily-editor-heading">
+          <h2 id="daily-selected-heading">Selected tasks <span className="small muted">{rows.length}/{limit}</span></h2>
+          <time className="small muted" dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time>
+        </div>
         <div className="row-wrap daily-editor-totals">
           <output aria-label="Total hours" aria-live="polite">
             <Badge cls="b-primary">{date === today() ? 'Today’s total' : 'Total'} <span className="mono">{totalHours(rows)} h</span></Badge>
           </output>
+          {pendingCount > 1 && <button type="button" className="btn btn-outline btn-sm" disabled={!!busy} onClick={saveAll}>
+            {busy === 'all' ? 'Saving…' : `Save all (${pendingCount})`}
+          </button>}
           <div className="stack" style={{ gap: 2 }}>
-            <button type="button" className="btn btn-primary" onClick={sendToSlack}
+            <button type="button" className="btn btn-primary btn-sm" onClick={sendToSlack}
               aria-describedby={data.slackEnabled ? undefined : 'daily-slack-setup'}
               disabled={!data.slackEnabled || !!busy || rows.some((row) => !row.collapsed) ||
                 (!submission?.entries.length && !submission?.slackPosted) ||
@@ -344,6 +400,7 @@ function EntryEditor({ date, data }) {
           </div>
         </div>
       </div>
+      {atLimit && <div className="daily-editor-feedback small muted" role="status">Daily limit reached. Remove a task to add another.</div>}
       {(error || (submission?.delivery && submission.delivery !== 'skipped')) && <div className="daily-editor-feedback stack">
         <ErrorBox error={error} />
         {submission?.delivery && submission.delivery !== 'skipped' && <p className="small muted" role="status">{deliveryLabel[submission.delivery]}</p>}
@@ -354,7 +411,7 @@ function EntryEditor({ date, data }) {
           const linked = !!(row.workflowTaskId || row.workItemId || row.catalogId);
           const task = taskFor(row);
           const remaining = task && available(task, row.key);
-          const original = submission?.entries.find((entry) => entry._id === row._id);
+          const original = originalById.get(row._id);
           const customEdit = original && !original.catalogId && !original.workItemId && !task &&
             nameKey(original.title) !== 'review' && nameKey(row.title) !== 'review' &&
             !data.workItems.some((item) => item.projectId === row.projectId && nameKey(item.title) === nameKey(row.title));
@@ -364,7 +421,7 @@ function EntryEditor({ date, data }) {
             newEntry.current = row.key;
             update(row.key, { collapsed: false, noteOpen: !!row.note });
           }}>
-            <form onSubmit={(event) => { event.preventDefault(); saveRow(row); }}>
+            <form onSubmit={(event) => { event.preventDefault(); saveRows([row]); }}>
               <fieldset className="daily-entry-fields" disabled={!!busy}>
                 <span className="small muted daily-row-project">{row.projectName}</span>
                 <div className="daily-task-heading">
@@ -383,7 +440,7 @@ function EntryEditor({ date, data }) {
                     </>}
                   </div>
                   <button type="button" className="btn btn-ghost icon-btn daily-task-remove" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
-                    onClick={() => saveRow(row, true)}><Trash2 size={17} /></button>
+                    onClick={() => saveRows([row], { remove: true })}><Trash2 size={17} /></button>
                 </div>
                 <div className="daily-entry-grid">
                   <div className="field">

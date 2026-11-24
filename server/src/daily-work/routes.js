@@ -17,6 +17,7 @@ import { hubstaff, hubstaffConfigured } from './hubstaff.js';
 import { defaultStatusReminder, parseStatusReminder, statusRemindersWithDelivery, statusScheduleRevision } from './settings.js';
 
 const r = Router();
+const dailyEntryLimit = 40;
 const fail = (message) => { throw new HttpError(400, message); };
 const idValue = (id) => {
   if (typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id)) fail('Select a valid record');
@@ -134,7 +135,7 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
   const workItems = await listClientWork(projects, req.user, date, undefined, catalog);
   const budgetCatalog = withClientBudgets(catalog, workItems);
   res.json({
-    date, projects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })), workItems,
+    date, entryLimit: dailyEntryLimit, projects: projects.map((project) => ({ ...project, clientName: names.get(project.clientId) })), workItems,
     catalog: await catalogAvailability(models, memberId, date, budgetCatalog.filter((task) => reviewAllowed || !isReview(task.title))),
     assignments: assignments.filter((entry) => scope.dailyProjectIds.has(entry.projectId)), memberName: req.user.name,
     reviewProjects: reviewAllowed ? projects.filter((project) => includes(scope.managed, project.clientId)).map((project) => String(project._id)) : [],
@@ -148,7 +149,7 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
   if (date > clock().date) fail('Daily work cannot be submitted for a future date');
   const { entries, version } = req.body;
-  if (!Array.isArray(entries) || entries.length > 40) fail('Enter up to 40 tasks for the day');
+  if (!Array.isArray(entries) || entries.length > dailyEntryLimit) fail(`Enter up to ${dailyEntryLimit} tasks for the day`);
   if (entries.some((entry) => !entry || typeof entry !== 'object')) fail('Enter a valid task');
 
   const key = `${scope.own}:${date}`;
