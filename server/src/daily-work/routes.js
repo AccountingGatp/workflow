@@ -40,16 +40,21 @@ const visibleProjects = (scope) => scope.projects.length ? {
 } : scoped(scope.visible);
 const visibleEntry = (scope, entry) => includes(scope.visible, entry.clientId) || scope.dailyProjectIds.has(entry.projectId);
 const managedEntry = (scope, entry) => includes(scope.managed, entry.clientId) || scope.managedDailyProjectIds.has(String(entry.projectId));
-const route = (handler, superOnly = false) => ah(async (req, res) => {
-  if (superOnly) enforce(isSuper(req.user));
-  if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
-  const [models, scope] = await Promise.all([dailyModels(), dailyScope(req.user)]);
+async function dailyContext(user) {
+  const [models, scope] = await Promise.all([dailyModels(), dailyScope(user)]);
   const ids = [...new Set([...scope.projects, ...scope.managerProjects])];
   const projects = ids.length ? await models.Project.find({ workflowProjectId: { $in: ids } }).select('workflowProjectId').lean() : [];
   const granted = new Set(scope.projects);
   const managed = new Set(scope.managerProjects);
   scope.dailyProjectIds = new Set(projects.filter((project) => granted.has(project.workflowProjectId)).map(({ _id }) => String(_id)));
   scope.managedDailyProjectIds = new Set(projects.filter((project) => managed.has(String(project.workflowProjectId))).map(({ _id }) => String(_id)));
+  return { models, scope };
+}
+
+const route = (handler, superOnly = false) => ah(async (req, res) => {
+  if (superOnly) enforce(isSuper(req.user));
+  if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
+  const { models, scope } = await dailyContext(req.user);
   await handler(req, res, models, scope);
 });
 
@@ -380,6 +385,11 @@ async function reportRows(req, models, scope) {
       (!req.query.status || entry.status === req.query.status));
     return entries.length ? [publicSubmission(doc, entries.map((entry) => statusEntry(entry, own, scope)))] : [];
   });
+}
+
+export async function listDailySubmissions(user, query) {
+  const { models, scope } = await dailyContext(user);
+  return reportRows({ user, query }, models, scope);
 }
 
 r.get('/reports', route(async (req, res, models, scope) => {

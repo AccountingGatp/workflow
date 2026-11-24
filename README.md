@@ -129,3 +129,15 @@ Open **Daily Work** from the Workflow sidebar. Each person submits their own dai
 Daily Work uses the hours and recurrence in the Clients task list when both are clear. A Super Admin can set or override daily, weekly, or monthly limits in Manage Data. Existing catalog hours default to a daily limit until changed. A weekly limit runs Monday through Sunday, and a monthly limit follows the calendar month. Daily Work applies the selected work date in IST. Limits are per employee and task. Changes and deletions recalculate availability from the saved entries.
 
 Each Daily Work project receives a Review task automatically. The four eligible users are the unique active Admin/TL accounts whose first names are Simran, Krupali, Jaini, and Riddhi. Their Review limit is one hour per person per day across all projects. Daily Work uses MongoDB transactions to enforce hour limits across simultaneous saves, so the Daily Work database must be a replica set or a sharded cluster. Local demo mode starts a single-node replica set.
+
+## Workflow MCP
+
+The production MCP URL is `https://workflow.gatpsolutions.com/api/mcp`. In Workflow, open **MCP Connections** to find the URL for the current deployment and revoke your connections.
+
+In ChatGPT, add a custom MCP server using OAuth with **dynamic client registration**. Open the Workflow consent page and sign in with your existing Workflow account. Approve read access or select the write checkbox before approving. To switch from read-only to write access, authorize a new read-and-write connection. Workflow enforces the connected account's current role and project scope on each tool call. HR accounts stay read-only.
+
+- Read tools list visible projects, scheduled tasks and Daily Work submissions.
+- Write tools create and edit individual scheduled tasks. A Super Admin may remove an individual task occurrence through Workflow's soft deletion.
+- Access tokens last up to one hour and can refresh for the approved connection for up to 30 days. Revoking the connection invalidates both tokens.
+
+Production Vercel deployments default to the canonical Workflow domain. Previews use their Vercel deployment URL. Set `WORKFLOW_MCP_ORIGIN` to override the public origin when using a different domain. That origin must also be configured for Workflow Google sign-in. ChatGPT callbacks are supported by default. For another MCP client, configure the exact callback URL in the comma-separated `WORKFLOW_MCP_REDIRECT_URIS` setting. Use an isolated database for preview and development.

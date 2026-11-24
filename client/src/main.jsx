@@ -9,6 +9,7 @@ import { createWorkflowStore } from './daily-work-data.js';
 import Layout from './Layout.jsx';
 import DailyWork from './pages/daily-work.jsx';
 import Settings from './pages/settings.jsx';
+import { McpConnections, McpConsent } from './pages/mcp-connections.jsx';
 import { MyWork, Overview } from './pages/work.jsx';
 import { Clients, ClientDetail } from './pages/clients.jsx';
 import { ClientProjects } from './pages/projects.jsx';
@@ -57,6 +58,8 @@ function WorkflowRoutes({ can }) {
           <Route path="teams" element={<Navigate to="/clients" replace />} />
           <Route path="recurring" element={guard(can.manage || can.hr, <Recurring />)} />
           <Route path="people" element={guard(can.super || can.hr, <People />)} />
+          <Route path="mcp-connect" element={<McpConsent />} />
+          <Route path="mcp-connections" element={<McpConnections />} />
           <Route path="settings" element={guard(can.super, <Settings mail={mail} saveMail={saveMail} />)} />
           <Route path="access" element={guard(can.manage, <Access />)} />
           <Route path="audit" element={guard(can.manage || can.hr, <Audit />)} />

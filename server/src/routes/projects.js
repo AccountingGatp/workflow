@@ -100,9 +100,9 @@ r.put('/clients/:clientId/projects/:id/people/:userId', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-r.get('/projects', ah(async (req, res) => {
-  const [ids, granted] = await Promise.all([visibleClientIds(req.user), grantedProjectIds(req.user)]);
-  const { clients: managed, projects: portfolio } = await taskPortfolio(req.user, granted);
+export async function listProjects(user) {
+  const [ids, granted] = await Promise.all([visibleClientIds(user), grantedProjectIds(user)]);
+  const { clients: managed, projects: portfolio } = await taskPortfolio(user, granted);
   const portfolioIds = new Set(portfolio.map(String));
   const clients = await Client.find(ids === null ? {} : { _id: { $in: ids } }).select('name standaloneProject').lean();
   const clientInfo = new Map(clients.map((client) => [String(client._id), client]));
@@ -110,9 +110,9 @@ r.get('/projects', ah(async (req, res) => {
   const projects = await ClientProject.find(ids === null ? { deletedAt: null } : {
     deletedAt: null, $or: [{ client: { $in: clientIds } }, { _id: { $in: [...granted, ...portfolio] } }],
   }).select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
-  if (!projects.length) return res.json([]);
+  if (!projects.length) return [];
   const now = new Date();
-  const scope = await taskScope(req.user);
+  const scope = await taskScope(user);
   const counts = await Task.aggregate([
     { $match: { ...scope, project: { $in: projects.map(({ _id }) => _id) }, status: { $ne: 'done' } } },
     { $group: { _id: '$project', open: { $sum: 1 }, overdue: {
@@ -120,21 +120,23 @@ r.get('/projects', ah(async (req, res) => {
     } } },
   ]);
   const byProject = new Map(counts.map((row) => [String(row._id), row]));
-  res.json(projects.map(({ referenceClient, ...project }) => {
+  return projects.map(({ referenceClient, ...project }) => {
     const tasks = byProject.get(String(project._id));
     const owner = clientInfo.get(String(project.client));
     const reference = owner?.standaloneProject ? clientInfo.get(String(referenceClient)) : owner;
     return {
       ...project,
       clientName: reference?.name,
-      canManage: req.user.role !== 'hr' && (managed === null || managed.includes(String(project.client)) ||
-        (req.user.role === 'manager' && portfolioIds.has(String(project._id)))),
+      canManage: user.role !== 'hr' && (managed === null || managed.includes(String(project.client)) ||
+        (user.role === 'manager' && portfolioIds.has(String(project._id)))),
       clientInfoId: reference?._id,
       openTasks: tasks?.open || 0,
       overdueTasks: tasks?.overdue || 0,
     };
-  }));
-}));
+  });
+}
+
+r.get('/projects', ah(async (req, res) => res.json(await listProjects(req.user))));
 
 r.post('/projects', requireRole('super_admin', 'manager', 'admin'), ah(async (req, res) => {
   const details = projectDetails(req.body);
