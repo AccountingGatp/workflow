@@ -84,6 +84,15 @@ submissionSchema.index({ memberId: 1, date: 1 });
 submissionSchema.index({ 'entries.projectId': 1, date: 1 });
 submissionSchema.index({ delivery: 1, deliveryAfter: 1 });
 
+const submissionArchiveSchema = new Schema({
+  cleanupId: { type: String, required: true, index: true },
+  actor: Schema.Types.ObjectId,
+  archivedAt: Date,
+  submission: { type: Schema.Types.Mixed, required: true },
+});
+
+export const sharedBudgetId = 'shared-project-budgets';
+
 const reportSchema = new Schema({ _id: String, state: text, startedAt: Date, expiresAt: Date });
 reportSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
@@ -127,6 +136,7 @@ export async function dailyModels() {
     Member: model('DailyMember', memberSchema, 'members'),
     Leave: model('DailyLeave', leaveSchema, 'leave'),
     Submission: model('DailySubmission', submissionSchema, 'daily_submissions'),
+    SubmissionArchive: model('DailySubmissionArchive', submissionArchiveSchema, 'daily_submission_archive'),
     Report: model('DailySlackReport', reportSchema, 'slack_report_runs'),
     StatusReminder: model('DailyStatusReminder', statusReminderSchema, 'status_reminders'),
   };

@@ -8,7 +8,10 @@ import { User } from '../models/index.js';
 
 export const READ = 'workflow:read';
 export const WRITE = 'workflow:write';
-const scopes = [READ, WRITE];
+export const DELETE = 'workflow:delete';
+const scopes = [READ, WRITE, DELETE];
+const effectiveScopes = (user, granted) => granted.filter((scope) =>
+  scope === READ || (scope === WRITE && user.role !== 'hr') || (scope === DELETE && user.role === 'super_admin'));
 const randomToken = () => randomBytes(32).toString('base64url');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const expiresIn = (seconds) => new Date(Date.now() + seconds * 1000);
@@ -109,13 +112,15 @@ export function createWorkflowOAuth(origin) {
       const request = await Authorization.findOneAndDelete({
         ...activeCode(client.client_id, code), redirectUri: redirectUri || client.redirect_uris[0],
       }).lean();
-      if (!request || !await currentUser(request)) throw new InvalidGrantError('Workflow approval is no longer valid');
+      const user = request && await currentUser(request);
+      if (!user) throw new InvalidGrantError('Workflow approval is no longer valid');
       const pair = tokenPair();
+      const selected = effectiveScopes(user, request.scopes);
       await Grant.create({
         clientId: client.client_id, origin, user: request.user, email: request.email,
-        scopes: request.scopes, expiresAt: expiresIn(grantLifetime), ...pair.update,
+        scopes: selected, expiresAt: expiresIn(grantLifetime), ...pair.update,
       });
-      return { ...pair.response, scope: request.scopes.join(' ') };
+      return { ...pair.response, scope: selected.join(' ') };
     },
     async exchangeRefreshToken(client, token, wanted, target) {
       validateResource(target);
@@ -123,7 +128,7 @@ export function createWorkflowOAuth(origin) {
       const grant = await Grant.findOne(filter).lean();
       const user = grant && await currentUser(grant);
       if (!user) throw new InvalidGrantError('Workflow connection expired or was revoked');
-      const available = user.role === 'hr' ? [READ] : grant.scopes;
+      const available = effectiveScopes(user, grant.scopes);
       const selected = wanted?.length ? [...new Set(wanted)] : available;
       if (!selected.includes(READ) || selected.some((scope) => !available.includes(scope))) {
         throw new InvalidScopeError('Requested scopes exceed the approved Workflow access');
@@ -143,7 +148,7 @@ export function createWorkflowOAuth(origin) {
       if (!user) throw new InvalidTokenError('Workflow token expired or was revoked');
       return {
         token, clientId: grant.clientId, resource, expiresAt: Math.floor(+grant.accessExpiresAt / 1000),
-        scopes: user.role === 'hr' ? [READ] : grant.scopes, extra: { user },
+        scopes: effectiveScopes(user, grant.scopes), extra: { user },
       };
     },
     async revokeToken(client, { token }) {
@@ -175,31 +180,34 @@ export function createWorkflowOAuth(origin) {
   accountRoutes.get('/', ah(async (req, res) => {
     const grants = await Grant.find({ ...connection(req), expiresAt: { $gt: new Date() } })
       .select('scopes createdAt expiresAt').sort('-createdAt').lean();
-    res.json({ url: resource.href, grants });
+    res.json({ url: resource.href, grants: grants.map((grant) => ({ ...grant, scopes: effectiveScopes(req.user, grant.scopes) })) });
   }));
   accountRoutes.get('/consent/:id', ah(async (req, res) => {
     const request = await Authorization.findOne(pending(req.params.id)).lean();
     if (!request) throw new HttpError(404, 'This connection request expired. Start again in your MCP client.');
-    res.json({ destination: new URL(request.redirectUri).hostname, allowWrite: req.user.role !== 'hr' && request.requested.includes(WRITE) });
+    const allowed = effectiveScopes(req.user, request.requested);
+    res.json({ destination: new URL(request.redirectUri).hostname, allowWrite: allowed.includes(WRITE), allowDelete: allowed.includes(DELETE) });
   }));
   accountRoutes.post('/consent/:id', ah(async (req, res) => {
-    if (!['read', 'write', 'deny'].includes(req.body?.access)) throw new HttpError(400, 'Choose an access level');
+    const { access, allowDelete = false } = req.body || {};
+    if (!['read', 'write', 'deny'].includes(access) || typeof allowDelete !== 'boolean') throw new HttpError(400, 'Choose an access level');
     const request = await Authorization.findOne(pending(req.params.id)).lean();
     if (!request || !permittedRedirect(request.redirectUri)) throw new HttpError(404, 'This connection request expired.');
     const url = new URL(request.redirectUri);
     if (request.state) url.searchParams.set('state', request.state);
-    if (req.body.access === 'deny') {
+    if (access === 'deny') {
       const result = await Authorization.deleteOne(pending(req.params.id));
       if (!result.deletedCount) throw new HttpError(409, 'This request has already been answered');
       url.searchParams.set('error', 'access_denied');
     } else {
-      const write = req.body.access === 'write';
-      if (write && (req.user.role === 'hr' || !request.requested.includes(WRITE))) {
-        throw new HttpError(403, 'This request can only be approved for read access');
+      const selected = [READ, ...(access === 'write' ? [WRITE] : []), ...(allowDelete ? [DELETE] : [])];
+      const available = effectiveScopes(req.user, request.requested);
+      if (selected.some((scope) => !available.includes(scope))) {
+        throw new HttpError(403, 'This account or connection request cannot grant the selected access');
       }
       const code = randomToken();
       const result = await Authorization.updateOne(pending(req.params.id), { $set: {
-        user: req.user._id, email: req.user.email, scopes: write ? scopes : [READ],
+        user: req.user._id, email: req.user.email, scopes: selected,
         codeHash: hash(code), expiresAt: expiresIn(120),
       } });
       if (!result.modifiedCount) throw new HttpError(409, 'This request has already been answered');

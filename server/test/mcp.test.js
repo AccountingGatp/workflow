@@ -22,7 +22,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const { default: app, handleErrors } = await import('../src/app.js');
     const { JWT_SECRET } = await import('../src/middleware/auth.js');
     const { dailyModels } = await import('../src/daily-work/models.js');
-    const { User, Client, ClientProject, Task } = await import('../src/models/index.js');
+    const { User, Client, ClientProject, Task, TaskTemplate } = await import('../src/models/index.js');
     await mongoose.connect(db.getUri());
     handleErrors(app);
     server.on('request', app);
@@ -55,7 +55,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     async function requestApproval() {
       const verifier = randomBytes(32).toString('base64url');
       const params = new URLSearchParams({
-        response_type: 'code', client_id, redirect_uri: redirect, scope: 'workflow:read workflow:write',
+        response_type: 'code', client_id, redirect_uri: redirect, scope: 'workflow:read workflow:write workflow:delete',
         state: 'fixture-state', resource, code_challenge_method: 'S256',
         code_challenge: createHash('sha256').update(verifier).digest('base64url'),
       });
@@ -68,13 +68,15 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const postToken = (fields) => fetch(auth.token_endpoint, {
       method: 'POST', body: new URLSearchParams({ client_id, resource, ...fields }),
     });
-    async function approve(person, access, expected = 200) {
+    async function approve(person, access, expected = 200, allowDelete = false) {
       const { verifier, endpoint } = await requestApproval();
       const consent = await fetch(endpoint, { headers: credential(person) });
-      assert.equal((await consent.json()).allowWrite, person.role !== 'hr');
+      const options = await consent.json();
+      assert.equal(options.allowWrite, person.role !== 'hr');
+      assert.equal(options.allowDelete, person.role === 'super_admin');
       const response = await fetch(endpoint, {
         method: 'POST', headers: { ...credential(person), 'content-type': 'application/json' },
-        body: JSON.stringify({ access }),
+        body: JSON.stringify({ access, allowDelete }),
       });
       assert.equal(response.status, expected);
       if (expected !== 200) return;
@@ -128,6 +130,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.equal((await postToken({ grant_type: 'refresh_token', refresh_token: read.refresh_token, scope: 'workflow:read workflow:write' })).status, 400);
 
     await approve(hr, 'write', 403);
+    await approve(hr, 'read', 403, true);
     const write = await approve(owner, 'write');
     const writer = await connect(write.access_token);
     const created = await writer.callTool({ name: 'create_task', arguments: draft });
@@ -137,10 +140,59 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.equal(listed.structuredContent.total, 1);
     const updated = await writer.callTool({ name: 'update_task', arguments: { taskId, status: 'done' } });
     assert.equal(updated.structuredContent.task.status, 'done');
-    const removed = await writer.callTool({ name: 'delete_task', arguments: { taskId } });
+    assert.equal((await writer.callTool({ name: 'delete_task', arguments: { taskId } })).isError, true);
+    const template = await TaskTemplate.create({ title: 'Recurring fixture', client: fixture._id, project: project._id, frequency: 'daily' });
+    const occurrence = await Task.create({ title: template.title, client: fixture._id, project: project._id,
+      template: template._id, dueDate: new Date('2026-11-22T06:30:00Z'), status: 'done' });
+    const previous = await Submission.create({
+      _id: String(hr._id) + ':2026-11-22', date: '2026-11-22', memberId: String(hr._id), memberName: hr.name,
+      delivery: 'skipped', entries: [{ projectId: String(project._id), clientId: String(fixture._id), projectName: project.name,
+        title: occurrence.title, workflowTaskId: String(occurrence._id), hours: 2, priority: 'normal', status: 'complete' }],
+    });
+    const other = await Submission.create({
+      _id: String(owner._id) + ':2026-11-22', date: '2026-11-22', memberId: String(owner._id), memberName: owner.name,
+      entries: previous.entries,
+    });
+    const selection = { memberIds: [String(hr._id)], from: '2026-11-01', to: '2026-11-22' };
+    const preview = async (client) => client.callTool({ name: 'preview_daily_work_cleanup', arguments: selection });
+    const remove = async (client, token) => client.callTool({
+      name: 'delete_daily_work_activity', arguments: { ...selection, confirmationToken: token },
+    });
+    const reviewed = (await preview(writer)).structuredContent;
+    assert.equal(reviewed.submissionCount, 1);
+    assert.equal(reviewed.entryCount, 1);
+    assert.equal((await remove(writer, reviewed.confirmationToken)).isError, true);
+    await writer.close();
+
+    const destructive = await approve(owner, 'read', 200, true);
+    assert.equal(destructive.scope, 'workflow:read workflow:delete');
+    const deleter = await connect(destructive.access_token);
+    await Submission.updateOne({ _id: previous._id }, { $set: { delivery: 'sending' } });
+    assert.equal((await remove(deleter, reviewed.confirmationToken)).isError, true);
+    const sending = (await preview(deleter)).structuredContent;
+    assert.equal(sending.sendingCount, 1);
+    assert.equal((await remove(deleter, sending.confirmationToken)).isError, true);
+    await Submission.updateOne({ _id: previous._id }, { $set: { delivery: 'sent', slackTs: 'fixture-ts' } });
+    const confirmed = (await preview(deleter)).structuredContent;
+    const result = await remove(deleter, confirmed.confirmationToken);
+    assert.equal(result.structuredContent.deletedSubmissions, 1, JSON.stringify(result));
+    assert.equal(await Submission.exists({ _id: previous._id }), null);
+    assert.ok(await Submission.exists({ _id: other._id }));
+    assert.ok(await Submission.exists({ _id: String(hr._id) + ':2026-11-23' }));
+    assert.equal((await Task.findById(occurrence._id)).status, 'done');
+    assert.ok(await TaskTemplate.findById(template._id));
+    const { SubmissionArchive } = await dailyModels();
+    const archived = await SubmissionArchive.findOne({ cleanupId: result.structuredContent.cleanupId }).lean();
+    assert.equal(archived.submission.slackTs, 'fixture-ts');
+    assert.equal((await remove(deleter, confirmed.confirmationToken)).isError, true);
+
+    const removed = await deleter.callTool({ name: 'delete_task', arguments: { taskId } });
     assert.equal(removed.structuredContent.ok, true);
     assert.ok((await Task.findById(taskId)).deletedAt);
-    await writer.close();
+    await User.updateOne({ _id: owner._id }, { role: 'manager' });
+    assert.equal((await deleter.callTool({ name: 'delete_task', arguments: { taskId: String(occurrence._id) } })).isError, true);
+    await User.updateOne({ _id: owner._id }, { role: 'super_admin' });
+    await deleter.close();
 
     const refresh = await postToken({ grant_type: 'refresh_token', refresh_token: write.refresh_token });
     assert.equal(refresh.status, 200);
