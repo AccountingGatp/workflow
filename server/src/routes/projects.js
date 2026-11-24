@@ -100,7 +100,7 @@ r.put('/clients/:clientId/projects/:id/people/:userId', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-export async function listProjects(user) {
+export async function visibleProjectDirectory(user) {
   const [ids, granted] = await Promise.all([visibleClientIds(user), grantedProjectIds(user)]);
   const { clients: managed, projects: portfolio } = await taskPortfolio(user, granted);
   const portfolioIds = new Set(portfolio.map(String));
@@ -110,6 +110,11 @@ export async function listProjects(user) {
   const projects = await ClientProject.find(ids === null ? { deletedAt: null } : {
     deletedAt: null, $or: [{ client: { $in: clientIds } }, { _id: { $in: [...granted, ...portfolio] } }],
   }).select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
+  return { projects, clientInfo, managed, portfolioIds };
+}
+
+export async function listProjects(user) {
+  const { projects, clientInfo, managed, portfolioIds } = await visibleProjectDirectory(user);
   if (!projects.length) return [];
   const now = new Date();
   const [scope, adminIds] = await Promise.all([taskScope(user), superAdminIds()]);

@@ -23,7 +23,7 @@ const validateProject = async (clientId, projectId) => {
 };
 
 const populateTask = (q) => q.populate('client', 'name').populate('team', 'name color')
-  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).populate({ path: 'owner', select: 'name', match: { role: { $ne: 'super_admin' } } }).populate('completedBy', 'name').select('-reviewer -submittedBy -submittedAt -reviewedBy -reviewedAt');
+  .populate('template', 'frequency').populate('project', 'name client').populate('masterItem', 'title links software notes automationStatus').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).populate({ path: 'owner', select: 'name', match: { role: { $ne: 'super_admin' } } }).populate('completedBy', 'name').select('-reviewer -submittedBy -submittedAt -reviewedBy -reviewedAt');
 
 /**
  * Assignees must be able to see the client. If the person assigning is allowed to grant
@@ -293,7 +293,7 @@ export async function listRecurringTasks(user, { client, project, assignee, page
   const [total, items] = await Promise.all([
     TaskTemplate.countDocuments(filter),
     TaskTemplate.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * pageSize).limit(pageSize)
-      .populate('client', 'name').populate('project', 'name client').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).select('-reviewer').lean(),
+      .populate('client', 'name').populate('project', 'name client').populate('masterItem', 'title automationStatus').populate({ path: 'assignees', select: 'name role', match: { role: { $ne: 'super_admin' } } }).select('-reviewer').lean(),
   ]);
   return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
 }

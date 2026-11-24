@@ -7,7 +7,7 @@ import { ah, HttpError } from '../middleware/auth.js';
 import { listTasks, createTask, updateTask, deleteTask, listRecurringTasks, updateRecurringAssignments, createRecurringTask } from '../routes/work.js';
 import { listProjects, createProject } from '../routes/projects.js';
 import { createMasterTask } from '../routes/project-work.js';
-import { listDailySubmissions } from '../daily-work/routes.js';
+import { listDailyWork, listLeave, listMasterTasks, withTaskAutomation } from './reads.js';
 import { dateValue } from '../daily-work/dates.js';
 import { createWorkflowOAuth, READ, WRITE, DELETE } from './oauth.js';
 
@@ -26,7 +26,7 @@ const tools = [
     name: 'list_recurring_tasks', title: 'List recurring tasks',
     description: 'List recurring templates within your Workflow portfolio. Filter by client, project or assignee. Includes exact template IDs and current assignments.',
     inputSchema: { client: id.optional(), project: id.optional(), assignee: id.optional(), page, pageSize },
-    run: listRecurringTasks,
+    run: async (user, query) => withTaskAutomation(await listRecurringTasks(user, query)),
   },
   ...['replace', 'add', 'remove'].map((mode) => ({
     name: mode === 'replace' ? 'update_recurring_task' : mode + '_recurring_assignee',
@@ -42,6 +42,18 @@ const tools = [
     run: async (user) => ({ projects: await listProjects(user) }),
   },
   {
+    name: 'list_master_tasks', title: 'Read project master tasks',
+    description: 'Read visible project master tasks, owners, frequencies, estimated hours, instructions and links. Filter by client, project or automation status: Y automated, N automation not required, A needs automation.',
+    inputSchema: { client: id.optional(), project: id.optional(), automation: z.enum(['Y', 'N', 'A']).optional(), page, pageSize },
+    run: listMasterTasks,
+  },
+  {
+    name: 'list_leave', title: 'Read employee leave',
+    description: 'Super Admin only. Read employee leave records overlapping an inclusive IST date range, or today if dates are omitted. An empty end date on a returned record means ongoing leave.',
+    inputSchema: { from: date.optional(), to: date.optional(), memberId: id.optional(), page, pageSize },
+    run: listLeave,
+  },
+  {
     name: 'create_project', title: 'Create a Workflow project', write: true,
     description: 'Create a standalone project or add a project under an existing client you manage. First check list_projects for an existing project with the same name.',
     inputSchema: { name: z.string().trim().min(1).max(120), description: z.string().max(3000).optional(), client: id.optional() },
@@ -53,9 +65,13 @@ const tools = [
     inputSchema: {
       client: id, project: id, title: z.string().trim().min(1).max(180), frequency: z.string().trim().min(1).max(100).optional(),
       weeklyHours: z.string().trim().max(100).optional(), executionDay: z.string().trim().max(100).optional(),
-      notes: z.string().max(3000).optional(), responsibleUser: id.optional(),
+      notes: z.string().max(3000).optional(), responsibleUser: id.optional(), automationCode: z.enum(['Y', 'N', 'A']).optional(),
     },
-    run: async (user, { client, project, ...task }) => ({ masterTask: await createMasterTask(user, client, project, task) }),
+    run: async (user, { client, project, automationCode, ...task }) => ({
+      masterTask: await createMasterTask(user, client, project, { ...task,
+        automationStatus: automationCode === 'A' ? null : automationCode && automationCode === 'Y',
+      }),
+    }),
   },
   {
     name: 'create_recurring_task', title: 'Create a recurring task template', write: true,
@@ -79,20 +95,18 @@ const tools = [
       client: id.optional(), project: id.optional(), assignee: id.optional(), q: z.string().max(100).optional(),
       from: date.optional(), to: date.optional(), page, pageSize,
     },
-    run: (user, { from, to, ...query }) => listTasks(user, {
+    run: async (user, { from, to, ...query }) => withTaskAutomation(await listTasks(user, {
       scope: 'all', ...query,
       from: from && dateValue(from) + 'T00:00:00+05:30',
       to: to && dateValue(to) + 'T23:59:59.999+05:30',
-    }),
+    })),
   },
   {
     name: 'list_daily_work', title: 'Read Daily Work',
-    description: 'Read Daily Work submissions and incomplete reasons for a specific work date (IST). Use the optional member filter or next page for large teams.',
-    inputSchema: { date, memberId: id.optional(), status: z.enum(['complete', 'incomplete']).optional(), page, pageSize },
-    run: async (user, { date, memberId, status, page = 1, pageSize = 10 }) => {
-      const rows = await listDailySubmissions(user, { from: date, to: date, memberId, status });
-      return { submissions: rows.slice((page - 1) * pageSize, page * pageSize), page, pageSize, total: rows.length };
-    },
+    description: 'Read Daily Work entries, hours, notes, incomplete reasons and linked master-task automation codes for an IST date or a range of up to 31 days. Filter by member, status or Daily Work project ID.',
+    inputSchema: { date: date.optional(), from: date.optional(), to: date.optional(), memberId: id.optional(),
+      projectId: id.optional(), status: z.enum(['complete', 'incomplete']).optional(), page, pageSize },
+    run: listDailyWork,
   },
   {
     name: 'create_task', title: 'Create a one-time task', write: true,

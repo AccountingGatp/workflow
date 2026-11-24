@@ -110,12 +110,19 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.ok(denied.isError && denied._meta['mcp/www_authenticate'][0].includes(metadataPath), JSON.stringify(denied));
     await publicClient.close();
 
-    const { Submission } = await dailyModels();
+    const { Submission, Leave } = await dailyModels();
+    const masterFixture = await ProjectWorkItem.create({
+      client: fixture._id, project: project._id, title: 'Pending check', notes: 'Statement SOP',
+    });
+    await Leave.create([
+      { _id: 'period', memberId: String(employee._id), date: '2026-11-22', period: true, through: '2026-11-24' },
+      { _id: 'invalid', memberId: String(employee._id), date: '2026-11-24', period: true, through: '2026-11-23' },
+    ]);
     await Submission.create({
       _id: String(hr._id) + ':2026-11-23', date: '2026-11-23', memberId: String(hr._id), memberName: hr.name,
       entries: [{
         projectId: String(project._id), clientId: String(fixture._id), projectName: project.name,
-        title: 'Pending check', hours: 2, priority: 'normal', status: 'incomplete', incompleteReason: 'Waiting for a statement',
+        title: 'Pending check', workItemId: String(masterFixture._id), hours: 2, priority: 'normal', status: 'incomplete', incompleteReason: 'Waiting for a statement',
       }],
     });
     const read = await approve(owner, 'read');
@@ -125,6 +132,14 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.equal(projects.structuredContent.projects[0].name, project.name);
     const report = await readClient.callTool({ name: 'list_daily_work', arguments: { date: '2026-11-23', status: 'incomplete' } });
     assert.equal(report.structuredContent.submissions[0].entries[0].incompleteReason, 'Waiting for a statement');
+    assert.equal(report.structuredContent.submissions[0].entries[0].automationCode, 'A');
+    const masterTasks = await readClient.callTool({ name: 'list_master_tasks', arguments: { automation: 'A' } });
+    assert.deepEqual(masterTasks.structuredContent.items.map(({ title, notes, automationCode }) => ({ title, notes, automationCode })),
+      [{ title: 'Pending check', notes: 'Statement SOP', automationCode: 'A' }]);
+    const leave = await readClient.callTool({ name: 'list_leave', arguments: { from: '2026-11-23', to: '2026-11-24' } });
+    assert.equal(leave.structuredContent.total, 1);
+    assert.equal(leave.structuredContent.items[0].memberName, employee.name);
+    assert.equal(leave.structuredContent.items[0].through, '2026-11-24');
     const draft = { title: 'MCP task', client: String(fixture._id), project: String(project._id), dueDate: '2026-11-23' };
     const writeDenied = await readClient.callTool({ name: 'create_task', arguments: draft });
     assert.equal(writeDenied.isError, true);
@@ -153,6 +168,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     }
     const leadGrant = await approve(lead, 'read');
     const connectedLead = await connect(leadGrant.access_token);
+    assert.equal((await connectedLead.callTool({ name: 'list_leave', arguments: {} })).isError, true);
     await connectedLead.close();
     await User.updateOne({ _id: lead._id }, { role: 'employee' });
     await assert.rejects(() => connect(leadGrant.access_token), /401|Unauthorized|expired|revoked/);
@@ -164,7 +180,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const { _id: payrollProject, client: payrollClient } = projectResult.structuredContent.project;
     const payroll = { project: payrollProject, client: payrollClient };
     const master = await writer.callTool({ name: 'create_master_task', arguments: {
-      ...payroll, title: 'Check payroll', frequency: 'Weekly', weeklyHours: '3 h weekly',
+      ...payroll, title: 'Check payroll', frequency: 'Weekly', weeklyHours: '3 h weekly', automationCode: 'N',
     } });
     const masterId = master.structuredContent.masterTask._id;
     assert.equal(master.structuredContent.masterTask.responsibleUser, undefined);
@@ -176,6 +192,10 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.deepEqual(schedule.structuredContent.template.assignees, []);
     assert.equal(String((await ProjectWorkItem.findById(masterId)).scheduledTemplate), templateId);
     assert.ok(await Task.exists({ template: templateId, masterItem: masterId }));
+    const recurring = await writer.callTool({ name: 'list_recurring_tasks', arguments: { project: payrollProject } });
+    assert.equal(recurring.structuredContent.items[0].automationCode, 'N');
+    const scheduled = await writer.callTool({ name: 'list_tasks', arguments: { project: payrollProject } });
+    assert.equal(scheduled.structuredContent.items[0].automationCode, 'N');
     assert.ok((await writer.callTool({ name: 'create_recurring_task', arguments: args })).isError);
     assert.equal(await TaskTemplate.countDocuments({ masterItem: masterId }), 1);
 
