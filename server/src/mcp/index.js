@@ -4,8 +4,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { z } from 'zod';
 import { ah, HttpError } from '../middleware/auth.js';
-import { listTasks, createTask, updateTask, deleteTask, listRecurringTasks, updateRecurringAssignments } from '../routes/work.js';
-import { listProjects } from '../routes/projects.js';
+import { listTasks, createTask, updateTask, deleteTask, listRecurringTasks, updateRecurringAssignments, createRecurringTask } from '../routes/work.js';
+import { listProjects, createProject } from '../routes/projects.js';
+import { createMasterTask } from '../routes/project-work.js';
 import { listDailySubmissions } from '../daily-work/routes.js';
 import { dateValue } from '../daily-work/dates.js';
 import { createWorkflowOAuth, READ, WRITE, DELETE } from './oauth.js';
@@ -39,6 +40,36 @@ const tools = [
     description: 'List projects visible to the connected Workflow account, with client IDs and workload counts.',
     inputSchema: {},
     run: async (user) => ({ projects: await listProjects(user) }),
+  },
+  {
+    name: 'create_project', title: 'Create a Workflow project', write: true,
+    description: 'Create a standalone project or add a project under an existing client you manage. First check list_projects for an existing project with the same name.',
+    inputSchema: { name: z.string().trim().min(1).max(120), description: z.string().max(3000).optional(), client: id.optional() },
+    run: async (user, { client, ...details }) => ({ project: await createProject(user, details, client) }),
+  },
+  {
+    name: 'create_master_task', title: 'Add a project master task', write: true,
+    description: 'Add a master task without creating a dated occurrence. Use frequency As needed for on-demand work. Enter time estimates in weeklyHours (for example 3 h weekly); omit it if the task has no separate allocation.',
+    inputSchema: {
+      client: id, project: id, title: z.string().trim().min(1).max(180), frequency: z.string().trim().min(1).max(100).optional(),
+      weeklyHours: z.string().trim().max(100).optional(), executionDay: z.string().trim().max(100).optional(),
+      notes: z.string().max(3000).optional(), responsibleUser: id.optional(),
+    },
+    run: async (user, { client, project, ...task }) => ({ masterTask: await createMasterTask(user, client, project, task) }),
+  },
+  {
+    name: 'create_recurring_task', title: 'Create a recurring task template', write: true,
+    description: 'Create a dated recurring template. Weekly needs a weekday (0 Sunday through 6 Saturday), monthly needs a day of the month, and semimonthly needs two dates. Semimonthly means twice per month. Omit assignees to leave the schedule unassigned. Provide masterItem to link an existing master task from the same project.',
+    inputSchema: {
+      client: id, project: id.optional(), masterItem: id.optional(), title: z.string().trim().min(1).max(230),
+      assignees: ids.optional(), frequency: z.enum(['daily', 'weekly', 'monthly', 'semimonthly']),
+      weekday: z.number().int().min(0).max(6).optional(),
+      monthDay: z.number().int().min(1).max(31).optional(),
+      monthDays: z.array(z.number().int().min(1).max(31)).length(2).optional(),
+      startsOn: date.optional(), priority: priority.optional(), sop: z.string().max(3000).optional(),
+      checklist: z.array(z.string().trim().min(1).max(300)).max(25).optional(),
+    },
+    run: (user, { startsOn, ...body }) => createRecurringTask(user, { ...body, startsOn: startsOn && dateValue(startsOn) }),
   },
   {
     name: 'list_tasks', title: 'List tasks',

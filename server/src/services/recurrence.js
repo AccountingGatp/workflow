@@ -30,14 +30,14 @@ export function materializeOccurrence(tpl, due, session) {
  * Each occurrence is created independently of whether the previous one was finished,
  * so overdue work stays visible. Idempotent via unique (template, dueDate).
  */
-export async function generateRecurringTasks(templateId) {
+export async function generateRecurringTasks(templateId, session) {
   const filter = { active: true };
   if (templateId) filter._id = templateId;
-  const templates = await TaskTemplate.find(filter);
+  const templates = await TaskTemplate.find(filter).session(session || null);
   const projectIds = templates.map((template) => template.project).filter(Boolean);
   const removedProjects = new Set((await ClientProject.distinct('_id', {
     _id: { $in: projectIds }, deletedAt: { $ne: null },
-  })).map(String));
+  }).session(session || null)).map(String));
   const today = startOfDay(new Date());
   let created = 0;
   for (const tpl of templates) {
@@ -47,7 +47,7 @@ export async function generateRecurringTasks(templateId) {
       const day = new Date(from); day.setDate(from.getDate() + i);
       if (!matches(tpl, day)) continue;
       const due = new Date(day); due.setHours(17, 0, 0, 0);
-      const res = await materializeOccurrence(tpl, due);
+      const res = await materializeOccurrence(tpl, due, session);
       created += res.upsertedCount || 0;
     }
   }

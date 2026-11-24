@@ -74,13 +74,17 @@ r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) =>
     ? { ...item, responsible: undefined, responsibleUser: undefined }
     : item));
 }));
-r.post('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
-  const project = await authorized(req, true);
+export async function createMasterTask(user, clientId, projectId, body) {
+  const project = await authorized({ user, params: { clientId, projectId } }, true);
   const doc = await ProjectWorkItem.create({
-    ...await resolveAssignedEmployee(req.user, project, payload(req.body)), client: project.client, project: project._id,
+    ...await resolveAssignedEmployee(user, project, payload(body)), client: project.client, project: project._id,
   });
-  await audit(req.user, 'project.work.create', { entity:'ProjectWorkItem', entityId:doc._id, client:project.client, project:project._id, summary:'Added project work item ' + doc.title });
-  res.status(201).json(doc);
+  await audit(user, 'project.work.create', { entity: 'ProjectWorkItem', entityId: doc._id, client: project.client, project: project._id, summary: 'Added project work item ' + doc.title });
+  return doc;
+}
+
+r.post('/clients/:clientId/projects/:projectId/work-items', ah(async (req, res) => {
+  res.status(201).json(await createMasterTask(req.user, req.params.clientId, req.params.projectId, req.body));
 }));
 r.patch('/clients/:clientId/projects/:projectId/work-items/:id', ah(async (req,res) => {
   const project = await authorized(req, true);
