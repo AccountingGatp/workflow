@@ -36,7 +36,8 @@ Grant.schema.index({ refreshHash: 1 }, { unique: true });
 Grant.schema.index({ user: 1, origin: 1 });
 
 function permittedRedirect(value) {
-  if (value === 'https://chatgpt.com/connector_platform_oauth_redirect') return true;
+  if (value === 'https://chatgpt.com/connector_platform_oauth_redirect' ||
+      value === 'https://claude.ai/api/mcp/auth_callback') return true;
   if (/^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/.test(value)) return true;
   return (process.env.WORKFLOW_MCP_REDIRECT_URIS || '').split(',').some((uri) => uri.trim() === value);
 }
