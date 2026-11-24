@@ -109,7 +109,7 @@ app.get('/api/cron/daily-work', cronAuth, async (_req, res) => {
   console.info('Daily Work cron finished');
   res.json({ ok: true });
 });
-app.use('/api/daily-work', requireAuth, enforceWorkReadOnly, dailyWorkRoutes);
+app.use('/api/daily-work', requireAuth, dailyWorkRoutes);
 
 app.use('/api/auth', authRoutes);
 app.get('/api/settings/mail', requireAuth, ah(async (_req, res) => res.json({ enabled: await mailEnabled() })));

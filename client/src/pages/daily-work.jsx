@@ -505,11 +505,11 @@ function TaskStatusActions({ entry }) {
 }
 
 function TaskStatusTable({ entries, showMember = true }) {
-  const { can } = useAuth();
+  const showActions = entries.some((entry) => entry.canUpdateStatus);
   return <div className="card table-wrap" role="region" aria-label="Daily task completion" tabIndex={0}>
     <table className="table daily-status-table">
       <thead><tr><th scope="col">Task</th><th scope="col">Project</th>{showMember && <th scope="col">Member</th>}<th scope="col">Date</th>
-        <th scope="col">Hours</th><th scope="col">Priority</th><th scope="col">Status</th>{!can.hr && <th scope="col">Actions</th>}</tr></thead>
+        <th scope="col">Hours</th><th scope="col">Priority</th><th scope="col">Status</th>{showActions && <th scope="col">Actions</th>}</tr></thead>
       <tbody>{entries.map((entry) => {
         const { date, memberId, memberName } = entry.submission;
         return <tr key={`${memberId}:${date}:${entry._id}`}>
@@ -523,7 +523,7 @@ function TaskStatusTable({ entries, showMember = true }) {
           <td><time dateTime={date}>{dueLabel.format(new Date(`${date}T00:00:00+05:30`))}</time></td>
           <td className="mono">{hours(entry.hours)}</td><td className="daily-status">{entry.priority}</td>
           <td><StatusBadge entry={entry} /></td>
-          {!can.hr && <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} />}</td>}
+          {showActions && <td>{entry.canUpdateStatus && <TaskStatusActions entry={entry} />}</td>}
         </tr>;
       })}</tbody>
     </table>
@@ -684,10 +684,10 @@ export default function DailyWork() {
   const [sendingMissing, setSendingMissing] = useState(false);
   const [missingError, setMissingError] = useState(null);
   const tabs = [
-    ...(!can.hr ? [['entry', 'Add Projects']] : []), ['member', 'Projects by Member'], ['status', 'Task Status'],
+    ['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
   const requested = params.get('tab');
-  const tab = tabs.some(([id]) => id === requested) ? requested : can.hr ? 'status' : 'entry';
+  const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
   const day = useApi(tab === 'entry' ? `${root}/day/${date}` : null);
   const choose = (id) => setParams(id === 'entry' ? {} : { tab: id });
   const reportDate = ['entry', 'missing'].includes(tab) ? date : today();
@@ -754,7 +754,7 @@ export default function DailyWork() {
     {tab === 'entry' && (day.error ? <ErrorBox error={day.error} /> : day.loading || day.data?.date !== date ? <Skeleton /> :
       <EntryEditor key={date} date={date} data={day.data} />)}
     {tab === 'status' && <DailyTaskStatus date={date} />}
-    {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={can.hr ? undefined : user._id} />}
+    {reportViews.includes(tab) && <DailyReports tab={tab} date={date} setDate={setDate} openEntry={() => choose('entry')} me={user._id} />}
     {tab === 'missing' && <Missing date={date} preview={can.super ? preview : undefined} />}
   </div>;
 }
