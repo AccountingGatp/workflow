@@ -351,6 +351,20 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 
 /* Daily Work */
 .daily-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.main:has(.daily-work-page[data-entry]) .topbar { height: 48px; min-height: 48px; }
+.content:has(.daily-work-page[data-entry]) { padding-top: 0; }
+.daily-work-page[data-entry] .page-head { top: 48px; margin-bottom: 8px; padding-block: 7px; gap: 8px; }
+.daily-work-page[data-entry] .page-head h1 { font-size: clamp(1.25rem, 2vw, 1.5rem); }
+.daily-work-page[data-entry] .page-head .field { flex-direction: row; align-items: center; gap: 8px; }
+.daily-work-page[data-entry] .page-head .field > span { white-space: nowrap; }
+.daily-work-page[data-entry] .page-head .input { min-height: 34px; padding-block: 5px; }
+.daily-work-page[data-entry] .daily-tabs { margin-bottom: 12px; }
+.daily-work-page[data-entry] .daily-tab { padding: 8px 10px; }
+.daily-entry-layout > .daily-card { padding: 14px; }
+.daily-entry-layout h2 { font-size: 1.05rem; }
+.daily-editor-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 12px; }
+.daily-editor-heading h2 > span { margin-left: 4px; font-weight: 500; }
+.daily-editor-heading time { white-space: nowrap; }
 .daily-tab { background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-2);
   padding: 11px 12px; font: inherit; font-weight: 600; cursor: pointer; }
 .daily-tab:hover, .daily-tab.active { color: var(--primary); }
@@ -371,30 +385,32 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-controls { align-items: flex-end; margin-block: 10px; }
 .daily-controls .field { flex: 1 1 155px; min-width: 0; }
 .content:has(.daily-work-page[data-entry]) { max-width: none; }
-.daily-entry-layout { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+.daily-entry-layout { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
 .daily-task-editor { min-width: 0; }
-.daily-picker-fields { margin-top: 14px; }
+.daily-picker-fields { margin-top: 8px; }
 .daily-picker-fields .field, .daily-task-name { min-width: 0; }
 .daily-picker-fields .select, .daily-task-name .input { width: 100%; }
 .daily-search { position: relative; display: block; }
 .daily-search > svg { position: absolute; top: 50%; left: 12px; translate: 0 -50%; color: var(--text-3); pointer-events: none; }
 .daily-search > .input { width: 100%; padding-left: 38px; }
 .daily-project-task-panel > p { margin-top: 12px; }
-.daily-project-tasks { display: grid; gap: 8px; margin: 12px 0 0; padding: 2px 4px 2px 2px; list-style: none;
+.daily-project-tasks { display: grid; gap: 6px; margin: 8px 0 0; padding: 2px 4px 2px 2px; list-style: none;
   max-height: clamp(220px, 42vh, 540px); overflow: auto; scrollbar-width: thin; }
 .daily-project-task { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
+  border: 1px solid var(--border); border-radius: var(--r-md); padding: 8px 10px; }
 .daily-project-task-info { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
 .daily-project-task-info strong { font-weight: 600; }
-.daily-editor-bar, .daily-editor-body, .daily-editor-feedback { padding: 14px clamp(14px, 2vw, 22px); }
-.daily-editor-bar { position: sticky; top: 64px; z-index: 2; background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 1px solid var(--border); }
+.daily-editor-bar, .daily-editor-body, .daily-editor-feedback { padding: 10px 14px; }
+.daily-editor-bar { position: relative; z-index: 2; background: var(--surface-2); border-radius: var(--r-lg) var(--r-lg) 0 0; border-bottom: 1px solid var(--border); }
 .daily-editor-bar h2 { margin-bottom: 2px; }
 .daily-editor-totals { gap: 10px; }
 .daily-editor-feedback { padding-bottom: 0; }
-.daily-editor-body { min-height: 146px; max-height: clamp(240px, 58dvh, 600px); overflow-y: auto;
-  scrollbar-width: thin; scrollbar-gutter: stable; scroll-padding-block: 10px; }
+.daily-editor-body { gap: 6px; min-height: 108px; max-height: clamp(240px, 58dvh, 600px); overflow-y: auto;
+  scrollbar-width: thin; scrollbar-gutter: stable; scroll-padding-block: 8px; overscroll-behavior-y: contain; }
+.daily-editor-body .empty { padding: 18px 10px; }
+.daily-editor-body .empty-icon { width: 34px; height: 34px; }
 .daily-editor-body > .daily-entry { flex-shrink: 0; }
-.daily-entry { border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; margin: 0; padding: 12px; }
+.daily-entry { border: 1px solid var(--border); border-radius: var(--r-md); min-width: 0; margin: 0; padding: 8px 10px; }
 .daily-task-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-bottom: 12px; }
 .daily-task-search { margin-top: 12px; }
 .daily-task-description { white-space: pre-line; overflow-wrap: anywhere; }
@@ -406,15 +422,16 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
 .daily-entry-checklist { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .daily-entry-checklist label { overflow-wrap: anywhere; }
 @media (min-width: 1025px) {
-  .daily-entry-layout { display: grid; grid-template-columns: minmax(300px, .85fr) minmax(0, 1.5fr);
+  .daily-entry-layout { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(0, 1.5fr);
     grid-template-rows: auto 1fr; grid-template-areas: "project editor" "tasks editor"; align-items: start; }
   .daily-project-picker { grid-area: project; }
   .daily-task-editor { grid-area: editor; }
   .daily-project-task-panel { grid-area: tasks; }
-  .daily-editor-body { max-height: clamp(260px, calc(100dvh - 340px), 840px); }
+  .daily-editor-body { max-height: clamp(260px, calc(100dvh - 250px), 840px); }
 }
 @media (max-width: 640px) {
-  .daily-editor-bar { top: 56px; }
+  .daily-work-page[data-entry] .page-head > div:first-child { flex-basis: auto; }
+  .daily-work-page[data-entry] .page-head > .row-wrap { width: auto; flex: 0 1 auto; }
   .daily-work-page[data-entry] .daily-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; }
   .daily-work-page[data-entry] .daily-tab { flex: 0 0 auto; white-space: nowrap; }
 }
