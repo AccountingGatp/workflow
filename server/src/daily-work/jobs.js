@@ -4,6 +4,7 @@ import { roster } from './access.js';
 import { clock, shiftDate } from './dates.js';
 import { leaveDates } from './leave.js';
 import { dailySubmissionText, postSlack, retrySlack, slackConfigured, slackPerson, statusReminderText } from './slack.js';
+import { automationByWorkItem } from '../services/task-automation.js';
 import { statusReminders, validTime } from './settings.js';
 
 const minutes = (time) => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
@@ -107,7 +108,8 @@ async function incompleteText(models, date) {
   const heading = `:warning: *Incomplete Tasks Report*\nDate: ${date}`;
   if (!submissions.length) return `${heading}\n\nNo eligible Daily Work submissions to check.`;
   if (!rows.length) return `${heading}\n\n:white_check_mark: No incomplete tasks reported.`;
-  return [heading, ...rows.map((row) => dailySubmissionText(row, people.get(row.memberId).slackUserId, true)),
+  const automation = await automationByWorkItem(rows);
+  return [heading, ...rows.map((row) => dailySubmissionText(row, people.get(row.memberId).slackUserId, true, automation)),
     'Please complete or update these tasks and contact your project manager if you need help.'].join('\n\n');
 }
 

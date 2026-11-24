@@ -136,7 +136,8 @@ The production MCP URL is `https://workflow.gatpsolutions.com/api/mcp`. In Workf
 
 In ChatGPT, add a custom MCP server using OAuth with **dynamic client registration**. Open the Workflow consent page and sign in with your existing Workflow account. Approve read access, or opt in to write access. A Super Admin can separately opt in to delete access. Reconnect to approve additional permissions. MCP connections are available to Super Admins, Admin / Managers, and Admin / Team Leads. Workflow checks the account’s current role and project scope when using or refreshing a connection.
 
-- Read tools list visible projects, scheduled tasks and Daily Work submissions.
+- Read tools list visible projects, master tasks, scheduled occurrences, recurring templates and Daily Work submissions. Master tasks support filtering by automation code. Linked task records return `Y` for automated, `N` for automation not required, or `A` for needs automation when the saved value is blank. Daily Work labels follow the master task, including in Slack.
+- `list_leave` reads saved employee leave by IST date range or employee ID. It requires a Super Admin connection with read access.
 - Write tools create and edit individual scheduled tasks.
 - Delete tools require the separate `workflow:delete` scope and a current Super Admin role. They can remove a scheduled occurrence or remove Daily Work submissions from active views.
 - For Daily Work cleanup, call `preview_daily_work_cleanup` with employee IDs and an inclusive historical work-date range in IST. After reviewing and confirming the dates and counts, pass the preview token and the same selection to `delete_daily_work_activity`. A changed submission or a Slack delivery in progress blocks the cleanup. The tool records a recovery copy in `daily_submission_archive` and returns its cleanup ID. Task occurrences, recurring schedules, and previous Slack posts are outside this operation.

@@ -34,7 +34,7 @@ function payload(body) {
   if (body.automated !== undefined) result.automated = !!body.automated;
   if (body.automationStatus !== undefined) {
     if (body.automationStatus !== null && typeof body.automationStatus !== 'boolean') {
-      throw new HttpError(400, 'Choose Yes, No or Not set for automation');
+      throw new HttpError(400, 'Choose Automated, Automation not required or Needs automation');
     }
     result.automationStatus = body.automationStatus;
   }

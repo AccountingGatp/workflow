@@ -13,6 +13,7 @@ import { listClientWork, projectWorkflowStatuses, saveWorkflowEntry, syncClientP
 import { clock, dateValue, shiftDate } from './dates.js';
 import { missingSubmissionText, missingSubmissions } from './jobs.js';
 import { deliverSubmission, postSlack, submissionText, slackConfigured } from './slack.js';
+import { automationByWorkItem } from '../services/task-automation.js';
 import { hubstaff, hubstaffConfigured } from './hubstaff.js';
 import { defaultStatusReminder, parseStatusReminder, statusRemindersWithDelivery, statusScheduleRevision } from './settings.js';
 
@@ -437,7 +438,8 @@ r.post('/reports/slack', route(async (req, res, models, scope) => {
   const submissions = await reportRows(req, models, scope);
   if (!submissions.length) fail('No daily work matches these filters');
   if (!slackConfigured()) throw new HttpError(503, 'Slack is not configured');
-  await postSlack(['Project Summary by Member', ...submissions.map((submission) => submissionText(submission))]
+  const automation = await automationByWorkItem(submissions);
+  await postSlack(['Project Summary by Member', ...submissions.map((submission) => submissionText(submission, undefined, automation))]
     .join('\n\n'), { userError: true });
   res.json({ ok: true });
 }));

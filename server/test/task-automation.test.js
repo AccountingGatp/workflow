@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { Client, ClientProject, ProjectWorkItem } from '../src/models/index.js';
 import { importTaskAutomation } from '../src/import-task-automation.js';
+import { automationByWorkItem } from '../src/services/task-automation.js';
 import { dailySubmissionText } from '../src/daily-work/slack.js';
 
 test('only explicit automation values on matching saved tasks are imported and shown in Slack', async () => {
@@ -35,11 +36,13 @@ test('only explicit automation values on matching saved tasks are imported and s
       projectName: project.name, title, workItemId: String(_id), hours: 1, priority: 'normal',
     }));
     entries.push({ ...entries[0], workItemId: undefined, note: 'Example note' });
-    const slack = dailySubmissionText({ memberName: 'Test Employee', date: '2026-11-23', entries }, undefined, false, status);
+    const submission = { memberName: 'Test Employee', date: '2026-11-23', entries };
+    const workItems = await automationByWorkItem([submission]);
+    const slack = dailySubmissionText(submission, undefined, false, workItems);
     assert.match(slack, /^   Task 1: Automated bookkeeping \(1h\) - Priority: Medium - Y$/m);
     assert.match(slack, /^   Task 2: Manual review \(1h\) - Priority: Medium - N$/m);
-    assert.match(slack, /^   Task 3: Blank in sheet \(1h\) - Priority: Medium$/m);
-    assert.match(slack, /^   Task 4: Cleared by lead \(1h\) - Priority: Medium$/m);
+    assert.match(slack, /^   Task 3: Blank in sheet \(1h\) - Priority: Medium - A$/m);
+    assert.match(slack, /^   Task 4: Cleared by lead \(1h\) - Priority: Medium - A$/m);
     assert.match(slack, /^   Task 5: Automated bookkeeping \(1h\) - Priority: Medium\n      Note: Example note$/m);
   } finally {
     await mongoose.disconnect();
