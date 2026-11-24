@@ -93,15 +93,16 @@ r.post('/users', requireRole('super_admin'), ah(async (req, res) => {
   res.status(201).json(user);
 }));
 
-r.put('/users/:id/leave', requireRole('super_admin'), ah(async (req, res) => {
+export const updatePersonLeave = ah(async (req, res) => {
   const { onLeave } = req.body || {};
   if (typeof onLeave !== 'boolean') throw new HttpError(400, 'Choose Active or On leave');
-  const person = await User.findOne({ _id: req.params.id, active: true, deletedAt: null }).select('_id');
+  const person = await User.findOne({ _id: req.params.id, active: true, deletedAt: null }).select('_id role');
   if (!person) throw new HttpError(404, 'Active person not found');
+  if (req.user.role === 'hr' && isSuper(person)) throw new HttpError(403, 'Only Super Admins can update Super Admin availability');
   const { Leave } = await dailyModels();
   await setCurrentLeave(Leave, String(person._id), clock().date, onLeave);
   res.json({ onLeave });
-}));
+});
 
 r.patch('/users/:id', requireRole('super_admin'), ah(async (req, res) => {
   const allowed = ['name', 'email', 'role', 'title', 'active', 'slackUserId', 'dailyReport'];

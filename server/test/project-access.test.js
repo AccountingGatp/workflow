@@ -216,6 +216,18 @@ test('project assignment enables Daily Work without opening the rest of the clie
     await request(hr, '/mail/threads', 'GET', undefined, 403);
     await request(hr, settings, 'GET', undefined, 403);
     await request(hr, '/users/' + employee._id, 'PATCH', { active: false }, 403);
+    const leavePath = '/users/' + employee._id + '/leave';
+    await request(employee, leavePath, 'PUT', { onLeave: true }, 403);
+    await request(hr, '/users/' + admin._id + '/leave', 'PUT', { onLeave: true }, 403);
+    assert.deepEqual(await request(hr, leavePath, 'PUT', { onLeave: true }), { onLeave: true });
+    let staff = (await request(hr, '/users?dailyReport=1')).find((person) => person._id === String(employee._id));
+    assert.equal(staff.onLeave, true);
+    assert.equal(staff.active, true);
+    assert.deepEqual(await request(hr, leavePath, 'PUT', { onLeave: false }), { onLeave: false });
+    staff = (await request(hr, '/users?dailyReport=1')).find((person) => person._id === String(employee._id));
+    assert.equal(staff.onLeave, false);
+    assert.equal(staff.active, true);
+
     await request(hr, '/tasks/' + hidden._id, 'PATCH', { status: 'done' }, 403);
     await request(hr, statusPath, 'PATCH', { status: 'complete', version: monitoredReport.submissions[0].version }, 403);
     await request(hr, '/daily-work/reports/slack', 'POST', undefined, 403);

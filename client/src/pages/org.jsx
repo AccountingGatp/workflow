@@ -174,7 +174,7 @@ export function People() {
                     onClick={() => setAssigningPerson(u)}><Plus size={14} />Assign projects</button>)}</td>}
                 <td>{u.active && <div className="row-wrap">
                   <Badge cls={u.onLeave ? 'b-warning' : 'b-success'}>{u.onLeave ? 'On leave' : 'Active'}</Badge>
-                  {can.super && <button type="button" className="btn btn-outline btn-sm" disabled={changingLeave !== null}
+                  {(can.super || (can.hr && u.role !== 'super_admin')) && <button type="button" className="btn btn-outline btn-sm" disabled={changingLeave !== null}
                     aria-label={`${u.onLeave ? 'Mark active' : 'Mark on leave'} for ${u.name}`}
                     onClick={() => changeLeave(u)}>{u.onLeave ? 'Mark active' : 'Mark on leave'}</button>}
                 </div>}</td>

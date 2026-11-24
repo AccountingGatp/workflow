@@ -5,7 +5,7 @@ import cors from 'cors';
 import mongoose from 'mongoose';
 import { ah, enforceWorkReadOnly, requireAuth, requireRole } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
-import peopleRoutes from './routes/people.js';
+import peopleRoutes, { updatePersonLeave } from './routes/people.js';
 import clientRoutes from './routes/clients.js';
 import dailyWorkRoutes from './daily-work/routes.js';
 import { runDailyWorkJobs } from './daily-work/jobs.js';
@@ -118,6 +118,7 @@ app.put('/api/settings/mail', requireAuth, requireRole('super_admin'), ah(async 
 }));
 app.use('/api/mail', requireMailEnabled);
 app.use('/api', mailPublic);
+app.put('/api/users/:id/leave', requireAuth, requireRole('super_admin', 'hr'), updatePersonLeave);
 app.use('/api', requireAuth, enforceWorkReadOnly, peopleRoutes, clientRoutes, projectRoutes, projectWorkRoutes, workRoutes, mailRoutes);
 
 export function handleErrors(app) {
