@@ -134,10 +134,12 @@ Each Daily Work project receives a Review task automatically. The four eligible 
 
 The production MCP URL is `https://workflow.gatpsolutions.com/api/mcp`. In Workflow, open **MCP Connections** to find the URL for the current deployment and revoke your connections.
 
-In ChatGPT, add a custom MCP server using OAuth with **dynamic client registration**. Open the Workflow consent page and sign in with your existing Workflow account. Approve read access or select the write checkbox before approving. To switch from read-only to write access, authorize a new read-and-write connection. Workflow enforces the connected account's current role and project scope on each tool call. HR accounts stay read-only.
+In ChatGPT, add a custom MCP server using OAuth with **dynamic client registration**. Open the Workflow consent page and sign in with your existing Workflow account. Approve read access, or opt in to write access. A Super Admin can separately opt in to delete access. Reconnect to approve additional permissions. Workflow enforces the connected account's current role and project scope on each tool call. HR accounts stay read-only.
 
 - Read tools list visible projects, scheduled tasks and Daily Work submissions.
-- Write tools create and edit individual scheduled tasks. A Super Admin may remove an individual task occurrence through Workflow's soft deletion.
+- Write tools create and edit individual scheduled tasks.
+- Delete tools require the separate `workflow:delete` scope and a current Super Admin role. They can remove a scheduled occurrence or remove Daily Work submissions from active views.
+- For Daily Work cleanup, call `preview_daily_work_cleanup` with employee IDs and an inclusive historical work-date range in IST. After reviewing and confirming the dates and counts, pass the preview token and the same selection to `delete_daily_work_activity`. A changed submission or a Slack delivery in progress blocks the cleanup. The tool records a recovery copy in `daily_submission_archive` and returns its cleanup ID. Task occurrences, recurring schedules, and previous Slack posts are outside this operation.
 - Access tokens last up to one hour and can refresh for the approved connection for up to 30 days. Revoking the connection invalidates both tokens.
 
 Production Vercel deployments default to the canonical Workflow domain. Previews use their Vercel deployment URL. Set `WORKFLOW_MCP_ORIGIN` to override the public origin when using a different domain. That origin must also be configured for Workflow Google sign-in. ChatGPT callbacks are supported by default. For another MCP client, configure the exact callback URL in the comma-separated `WORKFLOW_MCP_REDIRECT_URIS` setting. Use an isolated database for preview and development.

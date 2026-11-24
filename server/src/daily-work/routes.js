@@ -5,7 +5,7 @@ import { HttpError, ah } from '../middleware/auth.js';
 import { ClientProject, Task, User } from '../models/index.js';
 import { applyTaskTransition } from '../services/task-review.js';
 import { canManageProject, canMonitorAllWork, isSuper } from '../services/access.js';
-import { dailyModels } from './models.js';
+import { dailyModels, sharedBudgetId } from './models.js';
 import { importDailyProjects } from './import-projects.js';
 import { dailyScope, includes, roster, validateProjectLink, workflowProjects } from './access.js';
 import { canLogReview, catalogAvailability, catalogCollation, ensureReviewCatalog, isReview, periodLimits, projectBudgetUsage, taskName, validateBudgets, withClientBudgets } from './budgets.js';
@@ -153,13 +153,12 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
 
   const key = `${scope.own}:${date}`;
   const reviewAllowed = await canLogReview(req.user);
-  const sharedBudget = 'shared-project-budgets';
-  await models.BudgetRevision.updateOne({ _id: sharedBudget }, { $setOnInsert: { revision: 0 } }, { upsert: true })
+  await models.BudgetRevision.updateOne({ _id: sharedBudgetId }, { $setOnInsert: { revision: 0 } }, { upsert: true })
     .catch((error) => { if (error.code !== 11000) throw error; });
 
   const submission = await models.Submission.db.transaction(async (session) => {
     // Serialize budget writes so simultaneous saves cannot spend the same project hours.
-    await models.BudgetRevision.updateOne({ _id: sharedBudget }, { $inc: { revision: 1 } }, { session });
+    await models.BudgetRevision.updateOne({ _id: sharedBudgetId }, { $inc: { revision: 1 } }, { session });
     return saveDay(req.user, models, scope, { date, key, entries, version, reviewAllowed, session });
   });
   const [live] = await projectWorkflowStatuses([submission.toObject()]);

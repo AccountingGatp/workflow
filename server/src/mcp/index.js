@@ -3,12 +3,14 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { z } from 'zod';
-import { ah } from '../middleware/auth.js';
+import { ah, HttpError } from '../middleware/auth.js';
 import { listTasks, createTask, updateTask, deleteTask } from '../routes/work.js';
 import { listProjects } from '../routes/projects.js';
 import { listDailySubmissions } from '../daily-work/routes.js';
 import { dateValue } from '../daily-work/dates.js';
-import { createWorkflowOAuth, READ, WRITE } from './oauth.js';
+import { createWorkflowOAuth, READ, WRITE, DELETE } from './oauth.js';
+
+import { previewDailyWorkCleanup, deleteDailyWorkActivity } from '../daily-work/cleanup.js';
 
 const id = z.string().regex(/^[0-9a-f]{24}$/i);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -17,6 +19,7 @@ const status = z.enum(['todo', 'in_progress', 'waiting', 'done']);
 const ids = z.array(id).max(25);
 const page = z.number().int().min(1).max(100000).optional();
 const pageSize = z.number().int().min(1).max(50).optional();
+const cleanupSelection = { memberIds: z.array(id).min(1).max(20), from: date, to: date };
 const tools = [
   {
     name: 'list_projects', title: 'List projects',
@@ -65,32 +68,46 @@ const tools = [
     },
     run: async (user, { taskId, dueDate, ...body }) => {
       if (dueDate) body.dueDate = dateValue(dueDate) + 'T17:00:00+05:30';
-      if (!Object.keys(body).length) throw Object.assign(new Error('Provide at least one field to update'), { status: 400 });
+      if (!Object.keys(body).length) throw new HttpError(400, 'Provide at least one field to update');
       return { task: await updateTask(user, taskId, body) };
     },
   },
   {
-    name: 'delete_task', title: 'Remove one task occurrence', write: true, destructive: true,
+    name: 'delete_task', title: 'Remove one task occurrence', destructive: true,
     description: 'Super Admin only. Remove one scheduled task occurrence by exact ID using Workflow soft deletion. Ask the user to confirm the individual task before calling. Recurring schedules and Daily Work submissions are separate.',
     inputSchema: { taskId: id },
     run: (user, { taskId }) => deleteTask(user, taskId),
+  },
+  {
+    name: 'preview_daily_work_cleanup', title: 'Preview Daily Work activity cleanup',
+    description: 'Super Admin only. List saved Daily Work submissions targeted for removal by exact employee IDs and inclusive historical work dates in IST. Use the counts and dates to obtain the user’s explicit confirmation before deletion.',
+    inputSchema: cleanupSelection,
+    run: previewDailyWorkCleanup,
+  },
+  {
+    name: 'delete_daily_work_activity', title: 'Remove historical Daily Work activity',
+    destructive: true,
+    description: 'Super Admin only. After preview_daily_work_cleanup and explicit user confirmation of the members and dates, remove those Daily Work submissions from active views. Requires a matching preview token. Workflow keeps a recovery copy. Scheduled tasks, recurring templates, and existing Slack posts are unaffected.',
+    inputSchema: { ...cleanupSelection, confirmationToken: z.string().regex(/^[0-9a-f]{64}$/) },
+    run: (user, { confirmationToken, ...selection }) => deleteDailyWorkActivity(user, selection, confirmationToken),
   },
 ];
 
 function mcpServer(auth, resourceMetadataUrl) {
   const server = new McpServer({ name: 'gatp-workflow', version: '1.0.0' });
   for (const tool of tools) {
-    const scope = tool.write ? WRITE : READ;
+    const scope = tool.destructive ? DELETE : tool.write ? WRITE : READ;
     const securitySchemes = [{ type: 'oauth2', scopes: [scope] }];
     server.registerTool(tool.name, {
       title: tool.title, description: tool.description, inputSchema: tool.inputSchema,
-      annotations: { readOnlyHint: !tool.write, destructiveHint: !!tool.destructive, openWorldHint: false },
+      annotations: { readOnlyHint: scope === READ, destructiveHint: !!tool.destructive, openWorldHint: false },
       _meta: { securitySchemes },
     }, async (args) => {
       if (!auth?.scopes.includes(scope)) {
         return {
           isError: true,
-          content: [{ type: 'text', text: tool.write ? 'Connect with read and write access to perform this action.' : 'Connect your Workflow account.' }],
+          content: [{ type: 'text', text: scope === DELETE ? 'Reconnect as a Super Admin and explicitly grant delete access.' :
+            scope === WRITE ? 'Connect with read and write access to perform this action.' : 'Connect your Workflow account.' }],
           _meta: { 'mcp/www_authenticate': [`Bearer resource_metadata="${resourceMetadataUrl}", scope="${scope}", error="${auth ? 'insufficient_scope' : 'invalid_token'}"`] },
         };
       }

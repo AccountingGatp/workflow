@@ -11,6 +11,7 @@ export function McpConsent() {
   const { data, error, loading } = useApi(endpoint);
   const { user } = useAuth();
   const [write, setWrite] = useState(false);
+  const [allowDelete, setAllowDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState(null);
 
@@ -18,7 +19,7 @@ export function McpConsent() {
     setBusy(true);
     setFailure(null);
     try {
-      const { returnTo } = await api(endpoint, { method: 'POST', body: { access } });
+      const { returnTo } = await api(endpoint, { method: 'POST', body: { access, allowDelete } });
       window.location.assign(returnTo);
     } catch (error) {
       setFailure(error);
@@ -35,11 +36,15 @@ export function McpConsent() {
       <p>The connection can read the projects, tasks, and Daily Work your account can see.</p>
       {data.allowWrite && <label className="row">
         <input type="checkbox" checked={write} disabled={busy} onChange={(event) => setWrite(event.target.checked)} />
-        Allow this connection to create, update, and remove tasks where my role permits it
+        Allow this connection to create and update tasks where my role permits it
+      </label>}
+      {data.allowDelete && <label className="row">
+        <input type="checkbox" checked={allowDelete} disabled={busy} onChange={(event) => setAllowDelete(event.target.checked)} />
+        Allow this connection to delete scheduled occurrences and historical Daily Work activity
       </label>}
       <div className="row-wrap">
         <button type="button" className="btn btn-primary" disabled={busy} onClick={() => decide(write ? 'write' : 'read')}>
-          {write ? 'Allow read and write' : 'Allow read access'}
+          {allowDelete ? 'Approve with delete access' : write ? 'Allow read and write' : 'Allow read access'}
         </button>
         <button type="button" className="btn btn-outline" disabled={busy} onClick={() => decide('deny')}>Deny</button>
       </div>
@@ -82,7 +87,7 @@ export function McpConnections() {
         <h2>Active connections</h2>
         {data.grants.length === 0 && <p className="muted">You have no active MCP connections.</p>}
         {data.grants.map((grant) => <div className="row-wrap" key={grant._id}>
-          <Badge>{grant.scopes.includes('workflow:write') ? 'Read and write' : 'Read only'}</Badge>
+          <Badge>{grant.scopes.map((scope) => ({ 'workflow:read': 'Read', 'workflow:write': 'Write', 'workflow:delete': 'Delete' })[scope]).join(' · ')}</Badge>
           <span>Connected {fmtDate(grant.createdAt)} · expires {fmtDate(grant.expiresAt)}</span>
           <span className="spacer" />
           <button type="button" className="btn btn-outline btn-sm" disabled={busy !== null} onClick={() => revoke(grant._id)}>
