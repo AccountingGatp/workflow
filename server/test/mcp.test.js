@@ -39,18 +39,18 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.equal(supported.resource, resource);
     const auth = await (await fetch(origin + '/.well-known/oauth-authorization-server')).json();
     assert.deepEqual(auth.code_challenge_methods_supported, ['S256']);
-    const redirect = 'https://chatgpt.com/connector_platform_oauth_redirect';
-    const registered = await fetch(auth.registration_endpoint, {
+    const registerClient = (redirect, method = 'none') => fetch(auth.registration_endpoint, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ redirect_uris: [redirect], token_endpoint_auth_method: 'none' }),
+      body: JSON.stringify({ redirect_uris: [redirect], token_endpoint_auth_method: method }),
     });
+    assert.equal((await registerClient('https://chatgpt.com/connector_platform_oauth_redirect')).status, 201);
+    const redirect = 'https://claude.ai/api/mcp/auth_callback';
+    assert.equal((await registerClient(redirect, 'client_secret_post')).status, 201);
+    const registered = await registerClient(redirect);
     assert.equal(registered.status, 201);
     const { client_id } = await registered.json();
-    const registrationDenied = await fetch(auth.registration_endpoint, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ redirect_uris: ['https://unapproved.example/callback'], token_endpoint_auth_method: 'none' }),
-    });
-    assert.equal(registrationDenied.status, 400);
+    assert.equal((await registerClient(redirect + '?next=unapproved')).status, 400);
+    assert.equal((await registerClient('https://claude.ai.unapproved.example/api/mcp/auth_callback')).status, 400);
 
     async function requestApproval() {
       const verifier = randomBytes(32).toString('base64url');
