@@ -15,7 +15,7 @@ function cleanEmailMatches(list) {
 }
 import {
   audit, isSuper, clientAssignees, visibleClientIds, managedClientIds, canSeeClient, canManageClient,
-  canGrantDirectly, canEditTaskInProject, activePermissionFilter, teamLeads,
+  canGrantDirectly, canEditTaskInProject, staffTaskFilter, superAdminIds, activePermissionFilter, teamLeads,
 } from '../services/access.js';
 
 const r = Router();
@@ -26,8 +26,9 @@ r.get('/clients', ah(async (req, res) => {
   const clients = await Client.find(ids === null ? {} : { _id: { $in: ids } }).sort({ name: 1 }).lean();
   const assignments = await ClientAssignment.find({ client: { $in: clients.map((c) => c._id) }, endedAt: null })
     .populate('team', 'name color').populate('admin', 'name').lean();
+  const staffTasks = staffTaskFilter(await superAdminIds());
   const openCounts = await Task.aggregate([
-    { $match: { deletedAt: null, client: { $in: clients.map((c) => c._id) }, status: { $ne: 'done' } } },
+    { $match: { ...staffTasks, deletedAt: null, client: { $in: clients.map((c) => c._id) }, status: { $ne: 'done' } } },
     { $group: { _id: '$client', open: { $sum: 1 }, overdue: { $sum: { $cond: [{ $lt: ['$dueDate', new Date()] }, 1, 0] } } } },
   ]);
   const counts = Object.fromEntries(openCounts.map((c) => [String(c._id), c]));

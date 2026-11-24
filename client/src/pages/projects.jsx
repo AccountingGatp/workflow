@@ -269,7 +269,7 @@ export function ClientProjects() {
           <Trash2 size={16} />Delete project
         </button>}
       </>}
-      {projectId && canEditTasks && <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>}
+      {projectId && canEditTasks && !can.super && <button className="btn btn-outline" onClick={() => setCreatingTask('recurring')}><Plus size={16}/>Recurring task</button>}
       {projectId && p && canViewInsights && <button className="btn btn-outline" aria-expanded={showInsights} onClick={() => setSearchParams(showInsights ? {} : { insights: '1' }, { replace: true })}>
         {showInsights ? 'Hide insights' : 'Project insights'}
       </button>}
@@ -307,7 +307,7 @@ export function ClientProjects() {
       <section style={{ marginBottom: 20 }}>
         <div className="row-wrap" style={{ marginBottom: 12 }}>
           <h3>Scheduled tasks & completion</h3><div className="spacer" />
-          {canEditTasks && <button className="btn btn-outline btn-sm" onClick={() => setCreatingTask('once')}><Plus size={16}/>Add one-time task</button>}
+          {canEditTasks && !can.super && <button className="btn btn-outline btn-sm" onClick={() => setCreatingTask('once')}><Plus size={16}/>Add one-time task</button>}
           <div className="chips">{[['due','Due now'],['upcoming','Weekly / monthly · next 7 days'],['completed','Completed'],['open','All pending']].map(([v,l]) =>
             <button key={v} className={`chip ${workView === v ? 'on' : ''}`} onClick={() => setWorkView(v)}>{l}</button>
           )}</div>

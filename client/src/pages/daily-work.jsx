@@ -741,10 +741,10 @@ export default function DailyWork() {
   const [sendingMissing, setSendingMissing] = useState(false);
   const [missingError, setMissingError] = useState(null);
   const tabs = [
-    ['entry', 'Add Projects'], ['member', 'Projects by Member'], ['status', 'Task Status'],
+    ...(!can.super ? [['entry', 'Add Projects']] : []), ['member', 'Projects by Member'], ['status', 'Task Status'],
     ['summary', 'Summary Dashboard'], ['missing', 'Missing Report']];
   const requested = params.get('tab');
-  const tab = tabs.some(([id]) => id === requested) ? requested : 'entry';
+  const tab = tabs.some(([id]) => id === requested) ? requested : can.super ? 'status' : 'entry';
   const day = useApi(tab === 'entry' ? `${root}/day/${date}` : null);
   const choose = (id) => setParams(id === 'entry' ? {} : { tab: id });
   const reportDate = ['entry', 'missing'].includes(tab) ? date : today();

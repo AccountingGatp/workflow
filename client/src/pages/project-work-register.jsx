@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Plus, Pencil, Archive, ExternalLink, Link2, Search, BookOpen, Clock3 } from 'lucide-react';
-import { api, useApi, useToast } from '../lib.jsx';
+import { api, useApi, useAuth, useToast } from '../lib.jsx';
 import { ErrorBox, Modal, Skeleton } from '../ui.jsx';
 
 const initial = {
@@ -105,6 +105,7 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
 }
 export default function ProjectWorkRegister({ clientId, projectId }) {
   const url = basePath(clientId, projectId);
+  const { can } = useAuth();
   const register = useApi(url, [clientId, projectId]);
   const access = useApi(url.replace(/\/work-items$/, '/work-items/access'), [clientId, projectId]);
   const canEdit = !!access.data?.canEdit;
@@ -131,7 +132,7 @@ export default function ProjectWorkRegister({ clientId, projectId }) {
   return <section style={{ marginBottom: 28 }}>
     <div className="row-wrap" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
       <div><h2>Master task list</h2><p className="small muted">Original source frequency and execution day are shown in separate columns. Master records do not always have a dated employee schedule.</p></div>
-      {canEdit && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
+      {canEdit && !can.super && <button className="btn btn-primary" onClick={() => setEditing(null)}><Plus size={16}/>Add important task</button>}
     </div>
     <div className="row-wrap" style={{ marginBottom: 14 }}>
       <div className="search" style={{ flex: '1 1 220px', maxWidth: 390 }}><Search size={16}/><input className="input" placeholder="Search project tasks, software or person..." value={q} onChange={e => setQ(e.target.value)}/></div>
@@ -142,7 +143,7 @@ export default function ProjectWorkRegister({ clientId, projectId }) {
     </div>
     {register.error && <ErrorBox error={register.error}/>}
     {register.loading && !register.data ? <div className="card card-pad"><Skeleton rows={4}/></div> :
-    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit ? 'Use Add important task to add one.' : ''}</p></div> :
+    !filtered.length ? <div className="card card-pad"><p className="muted">No matching master tasks. {canEdit && !can.super ? 'Use Add important task to add one.' : ''}</p></div> :
     <div className="card" style={{ overflow: 'hidden' }}><div className="table-wrap">
       <table>
         <thead><tr><th style={{ minWidth: 220 }}>Task / responsibility</th><th>Source frequency</th><th>Execution day (source)</th><th>Software & time</th><th>References</th>{canEdit && <th>Manage</th>}</tr></thead>

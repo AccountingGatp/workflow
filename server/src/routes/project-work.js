@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { ClientProject, ProjectWorkItem, User } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
-import { canSeeProject, canManageProject, canManageClient, canEditProjectWork, clientAssignees, canMaintainTasks, ensureAssigneeAccess, audit } from '../services/access.js';
+import { canSeeProject, canManageProject, canManageClient, canEditProjectWork, clientAssignees, canMaintainTasks, ensureAssigneeAccess, superAdminIds, audit } from '../services/access.js';
 
 const r = Router();
 async function authorized(req, manager = false) {
@@ -69,7 +69,10 @@ r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) =>
   await authorized(req);
   const items = await ProjectWorkItem.find({ project: req.params.projectId, active: { $ne: false } })
     .sort({ createdAt: 1, _id: 1 }).lean();
-  res.json(items);
+  const adminIds = new Set((await superAdminIds()).map(String));
+  res.json(items.map((item) => adminIds.has(String(item.responsibleUser))
+    ? { ...item, responsible: undefined, responsibleUser: undefined }
+    : item));
 }));
 r.post('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) => {
   const project = await authorized(req, true);
