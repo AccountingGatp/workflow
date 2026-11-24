@@ -134,7 +134,7 @@ Each Daily Work project receives a Review task automatically. The four eligible 
 
 The production MCP URL is `https://workflow.gatpsolutions.com/api/mcp`. In Workflow, open **MCP Connections** to find the URL for the current deployment and revoke your connections.
 
-In ChatGPT, add a custom MCP server using OAuth with **dynamic client registration**. Open the Workflow consent page and sign in with your existing Workflow account. Approve read access, or opt in to write access. A Super Admin can separately opt in to delete access. Reconnect to approve additional permissions. Workflow enforces the connected account's current role and project scope on each tool call. HR accounts stay read-only.
+In ChatGPT, add a custom MCP server using OAuth with **dynamic client registration**. Open the Workflow consent page and sign in with your existing Workflow account. Approve read access, or opt in to write access. A Super Admin can separately opt in to delete access. Reconnect to approve additional permissions. MCP connections are available to Super Admins, Admin / Managers, and Admin / Team Leads. Workflow checks the account’s current role and project scope when using or refreshing a connection.
 
 - Read tools list visible projects, scheduled tasks and Daily Work submissions.
 - Write tools create and edit individual scheduled tasks.

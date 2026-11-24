@@ -3,15 +3,16 @@ import { Router } from 'express';
 import { model, Schema } from 'mongoose';
 import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/sdk/server/auth/router.js';
 import { InvalidClientMetadataError, InvalidGrantError, InvalidRequestError, InvalidScopeError, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
-import { ah, HttpError, requireAuth } from '../middleware/auth.js';
+import { ah, HttpError, requireAuth, requireRole } from '../middleware/auth.js';
 import { User } from '../models/index.js';
 
 export const READ = 'workflow:read';
 export const WRITE = 'workflow:write';
 export const DELETE = 'workflow:delete';
 const scopes = [READ, WRITE, DELETE];
+const mcpRoles = ['super_admin', 'manager', 'admin'];
 const effectiveScopes = (user, granted) => granted.filter((scope) =>
-  scope === READ || (scope === WRITE && user.role !== 'hr') || (scope === DELETE && user.role === 'super_admin'));
+  scope === READ || scope === WRITE || (scope === DELETE && user.role === 'super_admin'));
 const randomToken = () => randomBytes(32).toString('base64url');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const expiresIn = (seconds) => new Date(Date.now() + seconds * 1000);
@@ -43,7 +44,7 @@ function permittedRedirect(value) {
 }
 
 const currentUser = (record) => User.findOne({
-  _id: record.user, email: record.email, active: true, deletedAt: null,
+  _id: record.user, email: record.email, active: true, deletedAt: null, role: { $in: mcpRoles },
 });
 
 function tokenPair() {
@@ -171,7 +172,7 @@ export function createWorkflowOAuth(origin) {
   });
   const connection = (req) => ({ origin, user: req.user._id, email: req.user.email });
   const accountRoutes = Router();
-  accountRoutes.use(requireAuth, (req, res, next) => {
+  accountRoutes.use(requireAuth, requireRole(...mcpRoles), (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin && req.headers.origin !== origin) {
       return res.status(403).json({ error: 'Open Workflow directly to change MCP access' });

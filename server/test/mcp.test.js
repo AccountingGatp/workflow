@@ -28,9 +28,12 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     server.on('request', app);
     const fixture = await Client.create({ name: 'Fixture' });
     const project = await ClientProject.create({ client: fixture._id, name: 'Sample project' });
-    const [owner, hr] = await User.create([
+    const [owner, hr, employee, manager, lead] = await User.create([
       { email: 'owner@test.example', name: 'Owner', role: 'super_admin' },
       { email: 'hr@test.example', name: 'HR', role: 'hr' },
+      { email: 'employee@test.example', name: 'Employee', role: 'employee' },
+      { email: 'manager@test.example', name: 'Manager', role: 'manager' },
+      { email: 'lead@test.example', name: 'Team Lead', role: 'admin' },
     ]);
     const credential = (person) => ({ authorization: 'Bearer ' + jwt.sign({ sub: String(person._id) }, JWT_SECRET, { expiresIn: '1h' }) });
     const resource = origin + '/api/mcp';
@@ -130,8 +133,30 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     await readClient.close();
     assert.equal((await postToken({ grant_type: 'refresh_token', refresh_token: read.refresh_token, scope: 'workflow:read workflow:write' })).status, 400);
 
-    await approve(hr, 'write', 403);
-    await approve(hr, 'read', 403, true);
+    const connectionsPath = origin + '/api/mcp-connections';
+    const { endpoint } = await requestApproval();
+    for (const person of [hr, employee]) {
+      assert.equal((await fetch(connectionsPath, { headers: credential(person) })).status, 403);
+      assert.equal((await fetch(endpoint, { headers: credential(person) })).status, 403);
+      assert.equal((await fetch(endpoint, {
+        method: 'POST', headers: { ...credential(person), 'content-type': 'application/json' },
+        body: JSON.stringify({ access: 'read' }),
+      })).status, 403);
+    }
+    for (const person of [manager, lead]) {
+      assert.equal((await fetch(connectionsPath, { headers: credential(person) })).status, 200);
+      const consent = await fetch(endpoint, { headers: credential(person) });
+      assert.equal(consent.status, 200);
+      const permissions = await consent.json();
+      assert.equal(permissions.allowWrite, true);
+      assert.equal(permissions.allowDelete, false);
+    }
+    const leadGrant = await approve(lead, 'read');
+    const connectedLead = await connect(leadGrant.access_token);
+    await connectedLead.close();
+    await User.updateOne({ _id: lead._id }, { role: 'employee' });
+    await assert.rejects(() => connect(leadGrant.access_token), /401|Unauthorized|expired|revoked/);
+    assert.equal((await postToken({ grant_type: 'refresh_token', refresh_token: leadGrant.refresh_token })).status, 400);
     const write = await approve(owner, 'write');
     const writer = await connect(write.access_token);
     const projectResult = await writer.callTool({ name: 'create_project', arguments: { name: 'Payroll fixture' } });

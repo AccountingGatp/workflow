@@ -62,7 +62,7 @@ export default function Layout({ mailEnabled }) {
         {(can.manage || can.hr) && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>
         {(can.super || can.hr) && item('/people', Users, 'People')}
-        {item('/mcp-connections', ShieldCheck, 'MCP Connections')}
+        {can.manage && item('/mcp-connections', ShieldCheck, 'MCP Connections')}
         {can.super && item('/settings', Settings, 'Settings')}
         {can.manage && item('/access', ShieldCheck, 'Access', pending ? <span className="count">{pending}</span> : null)}
         {(can.manage || can.hr) && item('/audit', History, 'Activity log')}
