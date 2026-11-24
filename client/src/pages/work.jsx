@@ -134,7 +134,9 @@ function GlobalOverview() {
 
   return (
     <>
-      <PageHead title="Overview" subtitle="Workload across every client." />
+      <PageHead title="Overview" subtitle="Workload across every client.">
+        {can.hr && <Link className="btn btn-primary" to="/daily-work">Log my work</Link>}
+      </PageHead>
       {!d ? <div className="card"><Skeleton /></div> : (
         <div className="split">
           <div className="stack" style={{ gap: 16 }}>

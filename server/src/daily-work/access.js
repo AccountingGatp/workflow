@@ -6,7 +6,7 @@ import { dailyReportSettings } from './settings.js';
 
 export async function dailyScope(user) {
   const own = String(user._id);
-  if (canMonitorAllWork(user)) return { own, managed: null, visible: null, members: null, projects: [], managerProjects: [], readOnly: user.role === 'hr' };
+  if (canMonitorAllWork(user)) return { own, managed: null, visible: null, members: null, projects: [], managerProjects: [], monitorOnly: user.role === 'hr' };
   const [managed, visible, teams, projects] = await Promise.all([managedClientIds(user), visibleClientIds(user), ledTeamIds(user), grantedProjectIds(user)]);
   const teamMembers = teams.length
     ? await TeamMembership.distinct('user', { team: { $in: teams }, removedAt: null })

@@ -51,8 +51,9 @@ async function dailyContext(user) {
   return { models, scope };
 }
 
-const route = (handler, superOnly = false) => ah(async (req, res) => {
+const route = (handler, superOnly = false, ownWork = false) => ah(async (req, res) => {
   if (superOnly) enforce(isSuper(req.user));
+  if (req.user.role === 'hr' && !ownWork) enforce(['GET', 'HEAD', 'OPTIONS'].includes(req.method));
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) req.body ??= {};
   const { models, scope } = await dailyContext(req.user);
   await handler(req, res, models, scope);
@@ -115,7 +116,6 @@ function publicSubmission(doc, entries = doc.entries) {
 }
 
 r.get('/day/:date', route(async (req, res, models, scope) => {
-  enforce(!scope.readOnly);
   const date = dateValue(req.params.date);
   const memberId = scope.own;
   const names = await syncClientProjects(models, scope.visible, scope.projects);
@@ -140,7 +140,7 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
     reviewProjects: reviewAllowed ? projects.filter((project) => includes(scope.managed, project.clientId)).map((project) => String(project._id)) : [],
     submission: live[0] && publicSubmission(live[0], live[0].entries.filter((entry) => visibleEntry(scope, entry))),
     slackEnabled: slackConfigured(),
-    hubstaffAccess: isSuper(req.user) || !!settings?.hubstaffAccess,
+    hubstaffAccess: !scope.monitorOnly && (isSuper(req.user) || !!settings?.hubstaffAccess),
   });
 }));
 
@@ -163,7 +163,7 @@ r.put('/day/:date', route(async (req, res, models, scope) => {
   });
   const [live] = await projectWorkflowStatuses([submission.toObject()]);
   res.json(publicSubmission(live, live.entries.filter((entry) => visibleEntry(scope, entry))));
-}));
+}, false, true));
 
 r.post('/day/:date/slack', route(async (req, res, models, scope) => {
   const date = dateValue(req.params.date);
@@ -189,7 +189,7 @@ r.post('/day/:date/slack', route(async (req, res, models, scope) => {
   const result = await deliverSubmission(models, key);
   const [live] = await projectWorkflowStatuses([result.toObject()]);
   res.json(publicSubmission(live, live.entries.filter((entry) => visibleEntry(scope, entry))));
-}));
+}, false, true));
 
 async function saveDay(user, models, scope, { date, key, entries, version, reviewAllowed, session }) {
   const previous = await models.Submission.findById(key).session(session);
@@ -266,7 +266,7 @@ async function saveDay(user, models, scope, { date, key, entries, version, revie
       fail('Remove the entry and add another to change its linked task');
     }
     await saveWorkflowEntry({ user, models, project: linkedProject, row, existing, input, date, session,
-      managed: includes(scope.managed, clientId), period: catalogTask?.period });
+      managed: !scope.monitorOnly && includes(scope.managed, clientId), period: catalogTask?.period });
     if (row.status === 'incomplete' && row.workflowStatus !== 'pending_review') row.incompleteReason = existing?.incompleteReason;
     saved.push(row);
   }
@@ -301,8 +301,8 @@ function markUnsent(submission) {
 
 function statusEntry(entry, own, scope) {
   const { workflowAssignedToMember, workflowCompletedByActor, ...row } = entry;
-  const manager = managedEntry(scope, row);
-  return { ...row, canUpdateStatus: !scope.readOnly && workflowAssignedToMember !== false &&
+  const manager = !scope.monitorOnly && managedEntry(scope, row);
+  return { ...row, canUpdateStatus: workflowAssignedToMember !== false &&
     (manager || (own && (row.workflowStatus !== 'done' || workflowCompletedByActor))) };
 }
 
@@ -311,7 +311,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
   const memberId = idValue(req.params.memberId);
   const entryId = idValue(req.params.id);
   const own = scope.own === memberId;
-  enforce(own || req.user.role === 'manager' || includes(scope.members, memberId));
+  enforce(own || (!scope.monitorOnly && (req.user.role === 'manager' || includes(scope.members, memberId))));
   const { status, version } = req.body;
   if (!['incomplete', 'complete'].includes(status)) fail('Choose a valid status');
   const reason = status === 'incomplete' && req.body.reason !== undefined ? textValue(req.body.reason, 500) : undefined;
@@ -338,7 +338,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
     if (status === 'incomplete' && reason === undefined && !wasComplete) fail('Enter an incomplete note');
     if (task) {
       applyTaskTransition(task, { status: status === 'complete' ? 'done' : 'in_progress' }, {
-        manager: managedEntry(scope, entry), isAssignee: own, actorId: req.user._id,
+        manager: !scope.monitorOnly && managedEntry(scope, entry), isAssignee: own, actorId: req.user._id,
       });
       if (task.isModified()) await task.save({ session });
       entry.workflowStatus = task.status;
@@ -356,7 +356,7 @@ r.patch('/day/:date/members/:memberId/entries/:id/status', route(async (req, res
   const [live] = await projectWorkflowStatuses([submission.toObject()], req.user._id);
   const entry = live.entries.find((row) => String(row._id) === entryId);
   res.json({ entry: statusEntry(entry, own, scope), version: submission.__v });
-}));
+}, false, true));
 
 async function reportRows(req, models, scope) {
   const from = dateValue(req.query.from || clock().date);
@@ -408,7 +408,7 @@ r.get('/reports', route(async (req, res, models, scope) => {
       }
     }
   }
-  res.json({ submissions, members: [...reportMembers.values()].sort((a, b) => a.name.localeCompare(b.name)), projects, slackEnabled: !scope.readOnly && slackConfigured() });
+  res.json({ submissions, members: [...reportMembers.values()].sort((a, b) => a.name.localeCompare(b.name)), projects, slackEnabled: !scope.monitorOnly && slackConfigured() });
 }));
 
 r.get('/project-insights/:id', route(async (req, res, models) => {
@@ -589,7 +589,7 @@ r.put('/members/:id/leave/:date', route(async (req, res, models, scope) => {
 
 r.get('/hubstaff/:date', route(async (req, res, models, scope) => {
   const settings = await models.Member.findById(scope.own).lean();
-  enforce(!scope.readOnly && (isSuper(req.user) || settings?.hubstaffAccess));
+  enforce(!scope.monitorOnly && (isSuper(req.user) || settings?.hubstaffAccess));
   if (!hubstaffConfigured()) throw new HttpError(503, 'Hubstaff is not configured');
   const date = dateValue(req.params.date);
   const members = (await roster(scope, models)).filter((member) => member.hubstaffUserId);

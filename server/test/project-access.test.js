@@ -202,6 +202,26 @@ test('project assignment enables Daily Work without opening the rest of the clie
     await request(hr, '/tasks/' + hidden._id, 'PATCH', { status: 'done' }, 403);
     await request(hr, statusPath, 'PATCH', { status: 'complete', version: monitoredReport.submissions[0].version }, 403);
     await request(hr, '/daily-work/reports/slack', 'POST', undefined, 403);
+    const hrDay = await request(hr, dayPath);
+    const hrProject = hrDay.projects.find((row) => row.workflowProjectId === String(elsewhere._id));
+    const hrItem = hrDay.workItems.find((row) => row.projectId === hrProject._id);
+    const hrEntry = {
+      projectId: hrProject._id, workItemId: hrItem.id, title: hrItem.title,
+      hours: 1, priority: 'normal', status: 'incomplete',
+    };
+    const hrSaved = await request(hr, dayPath, 'PUT', { memberId: String(employee._id), entries: [hrEntry] });
+    assert.equal(hrSaved.memberId, String(hr._id));
+    await request(hr, dayPath, 'PUT', { version: hrSaved.version, entries: [{ ...hrEntry, _id: hrSaved.entries[0]._id, hours: 0.5 }] });
+    const ownReport = (await request(hr, report(hrProject._id, hr._id))).submissions[0];
+    const ownEntry = ownReport.entries[0];
+    assert.equal(ownEntry.hours, 0.5);
+    assert.equal(ownEntry.canUpdateStatus, true);
+    const completed = await request(hr, `${dayPath}/members/${hr._id}/entries/${ownEntry._id}/status`, 'PATCH', {
+      status: 'complete', version: ownReport.version,
+    });
+    assert.equal(completed.entry.status, 'complete');
+    assert.equal((await request(hr, report(dailyProject._id, employee._id))).submissions[0].entries[0].incompleteReason, 'Waiting for the statement');
+
     await request(admin, clientPath + '/assignments', 'POST', { adminId: hr._id }, 400);
 
     const grantsBefore = await ProjectPermission.countDocuments();
