@@ -58,8 +58,8 @@ function WorkflowRoutes({ can }) {
           <Route path="teams" element={<Navigate to="/clients" replace />} />
           <Route path="recurring" element={guard(can.manage || can.hr, <Recurring />)} />
           <Route path="people" element={guard(can.super || can.hr, <People />)} />
-          <Route path="mcp-connect" element={<McpConsent />} />
-          <Route path="mcp-connections" element={<McpConnections />} />
+          <Route path="mcp-connect" element={guard(can.manage, <McpConsent />)} />
+          <Route path="mcp-connections" element={guard(can.manage, <McpConnections />)} />
           <Route path="settings" element={guard(can.super, <Settings mail={mail} saveMail={saveMail} />)} />
           <Route path="access" element={guard(can.manage, <Access />)} />
           <Route path="audit" element={guard(can.manage || can.hr, <Audit />)} />
