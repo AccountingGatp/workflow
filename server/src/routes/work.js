@@ -335,18 +335,41 @@ r.get('/templates', ah(async (req, res) => {
   res.json(templates.map((template) => ({ ...template, canEdit: req.user.role !== 'hr', canDelete: canMaintainTasks(req.user) && (managed === null || managed.includes(String(template.client?._id))) })));
 }));
 
-r.post('/templates', ah(async (req, res) => {
-  const b = req.body || {};
+export async function createRecurringTask(user, body) {
+  const b = body || {};
   if (!b.title || !b.client || !b.frequency) throw new HttpError(400, 'Title, client and frequency are required');
-  if (!(await canEditTaskInProject(req.user, b.client, b.project))) throw new HttpError(403, 'You can only schedule work for projects you manage');
+  if (!(await canEditTaskInProject(user, b.client, b.project))) throw new HttpError(403, 'You can only schedule work for projects you manage');
   const validProject = await validateProject(b.client, b.project);
-  await assertAssignable(req.user, b.client, b.assignees || [], validProject);
   const schedule = scheduleFields(b);
-  const tpl = await TaskTemplate.create({ title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined, assignees: b.assignees || [], owner: (b.assignees || []).includes(b.owner) ? b.owner : b.assignees?.[0], priority: b.priority, sop: b.sop, ...schedule, checklist: (b.checklist || []).filter(Boolean), createdBy: req.user._id });
-  const created = await generateRecurringTasks(tpl._id);
-  await audit(req.user, 'template.create', { entity: 'TaskTemplate', entityId: tpl._id, client: b.client, project: tpl.project, summary: `Scheduled ${b.frequency} “${b.title}” (${created} upcoming tasks)` });
-  res.status(201).json({ template: tpl, created });
-}));
+  const assignees = b.assignees || [];
+  await assertAssignable(user, b.client, assignees, validProject);
+  const fields = {
+    title: String(b.title).trim(), client: b.client, project: validProject, team: b.team || undefined,
+    assignees, owner: assignees.includes(b.owner) ? b.owner : assignees[0],
+    priority: b.priority, sop: b.sop, checklist: (b.checklist || []).filter(Boolean), createdBy: user._id, ...schedule,
+  };
+  const { template, created } = await TaskTemplate.db.transaction(async (session) => {
+    const [template] = await TaskTemplate.create([{ ...fields, masterItem: b.masterItem }], { session });
+    if (b.masterItem) {
+      if (!validProject) throw new HttpError(400, 'Select the project that owns the master task');
+      // Touch the master row in the transaction to serialize competing links.
+      const master = await ProjectWorkItem.findOneAndUpdate({
+        _id: b.masterItem, project: validProject, client: b.client, active: { $ne: false },
+      }, { $set: { scheduledTemplate: template._id } }, { session });
+      if (!master) throw new HttpError(404, 'Active master task not found in the selected project');
+      const existing = await TaskTemplate.exists({ _id: { $ne: template._id }, $or: [
+        { masterItem: master._id },
+        ...(master.scheduledTemplate ? [{ _id: master.scheduledTemplate }] : []),
+      ] }).session(session);
+      if (existing) throw new HttpError(409, 'This master task already has a recurring schedule');
+    }
+    return { template, created: await generateRecurringTasks(template._id, session) };
+  });
+  await audit(user, 'template.create', { entity: 'TaskTemplate', entityId: template._id, client: b.client, project: template.project, summary: `Scheduled ${b.frequency} “${template.title}” (${created} upcoming tasks)` });
+  return { template, created };
+}
+
+r.post('/templates', ah(async (req, res) => res.status(201).json(await createRecurringTask(req.user, req.body))));
 
 r.patch('/templates/:id', ah(async (req, res) => {
   const tpl = await TaskTemplate.findById(req.params.id);

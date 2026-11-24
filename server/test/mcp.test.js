@@ -22,7 +22,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const { default: app, handleErrors } = await import('../src/app.js');
     const { JWT_SECRET } = await import('../src/middleware/auth.js');
     const { dailyModels } = await import('../src/daily-work/models.js');
-    const { User, Client, ClientProject, Task, TaskTemplate } = await import('../src/models/index.js');
+    const { User, Client, ClientProject, ProjectWorkItem, Task, TaskTemplate } = await import('../src/models/index.js');
     await mongoose.connect(db.getUri());
     handleErrors(app);
     server.on('request', app);
@@ -125,6 +125,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const draft = { title: 'MCP task', client: String(fixture._id), project: String(project._id), dueDate: '2026-11-23' };
     const writeDenied = await readClient.callTool({ name: 'create_task', arguments: draft });
     assert.equal(writeDenied.isError, true);
+    assert.ok((await readClient.callTool({ name: 'create_project', arguments: { name: 'Blocked project' } })).isError);
     assert.equal(await Task.countDocuments(), 0);
     await readClient.close();
     assert.equal((await postToken({ grant_type: 'refresh_token', refresh_token: read.refresh_token, scope: 'workflow:read workflow:write' })).status, 400);
@@ -133,6 +134,26 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     await approve(hr, 'read', 403, true);
     const write = await approve(owner, 'write');
     const writer = await connect(write.access_token);
+    const projectResult = await writer.callTool({ name: 'create_project', arguments: { name: 'Payroll fixture' } });
+    assert.ok(!projectResult.isError, JSON.stringify(projectResult));
+    const { _id: payrollProject, client: payrollClient } = projectResult.structuredContent.project;
+    const payroll = { project: payrollProject, client: payrollClient };
+    const master = await writer.callTool({ name: 'create_master_task', arguments: {
+      ...payroll, title: 'Check payroll', frequency: 'Weekly', weeklyHours: '3 h weekly',
+    } });
+    const masterId = master.structuredContent.masterTask._id;
+    assert.equal(master.structuredContent.masterTask.responsibleUser, undefined);
+    const args = { ...payroll, title: 'Check payroll', masterItem: masterId, frequency: 'weekly', weekday: 1, startsOn: '2026-12-07' };
+    assert.ok((await writer.callTool({ name: 'create_recurring_task', arguments: { ...args, weekday: undefined } })).isError);
+    const schedule = await writer.callTool({ name: 'create_recurring_task', arguments: args });
+    assert.ok(!schedule.isError, JSON.stringify(schedule));
+    const templateId = schedule.structuredContent.template._id;
+    assert.deepEqual(schedule.structuredContent.template.assignees, []);
+    assert.equal(String((await ProjectWorkItem.findById(masterId)).scheduledTemplate), templateId);
+    assert.ok(await Task.exists({ template: templateId, masterItem: masterId }));
+    assert.ok((await writer.callTool({ name: 'create_recurring_task', arguments: args })).isError);
+    assert.equal(await TaskTemplate.countDocuments({ masterItem: masterId }), 1);
+
     const created = await writer.callTool({ name: 'create_task', arguments: draft });
     assert.ok(!created.isError, JSON.stringify(created));
     const taskId = created.structuredContent.task._id;

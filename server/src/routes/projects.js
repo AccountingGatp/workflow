@@ -138,20 +138,34 @@ export async function listProjects(user) {
 
 r.get('/projects', ah(async (req, res) => res.json(await listProjects(req.user))));
 
-r.post('/projects', requireRole('super_admin', 'manager', 'admin'), ah(async (req, res) => {
-  const details = projectDetails(req.body);
+export async function createProject(user, body, clientId) {
+  if (!['super_admin', 'manager', 'admin'].includes(user.role)) throw new HttpError(403, 'You cannot create projects');
+  const details = projectDetails(body);
+  if (clientId) {
+    await check({ user }, clientId, true);
+    if (await Client.exists({ _id: clientId, standaloneProject: true })) {
+      throw new HttpError(400, 'Create another project from the Projects page');
+    }
+    if (await ClientProject.exists({ client: clientId, name: details.name })) throw new HttpError(409, 'Project already exists');
+  }
+  const project = clientId ? await ClientProject.create({ ...details, client: clientId }) : await createStandaloneProject(user, details);
+  await audit(user, 'project.create', { entity: 'ClientProject', entityId: project._id, client: project.client, summary: 'Created project ' + project.name });
+  return project;
+}
+
+async function createStandaloneProject(user, details) {
   // A private workspace keeps task and access links stable when client information is added.
-  const project = await Client.db.transaction(async (session) => {
+  return Client.db.transaction(async (session) => {
     const [workspace] = await Client.create([{ name: details.name, standaloneProject: true }], { session });
-    if (req.user.role !== 'super_admin') {
-      await ClientAssignment.create([{ client: workspace._id, admin: req.user._id }], { session });
+    if (user.role !== 'super_admin') {
+      await ClientAssignment.create([{ client: workspace._id, admin: user._id }], { session });
     }
     const [created] = await ClientProject.create([{ ...details, client: workspace._id }], { session });
     return created;
   });
-  audit(req.user, 'project.create', { entity: 'ClientProject', entityId: project._id, client: project.client, summary: 'Created project ' + project.name });
-  res.status(201).json(project);
-}));
+}
+
+r.post('/projects', ah(async (req, res) => res.status(201).json(await createProject(req.user, req.body))));
 
 r.get('/clients/:clientId/projects', ah(async (req, res) => {
   const { clientId } = req.params;
@@ -179,18 +193,7 @@ r.get('/clients/:clientId/projects/:id', ah(async (req, res) => {
     name: client.name, standaloneProject: !!client.standaloneProject, canManage: manager, canManageClient: clientManager, canEditTasks: manager || req.user.role === 'admin', canSeeClient: clientVisible,
   } });
 }));
-r.post('/clients/:clientId/projects', ah(async (req, res) => {
-  await check(req, req.params.clientId, true);
-  if (await Client.exists({ _id: req.params.clientId, standaloneProject: true })) {
-    throw new HttpError(400, 'Create another project from the Projects page');
-  }
-  const details = projectDetails(req.body);
-  const existing = await ClientProject.findOne({ client: req.params.clientId, name: details.name });
-  if (existing) throw new HttpError(409, 'Project already exists');
-  const project = await ClientProject.create({ ...details, client: req.params.clientId });
-  audit(req.user, 'project.create', { entity: 'ClientProject', entityId: project._id, client: project.client, summary: 'Created project ' + project.name });
-  res.status(201).json(project);
-}));
+r.post('/clients/:clientId/projects', ah(async (req, res) => res.status(201).json(await createProject(req.user, req.body, req.params.clientId))));
 r.patch('/clients/:clientId/projects/:id/client-reference', ah(async (req, res) => {
   const { clientId, id } = req.params;
   await check(req, clientId, true);
