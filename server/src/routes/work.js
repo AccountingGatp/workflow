@@ -283,6 +283,46 @@ r.delete('/tasks/:id', ah(async (req, res) => res.json(await deleteTask(req.user
 
 /* ---------- Recurring templates ---------- */
 
+export async function listRecurringTasks(user, { client, project, assignee, page = 1, pageSize = 25 } = {}) {
+  const filter = { $and: [portfolioFilter(await taskPortfolio(user)), {
+    ...(client && { client }), ...(project && { project }), ...(assignee && { assignees: assignee }),
+  }] };
+  const [total, items] = await Promise.all([
+    TaskTemplate.countDocuments(filter),
+    TaskTemplate.find(filter).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * pageSize).limit(pageSize)
+      .populate('client', 'name').populate('project', 'name client').populate('assignees', 'name role').select('-reviewer').lean(),
+  ]);
+  return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
+}
+
+// Assignment-only changes intentionally leave master definitions and materialized occurrences intact.
+export async function updateRecurringAssignments(user, templateId, assignees, mode) {
+  const tpl = await TaskTemplate.findById(templateId);
+  if (!tpl) throw new HttpError(404, 'Template not found');
+  if (user.role === 'hr' || !(await canEditTaskInProject(user, tpl.client, tpl.project))) {
+    throw new HttpError(403, 'You do not have permission to edit this recurring task');
+  }
+  const before = tpl.assignees.map(String);
+  const requested = [...new Set(assignees.map(a => String(a).toLowerCase()))];
+  const after = mode === 'add' ? [...new Set([...before, ...requested])] :
+    mode === 'remove' ? before.filter(a => !requested.includes(a)) : requested;
+  if (after.length > 25) throw new HttpError(400, 'Maximum 25 assignees');
+  await assertAssignable(user, tpl.client, after.filter(a => !before.includes(a)), tpl.project);
+  if (before.length === after.length && before.every((a, i) => a === after[i])) {
+    return { template: tpl, changed: false, existingOccurrencesUnchanged: true };
+  }
+  const owner = after.includes(String(tpl.owner)) ? String(tpl.owner) : after[0];
+  const result = await TaskTemplate.updateOne({ _id: tpl._id, assignees: before, owner: tpl.owner ?? null }, {
+    $set: { assignees: after, ...(owner && { owner }) },
+    ...(!owner && { $unset: { owner: 1 } }),
+  });
+  if (!result.matchedCount) throw new HttpError(409, 'Assignments changed; read the template again before retrying');
+  await audit(user, 'template.edit', { entity: 'TaskTemplate', entityId: tpl._id, client: tpl.client, project: tpl.project,
+    summary: `Changed recurring assignments for “${tpl.title}” (${before.length} to ${after.length})` });
+  return { template: await TaskTemplate.findById(tpl._id), changed: true, existingOccurrencesUnchanged: true };
+}
+
+
 r.get('/templates', ah(async (req, res) => {
   const portfolio = await taskPortfolio(req.user);
   const { clients: managed } = portfolio;

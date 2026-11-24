@@ -4,7 +4,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { z } from 'zod';
 import { ah, HttpError } from '../middleware/auth.js';
-import { listTasks, createTask, updateTask, deleteTask } from '../routes/work.js';
+import { listTasks, createTask, updateTask, deleteTask, listRecurringTasks, updateRecurringAssignments } from '../routes/work.js';
 import { listProjects } from '../routes/projects.js';
 import { listDailySubmissions } from '../daily-work/routes.js';
 import { dateValue } from '../daily-work/dates.js';
@@ -21,6 +21,19 @@ const page = z.number().int().min(1).max(100000).optional();
 const pageSize = z.number().int().min(1).max(50).optional();
 const cleanupSelection = { memberIds: z.array(id).min(1).max(20), from: date, to: date };
 const tools = [
+  {
+    name: 'list_recurring_tasks', title: 'List recurring tasks',
+    description: 'List recurring templates within your Workflow portfolio. Filter by client, project or assignee. Includes exact template IDs and current assignments.',
+    inputSchema: { client: id.optional(), project: id.optional(), assignee: id.optional(), page, pageSize },
+    run: listRecurringTasks,
+  },
+  ...['replace', 'add', 'remove'].map((mode) => ({
+    name: mode === 'replace' ? 'update_recurring_task' : mode + '_recurring_assignee',
+    title: mode + ' recurring task assignments', write: true,
+    description: 'Change assignments on one recurring template by exact ID. Ask the user before changing assignments. Preserves master tasks, schedule and existing occurrences; future generated occurrences use the new assignments. Replace accepts an empty array to unassign everyone.',
+    inputSchema: { templateId: id, assignees: mode === 'replace' ? ids : z.array(id).min(1).max(25) },
+    run: (user, { templateId, assignees }) => updateRecurringAssignments(user, templateId, assignees, mode),
+  })),
   {
     name: 'list_projects', title: 'List projects',
     description: 'List projects visible to the connected Workflow account, with client IDs and workload counts.',
