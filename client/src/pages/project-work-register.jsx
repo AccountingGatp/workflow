@@ -9,6 +9,7 @@ const initial = {
   responsible: '', weeklyHours: '', software: '', automationStatus: null, reminder: '', notes: '',
   links: [],
 };
+const automationLabels = { A: 'Automated', YTA: 'Yet to automate', 'N/A': 'Not applicable' };
 const frequencies = ['Daily', 'Weekly', 'Biweekly', 'Twice monthly', 'Monthly', 'Quarterly', 'Annually', 'As needed'];
 const basePath = (clientId, projectId) => `/clients/${clientId}/projects/${projectId}/work-items`;
 const validUrl = value => {
@@ -79,10 +80,11 @@ function WorkEditor({ item, clientId, projectId, onSaved, onClose }) {
       </div>
       <label className="stack" style={{ gap: 4 }}>
         <strong className="small">Automation status</strong>
-        <select className="select" value={f.automationStatus == null ? '' : String(f.automationStatus)}
-          onChange={e => set('automationStatus', e.target.value === '' ? null : e.target.value === 'true')}>
-          <option value="">A — Needs automation</option><option value="true">Y — Automated</option><option value="false">N — Automation not required</option>
+        <select className="select" value={String(f.automationStatus === true)}
+          onChange={e => set('automationStatus', e.target.value === 'true')}>
+          <option value="true">A — Automated</option><option value="false">Not automated</option>
         </select>
+        <span className="small muted">Not automated shows as YTA, or N/A for Client Specific Task.</span>
       </label>
       {field('reminder','Reminder / source status (optional)')}
       <label className="stack"><strong className="small">Instructions / notes</strong>
@@ -151,7 +153,7 @@ export default function ProjectWorkRegister({ clientId, projectId }) {
             {item.category === 'Payroll' && <div className="small muted">Payroll</div>}
             <div className="small muted" style={{ marginTop: 5 }}>{item.responsible ? 'Owner: ' + item.responsible : 'Owner not specified'}{item.responsibleUser ? ' · Workflow account linked' : ' · No account assigned'}</div>
             <div className="small" style={{ marginTop: 5, color: item.scheduledTemplate ? 'var(--success)' : 'var(--text-3)' }}>{item.scheduledTemplate ? 'Scheduled · appears in My Work' : 'Master list only · no dated assignment'}</div>
-            <span className="small muted">{item.automationStatus === true ? 'Y — Automated' : item.automationStatus === false ? 'N — Automation not required' : 'A — Needs automation'}</span>
+            <span className="small muted">{item.automationCode} — {automationLabels[item.automationCode]}</span>
             {item.notes && <div className="small muted" style={{ marginTop: 4 }}>{item.notes}</div>}
           </td>
           <td><div className="row small"><Clock3 size={13}/><strong>{item.frequency || 'Not specified'}</strong></div></td>

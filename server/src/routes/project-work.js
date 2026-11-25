@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mongoose from 'mongoose';
 import { ClientProject, ProjectWorkItem, User } from '../models/index.js';
+import { automationCode } from '../services/task-automation.js';
 import { ah, HttpError } from '../middleware/auth.js';
 import { canSeeProject, canManageProject, canManageClient, canEditProjectWork, clientAssignees, canMaintainTasks, ensureAssigneeAccess, superAdminIds, audit } from '../services/access.js';
 
@@ -34,7 +35,7 @@ function payload(body) {
   if (body.automated !== undefined) result.automated = !!body.automated;
   if (body.automationStatus !== undefined) {
     if (body.automationStatus !== null && typeof body.automationStatus !== 'boolean') {
-      throw new HttpError(400, 'Choose Automated, Automation not required or Needs automation');
+      throw new HttpError(400, 'Choose Automated or Not automated');
     }
     result.automationStatus = body.automationStatus;
   }
@@ -70,9 +71,11 @@ r.get('/clients/:clientId/projects/:projectId/work-items', ah(async (req,res) =>
   const items = await ProjectWorkItem.find({ project: req.params.projectId, active: { $ne: false } })
     .sort({ createdAt: 1, _id: 1 }).lean();
   const adminIds = new Set((await superAdminIds()).map(String));
-  res.json(items.map((item) => adminIds.has(String(item.responsibleUser))
-    ? { ...item, responsible: undefined, responsibleUser: undefined }
-    : item));
+  res.json(items.map((item) => ({
+    ...item,
+    automationCode: automationCode(item),
+    ...(adminIds.has(String(item.responsibleUser)) && { responsible: undefined, responsibleUser: undefined }),
+  })));
 }));
 export async function createMasterTask(user, clientId, projectId, body) {
   const project = await authorized({ user, params: { clientId, projectId } }, true);

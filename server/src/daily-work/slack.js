@@ -30,10 +30,7 @@ function workDate(date) {
 export const slackPerson = (name, id) =>
   id && slackUserIdPattern.test(id) ? `<@${id}>` : escape(name);
 
-const automationSuffix = (entry, workItems) => {
-  const code = entryAutomationCode(entry, workItems);
-  return code ? ` - ${code}` : '';
-};
+const automationSuffix = (entry, workItems) => ` - ${entryAutomationCode(entry, workItems)}`;
 
 export function dailySubmissionText({ memberName, date, entries }, slackUserId, report = false, workItems = new Map()) {
   const projects = new Map();
