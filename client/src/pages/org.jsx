@@ -165,6 +165,7 @@ export function People() {
               <tr key={u._id} style={!u.active ? { opacity: .55 } : undefined}>
                 <td><div className="row" style={{ gap: 12 }}><Avatar name={u.name} /><div><strong>{u.name}</strong><div className="small muted">{u.email}</div>
                   {u.dailyReport?.enabled && <div className="small muted">Shift starts {u.dailyReport.shiftStart} IST</div>}
+                  {can.super && u.directAssignmentsPaused && <div className="small muted">Direct assignments paused</div>}
                 </div></div></td>
                 <td>{can.super ? <select className="select" style={{ minHeight: 36, width: 'auto' }} value={u.role} disabled={u._id === me._id} onChange={(e) => update(u, { role: e.target.value })} aria-label={`Role for ${u.name}`}>
                   {Object.entries(ROLE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> : ROLE_LABEL[u.role]}</td>
@@ -223,7 +224,7 @@ function DailyReportFields({ value, onChange }) {
 }
 
 function EditPerson({ person, isSelf, onClose, onSaved }) {
-  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role, slackUserId: person.slackUserId || '', dailyReport: person.dailyReport || defaultDailyReport });
+  const [form, setForm] = useState({ name: person.name || '', email: person.email || '', title: person.title || '', role: person.role, slackUserId: person.slackUserId || '', dailyReport: person.dailyReport || defaultDailyReport, directAssignmentsPaused: !!person.directAssignmentsPaused });
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
@@ -246,6 +247,13 @@ function EditPerson({ person, isSelf, onClose, onSaved }) {
       <Field label="Sign-in email"><input className="input" type="email" value={form.email} onChange={set('email')} required maxLength={254} /></Field>
       <SlackUserIdField value={form.slackUserId} onChange={set('slackUserId')} />
       <DailyReportFields value={form.dailyReport} onChange={(dailyReport) => setForm((previous) => ({ ...previous, dailyReport }))} />
+      {!isSelf && form.role !== 'super_admin' && <label className="row small" style={{ alignItems: 'start', gap: 8 }}>
+        <input type="checkbox" checked={form.directAssignmentsPaused}
+          onChange={(event) => setForm((previous) => ({ ...previous, directAssignmentsPaused: event.target.checked }))} />
+        <span><strong>Pause direct task assignments</strong><br />
+          <span className="muted">This person chooses tasks from their projects in Daily Work.</span>
+        </span>
+      </label>}
       <Field label="Role" hint={isSelf ? 'You cannot change your own Super Admin role.' : 'Changing roles updates this person’s permissions.'}>
         <select className="select" value={form.role} onChange={set('role')} disabled={isSelf}>
           {Object.entries(ROLE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

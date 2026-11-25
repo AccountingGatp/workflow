@@ -102,7 +102,7 @@ export async function listClientWork(projects, user, date, session, catalog = []
   const memberId = String(user._id);
   const calendarDay = date && new Date(`${date}T12:00:00`);
   const periodDates = date ? Object.keys(periodLimits).map((period) => periodRange(date, period)) : [];
-  const tasks = date && items.length ? await Task.find({
+  const tasks = !user.directAssignmentsPaused && date && items.length ? await Task.find({
     project: { $in: ids }, assignees: user._id, deletedAt: null, status: { $ne: 'cancelled' },
     dueDate: { $gte: new Date(Math.min(...periodDates.map((range) => +range.$gte))), $lt: new Date(Math.max(...periodDates.map((range) => +range.$lt))) },
     $or: [{ masterItem: { $in: items.map((item) => item._id) } },
@@ -124,7 +124,7 @@ export async function listClientWork(projects, user, date, session, catalog = []
     const task = dueToday || (date && occurrences.find((task) => occurrenceMatches(task, range, memberId)));
     const assigned = item.responsibleUser ? String(item.responsibleUser) === memberId :
       Boolean(item.responsible && taskName(item.responsible) === taskName(user.name));
-    const suggested = date && (dueToday
+    const suggested = !user.directAssignmentsPaused && date && (dueToday
       ? !['done', 'pending_review'].includes(dueToday.status)
       : template
         ? template.assignees.some((id) => String(id) === memberId) &&
@@ -134,7 +134,7 @@ export async function listClientWork(projects, user, date, session, catalog = []
     return {
       id: String(item._id), projectId, title: item.title,
       description: item.notes, responsible: item.responsible, frequency: item.frequency, ...settings, period,
-      occurrence: taskDetail(task), occurrenceDueToday: Boolean(dueToday), suggested: Boolean(suggested), canLog: !item.responsibleUser || String(item.responsibleUser) === String(user._id) || !!task,
+      occurrence: taskDetail(task), occurrenceDueToday: Boolean(dueToday), suggested: Boolean(suggested), canLog: !!user.directAssignmentsPaused || !item.responsibleUser || String(item.responsibleUser) === String(user._id) || !!task,
     };
   });
 }
@@ -202,7 +202,8 @@ export async function projectWorkflowStatuses(submissions, actorId) {
 }
 
 export async function saveWorkflowEntry({ user, models, project, row, existing, input, date, session, managed, period }) {
-  const taskId = input.workflowTaskId || existing?.workflowTaskId;
+  const selfSelected = !!user.directAssignmentsPaused && !existing?.workflowTaskId;
+  const taskId = selfSelected ? undefined : input.workflowTaskId || existing?.workflowTaskId;
   let masterId = input.workItemId || existing?.workItemId;
   if (isReview(row.title)) return;
   if (Task.db.getClient() !== models.Submission.db.getClient()) {
@@ -244,14 +245,14 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
       }
       throw new HttpError(404, 'This Workflow task is no longer available to you');
     }
-  } else if (master) {
+  } else if (!selfSelected && master) {
     task = await findMasterOccurrence(master, filter, date, period, session, memberId);
-  } else if (!existing) {
+  } else if (!selfSelected && !existing) {
     const sameDay = { ...filter, project: projectId || null, title: row.title, dueDate: { $gte: dayStart, $lt: dayEnd } };
     task = await Task.findOne(sameDay).collation(catalogCollation).session(session);
   }
   if (!task) {
-    if (master?.responsibleUser && String(master.responsibleUser) !== memberId) {
+    if (!selfSelected && master?.responsibleUser && String(master.responsibleUser) !== memberId) {
       throw new HttpError(403, 'This client task is assigned to another employee');
     }
     task = new Task({

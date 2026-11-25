@@ -29,10 +29,13 @@ const populateTask = (q) => q.populate('client', 'name').populate('team', 'name 
  * Assignees must be able to see the client. If the person assigning is allowed to grant
  * access to them (their TL, or a Super Admin), access is granted automatically.
  */
-async function assertAssignable(actor, clientId, userIds = [], projectId) {
+async function assertAssignable(actor, clientId, userIds = [], projectId, existing = []) {
   for (const id of userIds) {
     const u = await User.findOne({ _id: id, deletedAt: null, active: true });
     if (!u) throw new HttpError(400, 'Unknown assignee');
+    if (u.directAssignmentsPaused && !existing.some((assignee) => String(assignee) === String(u._id))) {
+      throw new HttpError(400, `${u.name} is choosing tasks through Daily Work. Direct assignments are paused.`);
+    }
     await ensureAssigneeAccess(actor, clientId, u, projectId);
   }
 }
@@ -64,7 +67,15 @@ const viewFilter = (view, dates, weeklyMonthly) => {
 const taskFilters = async (req, dates, weeklyMonthly, adminIds) => {
   const { scope = 'mine', status, client, project, team, assignee, from, to, view = 'all', q } = req.query;
   const clauses = [await taskScope(req.user), viewFilter(view, dates, weeklyMonthly), staffTaskFilter(adminIds)];
-  if (scope === 'mine') clauses.push({ assignees: isSuper(req.user) ? { $in: [] } : req.user._id });
+  if (scope === 'mine') {
+    clauses.push({ assignees: isSuper(req.user) ? { $in: [] } : req.user._id });
+  }
+  if (req.user.directAssignmentsPaused && scope !== 'managed') {
+    const ownDirect = scope === 'mine' ? { assignees: req.user._id } : { assignees: [req.user._id] };
+    clauses.push({ $nor: [{ ...ownDirect, status: { $ne: 'done' },
+      $or: [{ createdBy: { $ne: req.user._id } }, { template: { $ne: null } }],
+    }] });
+  }
   if (scope === 'managed') {
     if (req.user.role === 'employee') throw new HttpError(403, 'Managers only');
     clauses.push(portfolioFilter(await taskPortfolio(req.user)));
@@ -248,13 +259,13 @@ export async function updateTask(user, id, body) {
       }
     }
     if (task.isModified('project') && body.assignees === undefined) {
-      await assertAssignable(user, task.client, task.assignees, task.project);
+      await assertAssignable(user, task.client, task.assignees, task.project, task.assignees);
     }
     if (body.assignees !== undefined) {
       if (!Array.isArray(body.assignees) || body.assignees.some((id) => typeof id !== 'string' || !mongoose.isObjectIdOrHexString(id))) {
         throw new HttpError(400, 'Select valid assignees');
       }
-      await assertAssignable(user, task.client, body.assignees, task.project);
+      await assertAssignable(user, task.client, body.assignees, task.project, task.assignees);
       task.assignees = body.assignees;
       if (!body.assignees.some((a) => String(a) === String(task.owner))) task.owner = body.assignees[0];
     }
@@ -394,7 +405,7 @@ r.patch('/templates/:id/details', ah(async (req, res) => {
   const assignees = Array.isArray(b.assignees) ? b.assignees : [];
   const validProject = await validateProject(tpl.client, b.project ?? tpl.project);
   if (!await canEditTaskInProject(req.user, tpl.client, validProject)) throw new HttpError(403, 'You cannot move this schedule to that project');
-  await assertAssignable(req.user, tpl.client, assignees, validProject);
+  await assertAssignable(req.user, tpl.client, assignees, validProject, tpl.assignees);
   tpl.project = validProject;
   tpl.title = String(b.title).trim();
   Object.assign(tpl, schedule);

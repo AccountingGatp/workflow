@@ -125,7 +125,7 @@ r.get('/day/:date', route(async (req, res, models, scope) => {
   const [projects, submission, assignments, settings] = await Promise.all([
     models.Project.find({ ...visibleProjects(scope), archived: false }).sort('name').lean(),
     models.Submission.findById(`${memberId}:${date}`).lean(),
-    models.Assignment.find({ memberId }).lean(),
+    req.user.directAssignmentsPaused ? [] : models.Assignment.find({ memberId }).lean(),
     models.Member.findById(memberId).lean(),
   ]);
   for (const project of projects) scope.dailyProjectIds.add(String(project._id));

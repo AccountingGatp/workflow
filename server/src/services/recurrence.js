@@ -1,4 +1,4 @@
-import { ClientProject, Task, TaskTemplate } from '../models/index.js';
+import { ClientProject, Task, TaskTemplate, User } from '../models/index.js';
 
 const LOOKAHEAD_DAYS = 14;
 
@@ -13,12 +13,23 @@ export function matches(tpl, day) {
   return false;
 }
 
-export function materializeOccurrence(tpl, due, session) {
+async function pausedAssignees(assignees, session) {
+  const paused = assignees.length ? await User.distinct('_id', {
+    _id: { $in: assignees }, directAssignmentsPaused: true,
+  }).session(session || null) : [];
+  return new Set(paused.map(String));
+}
+
+export async function materializeOccurrence(tpl, due, session, pausedIds) {
+  pausedIds ??= await pausedAssignees(tpl.assignees, session);
+  const assignees = tpl.assignees.filter((id) => !pausedIds.has(String(id)));
+  if (tpl.assignees.length && !assignees.length) return { upsertedCount: 0 };
+  const owner = pausedIds.has(String(tpl.owner)) ? assignees[0] : tpl.owner || assignees[0];
   return Task.updateOne(
     { template: tpl._id, $or: [{ dueDate: due }, { scheduledDate: due }] },
     { $setOnInsert: {
-      scheduledDate: due, dueDate: due, template: tpl._id, title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees: tpl.assignees,
-      owner: tpl.owner || tpl.assignees[0], priority: tpl.priority, sop: tpl.sop,
+      scheduledDate: due, dueDate: due, template: tpl._id, title: tpl.title, client: tpl.client, project: tpl.project, masterItem: tpl.masterItem, team: tpl.team, assignees,
+      owner, priority: tpl.priority, sop: tpl.sop,
       checklist: tpl.checklist.map((text) => ({ text })), createdBy: tpl.createdBy,
     } },
     { upsert: true, session },
@@ -38,6 +49,9 @@ export async function generateRecurringTasks(templateId, session) {
   const removedProjects = new Set((await ClientProject.distinct('_id', {
     _id: { $in: projectIds }, deletedAt: { $ne: null },
   }).session(session || null)).map(String));
+  const pausedIds = await pausedAssignees(
+    [...new Set(templates.flatMap((template) => template.assignees.map(String)))], session,
+  );
   const today = startOfDay(new Date());
   let created = 0;
   for (const tpl of templates) {
@@ -47,7 +61,7 @@ export async function generateRecurringTasks(templateId, session) {
       const day = new Date(from); day.setDate(from.getDate() + i);
       if (!matches(tpl, day)) continue;
       const due = new Date(day); due.setHours(17, 0, 0, 0);
-      const res = await materializeOccurrence(tpl, due, session);
+      const res = await materializeOccurrence(tpl, due, session, pausedIds);
       created += res.upsertedCount || 0;
     }
   }
