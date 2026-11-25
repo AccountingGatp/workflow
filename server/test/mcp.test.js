@@ -114,6 +114,10 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const masterFixture = await ProjectWorkItem.create({
       client: fixture._id, project: project._id, title: 'Pending check', notes: 'Statement SOP',
     });
+    await ProjectWorkItem.create([
+      { client: fixture._id, project: project._id, title: 'Client Specific Task — Extra work', automationStatus: false },
+      { client: fixture._id, project: project._id, title: 'Client Specific Task — Automated work', automationStatus: true },
+    ]);
     await Leave.create([
       { _id: 'period', memberId: String(employee._id), date: '2026-11-22', period: true, through: '2026-11-24' },
       { _id: 'invalid', memberId: String(employee._id), date: '2026-11-24', period: true, through: '2026-11-23' },
@@ -132,10 +136,16 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.equal(projects.structuredContent.projects[0].name, project.name);
     const report = await readClient.callTool({ name: 'list_daily_work', arguments: { date: '2026-11-23', status: 'incomplete' } });
     assert.equal(report.structuredContent.submissions[0].entries[0].incompleteReason, 'Waiting for a statement');
-    assert.equal(report.structuredContent.submissions[0].entries[0].automationCode, 'A');
-    const masterTasks = await readClient.callTool({ name: 'list_master_tasks', arguments: { automation: 'A' } });
+    assert.equal(report.structuredContent.submissions[0].entries[0].automationCode, 'YTA');
+    const masterTasks = await readClient.callTool({ name: 'list_master_tasks', arguments: { automation: 'YTA' } });
     assert.deepEqual(masterTasks.structuredContent.items.map(({ title, notes, automationCode }) => ({ title, notes, automationCode })),
-      [{ title: 'Pending check', notes: 'Statement SOP', automationCode: 'A' }]);
+      [{ title: 'Pending check', notes: 'Statement SOP', automationCode: 'YTA' }]);
+    const manualClient = await readClient.callTool({ name: 'list_master_tasks', arguments: { automation: 'N/A' } });
+    assert.deepEqual(manualClient.structuredContent.items.map(({ title, automationCode }) => ({ title, automationCode })),
+      [{ title: 'Client Specific Task — Extra work', automationCode: 'N/A' }]);
+    const automated = await readClient.callTool({ name: 'list_master_tasks', arguments: { automation: 'A' } });
+    assert.deepEqual(automated.structuredContent.items.map(({ title, automationCode }) => ({ title, automationCode })),
+      [{ title: 'Client Specific Task — Automated work', automationCode: 'A' }]);
     const leave = await readClient.callTool({ name: 'list_leave', arguments: { from: '2026-11-23', to: '2026-11-24' } });
     assert.equal(leave.structuredContent.total, 1);
     assert.equal(leave.structuredContent.items[0].memberName, employee.name);
@@ -180,7 +190,7 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     const { _id: payrollProject, client: payrollClient } = projectResult.structuredContent.project;
     const payroll = { project: payrollProject, client: payrollClient };
     const master = await writer.callTool({ name: 'create_master_task', arguments: {
-      ...payroll, title: 'Check payroll', frequency: 'Weekly', weeklyHours: '3 h weekly', automationCode: 'N',
+      ...payroll, title: 'Check payroll', frequency: 'Weekly', weeklyHours: '3 h weekly', automationCode: 'YTA',
     } });
     const masterId = master.structuredContent.masterTask._id;
     assert.equal(master.structuredContent.masterTask.responsibleUser, undefined);
@@ -193,9 +203,9 @@ test('Workflow MCP negotiates scoped OAuth connections and enforces task permiss
     assert.equal(String((await ProjectWorkItem.findById(masterId)).scheduledTemplate), templateId);
     assert.ok(await Task.exists({ template: templateId, masterItem: masterId }));
     const recurring = await writer.callTool({ name: 'list_recurring_tasks', arguments: { project: payrollProject } });
-    assert.equal(recurring.structuredContent.items[0].automationCode, 'N');
+    assert.equal(recurring.structuredContent.items[0].automationCode, 'YTA');
     const scheduled = await writer.callTool({ name: 'list_tasks', arguments: { project: payrollProject } });
-    assert.equal(scheduled.structuredContent.items[0].automationCode, 'N');
+    assert.equal(scheduled.structuredContent.items[0].automationCode, 'YTA');
     assert.ok((await writer.callTool({ name: 'create_recurring_task', arguments: args })).isError);
     assert.equal(await TaskTemplate.countDocuments({ masterItem: masterId }), 1);
 

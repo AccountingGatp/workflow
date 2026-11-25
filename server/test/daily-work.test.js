@@ -24,8 +24,8 @@ test('daily Slack text groups numbered tasks and matches the requested layout', 
     ':bar_chart: Summary: 1 project, 3.5 hours total',
     'Projects:',
     '1. lxp-enterprises-llc - 3.5 hours',
-    '   Task 1: FCB Deposits Creation (1h) - Priority: Medium',
-    '   Task 2: Other task (2.5h) - Priority: Medium',
+    '   Task 1: FCB Deposits Creation (1h) - Priority: Medium - YTA',
+    '   Task 2: Other task (2.5h) - Priority: Medium - YTA',
   ].join('\n'));
   const twoProjects = dailySubmissionText({ ...report, date: '2026-11-21', entries: [
     ...report.entries,

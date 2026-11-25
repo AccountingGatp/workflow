@@ -9,6 +9,7 @@ import { listProjects, createProject } from '../routes/projects.js';
 import { createMasterTask } from '../routes/project-work.js';
 import { listDailyWork, listLeave, listMasterTasks, withTaskAutomation } from './reads.js';
 import { dateValue } from '../daily-work/dates.js';
+import { automationCode as codeForTask, automationCodes, clientSpecificTaskTitle } from '../services/task-automation.js';
 import { createWorkflowOAuth, READ, WRITE, DELETE } from './oauth.js';
 
 import { previewDailyWorkCleanup, deleteDailyWorkActivity } from '../daily-work/cleanup.js';
@@ -43,8 +44,8 @@ const tools = [
   },
   {
     name: 'list_master_tasks', title: 'Read project master tasks',
-    description: 'Read visible project master tasks, owners, frequencies, estimated hours, instructions and links. Filter by client, project or automation status: Y automated, N automation not required, A needs automation.',
-    inputSchema: { client: id.optional(), project: id.optional(), automation: z.enum(['Y', 'N', 'A']).optional(), page, pageSize },
+    description: 'Read visible project master tasks, owners, frequencies, estimated hours, instructions and links. Filter by client, project or automation status: A automated, YTA yet to automate, N/A client-specific and not automated.',
+    inputSchema: { client: id.optional(), project: id.optional(), automation: z.enum(automationCodes).optional(), page, pageSize },
     run: listMasterTasks,
   },
   {
@@ -65,13 +66,17 @@ const tools = [
     inputSchema: {
       client: id, project: id, title: z.string().trim().min(1).max(180), frequency: z.string().trim().min(1).max(100).optional(),
       weeklyHours: z.string().trim().max(100).optional(), executionDay: z.string().trim().max(100).optional(),
-      notes: z.string().max(3000).optional(), responsibleUser: id.optional(), automationCode: z.enum(['Y', 'N', 'A']).optional(),
+      notes: z.string().max(3000).optional(), responsibleUser: id.optional(), automationCode: z.enum(automationCodes).optional(),
     },
-    run: async (user, { client, project, automationCode, ...task }) => ({
-      masterTask: await createMasterTask(user, client, project, { ...task,
-        automationStatus: automationCode === 'A' ? null : automationCode && automationCode === 'Y',
-      }),
-    }),
+    run: async (user, { client, project, automationCode, ...task }) => {
+      if (automationCode === 'N/A' && !clientSpecificTaskTitle.test(task.title)) {
+        throw new HttpError(400, 'N/A applies to Client Specific Task entries');
+      }
+      const masterTask = await createMasterTask(user, client, project, {
+        ...task, automationStatus: automationCode && automationCode === 'A',
+      });
+      return { masterTask: { ...masterTask.toObject(), automationCode: codeForTask(masterTask) } };
+    },
   },
   {
     name: 'create_recurring_task', title: 'Create a recurring task template', write: true,

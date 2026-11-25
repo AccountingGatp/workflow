@@ -2,7 +2,7 @@ import { ProjectWorkItem, User } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 import { visibleProjectDirectory } from '../routes/projects.js';
 import { superAdminIds } from '../services/access.js';
-import { automationByWorkItem, automationCode, entryAutomationCode } from '../services/task-automation.js';
+import { automationByWorkItem, automationCode, clientSpecificTaskTitle, entryAutomationCode } from '../services/task-automation.js';
 import { dailyModels } from '../daily-work/models.js';
 import { clock, dateValue, shiftDate } from '../daily-work/dates.js';
 import { leaveOverlap } from '../daily-work/leave.js';
@@ -12,9 +12,9 @@ export function withTaskAutomation(result) {
   return {
     ...result,
     items: result.items.map(({ masterItem, ...item }) => {
-      if (!masterItem) return { ...item, masterItem, automationCode: null };
+      if (!masterItem) return { ...item, masterItem, automationCode: automationCode(item) };
       const { automationStatus, ...master } = masterItem;
-      const code = automationCode(automationStatus);
+      const code = automationCode({ ...master, automationStatus });
       return { ...item, masterItem: { ...master, automationCode: code }, automationCode: code };
     }),
   };
@@ -26,7 +26,11 @@ export async function listMasterTasks(user, { client, project, automation, page 
     (!project || String(row._id) === project.toLowerCase()));
   const byProject = new Map(projects.map((row) => [String(row._id), row.name]));
   const filter = { project: { $in: projects.map(({ _id }) => _id) }, active: { $ne: false } };
-  if (automation) filter.automationStatus = automation === 'A' ? null : automation === 'Y';
+  if (automation === 'A') filter.automationStatus = true;
+  if (automation && automation !== 'A') {
+    filter.automationStatus = { $ne: true };
+    filter.title = automation === 'N/A' ? clientSpecificTaskTitle : { $not: clientSpecificTaskTitle };
+  }
   const [items, total, adminIds] = await Promise.all([
     ProjectWorkItem.find(filter).select('-sourceKey -__v -automated').sort({ project: 1, title: 1, _id: 1 })
       .skip((page - 1) * pageSize).limit(pageSize).lean(),
@@ -40,7 +44,7 @@ export async function listMasterTasks(user, { client, project, automation, page 
     projectName: byProject.get(String(item.project)),
     clientName: directory.clientInfo.get(String(item.client))?.standaloneProject ? undefined :
       directory.clientInfo.get(String(item.client))?.name,
-    automationCode: automationCode(automationStatus),
+    automationCode: automationCode({ ...item, automationStatus }),
   })), total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
 }
 
