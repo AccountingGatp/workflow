@@ -429,15 +429,11 @@ function EntryEditor({ date, data }) {
                     {linked ? <>
                       <strong className="daily-task-linked">{row.title}</strong>
                       {row.description && <p className="small muted daily-task-description">{row.description}</p>}
-                    </> : <>
-                      <label className="field"><span>Task</span>
-                        <input className="input" maxLength={230} required value={row.title}
-                          data-entry-focus={!row.title || undefined}
-                          onChange={(event) => update(row.key, { title: event.target.value })} /></label>
-                      <label className="field"><span>Description</span>
-                        <textarea className="input" rows={2} maxLength={3000} value={row.description || ''}
-                          onChange={(event) => update(row.key, { description: event.target.value })} /></label>
-                    </>}
+                    </> : <label className="field"><span>Task</span>
+                      <input className="input" maxLength={230} required value={row.title}
+                        data-entry-focus={!row.title || undefined}
+                        onChange={(event) => update(row.key, { title: event.target.value })} />
+                    </label>}
                   </div>
                   <button type="button" className="btn btn-ghost icon-btn daily-task-remove" aria-label={`Remove ${row.title || 'task'}`} title="Remove task"
                     onClick={() => saveRows([row], { remove: true })}><Trash2 size={17} /></button>
