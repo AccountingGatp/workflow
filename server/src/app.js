@@ -16,6 +16,7 @@ import mailRoutes, { mailPublic } from './routes/mail.js';
 import { mailEnabled, setMailEnabled, requireMailEnabled } from './services/mail-settings.js';
 import { syncAllAccounts } from './services/gmail.js';
 import { generateRecurringTasks } from './services/recurrence.js';
+import { detachBluntdRecurringLinks } from './detach-bluntd-recurring-links.js';
 import { assignLoanTasks } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
@@ -46,6 +47,8 @@ async function connect() {
   const loanImport = await seedLoanReminders();
   console.info('Bluntd loan reminder import:', loanImport);
   console.info('Bluntd loan assignments:', await assignLoanTasks());
+  const detached = await detachBluntdRecurringLinks();
+  if (detached !== null) console.info('Bluntd recurring links detached:', detached);
   await User.updateMany({
     email: { $in: ['krupali.s@gatpsolutions.com', 'sathya.p@gatpsolutions.com'] },
     deletedAt: null, directAssignmentsPaused: { $exists: false },
