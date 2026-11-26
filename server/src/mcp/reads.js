@@ -2,7 +2,7 @@ import { ProjectWorkItem, User } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 import { visibleProjectDirectory } from '../routes/projects.js';
 import { superAdminIds } from '../services/access.js';
-import { automationByWorkItem, automationCode, clientSpecificTaskTitle, entryAutomationCode } from '../services/task-automation.js';
+import { loadEntryAutomation, automationCode, clientSpecificTaskTitle, entryAutomationCode } from '../services/task-automation.js';
 import { dailyModels } from '../daily-work/models.js';
 import { clock, dateValue, shiftDate } from '../daily-work/dates.js';
 import { leaveOverlap } from '../daily-work/leave.js';
@@ -80,7 +80,7 @@ export async function listDailyWork(user, { date, from, to, memberId, projectId,
   const start = date || from || clock().date;
   const rows = await listDailySubmissions(user, { from: start, to: to || start, memberId, projectId, status });
   const selected = rows.slice((page - 1) * pageSize, page * pageSize);
-  const workItems = await automationByWorkItem(selected);
+  const workItems = await loadEntryAutomation(selected);
   return { submissions: selected.map((row) => ({
     ...row, entries: row.entries.map((entry) => ({ ...entry, automationCode: entryAutomationCode(entry, workItems) })),
   })), page, pageSize, total: rows.length, totalPages: Math.ceil(rows.length / pageSize) };

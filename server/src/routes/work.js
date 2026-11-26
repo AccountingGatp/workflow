@@ -201,7 +201,7 @@ const taskActivity = [
 r.get('/tasks/:id', ah(async (req, res) => {
   const task = await populateTask(Task.findOne({ _id: req.params.id, ...(await taskScope(req.user)) })).populate('checklist.doneBy', 'name').lean();
   if (!task) throw new HttpError(404, 'Task not found');
-  const activity = await AuditLog.find({ entity: 'Task', entityId: task._id, $or: taskActivity }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
+  const activity = task.dailyWorkCustom ? [] : await AuditLog.find({ entity: 'Task', entityId: task._id, $or: taskActivity }).sort({ createdAt: -1 }).populate('actor', 'name').lean();
   const canEdit = await canEditTaskInProject(req.user, task.client._id, task.project?._id);
   const isAssignee = req.user.role !== 'hr' && task.assignees.some((person) => String(person._id) === String(req.user._id));
   res.json({ ...task, activity, canEdit, canChangeStatus: canEdit || (isAssignee &&
@@ -286,7 +286,7 @@ export async function deleteTask(user, id) {
   if (!task) throw new HttpError(404, 'Task not found');
   task.deletedAt = new Date(); task.status = 'cancelled';
   await task.save();
-  await audit(user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Deleted task occurrence “${task.title}”` });
+  if (!task.dailyWorkCustom) await audit(user, 'task.delete', { entity: 'Task', entityId: task._id, client: task.client, project: task.project, summary: `Deleted task occurrence “${task.title}”` });
   return { ok: true };
 }
 
@@ -494,12 +494,21 @@ r.get('/dashboard', ah(async (req, res) => {
 r.get('/audit', ah(async (req, res) => {
   if (req.user.role === 'employee') throw new HttpError(403, 'Not available');
   const changes = { $or: [...taskActivity, { action: { $in: ['project.work.create', 'project.work.update', 'template.create', 'template.edit'] } }] };
-  const pipeline = [{ $match: changes }];
+  const pipeline = [
+    { $match: changes },
+    { $lookup: {
+      from: Task.collection.name, localField: 'entityId', foreignField: '_id',
+      let: { entity: '$entity' },
+      pipeline: [{ $match: { $expr: { $eq: ['$$entity', 'Task'] } } }, { $project: { dailyWorkCustom: 1, project: 1 } }],
+      as: 'Task',
+    } },
+    { $match: { 'Task.dailyWorkCustom': { $ne: true } } },
+  ];
   if (req.user.role === 'manager') {
     const portfolio = await taskPortfolio(req.user);
     const scope = portfolioFilter(portfolio);
     // Older entries predate the project field. Look up their project from the recorded work item.
-    for (const [model, entity] of [[Task, 'Task'], [TaskTemplate, 'TaskTemplate'], [ProjectWorkItem, 'ProjectWorkItem']]) {
+    for (const [model, entity] of [[TaskTemplate, 'TaskTemplate'], [ProjectWorkItem, 'ProjectWorkItem']]) {
       pipeline.push({ $lookup: {
         from: model.collection.name, localField: 'entityId', foreignField: '_id',
         let: { entity: '$entity', loggedProject: '$project' },
@@ -509,9 +518,9 @@ r.get('/audit', ah(async (req, res) => {
     }
     pipeline.push({ $set: { project: { $ifNull: ['$project', { $first: '$Task.project' }, { $first: '$TaskTemplate.project' }, { $first: '$ProjectWorkItem.project' }] } } },
       { $match: { $or: [...scope.$or, { actor: req.user._id }] } },
-      { $unset: ['Task', 'TaskTemplate', 'ProjectWorkItem'] });
+      { $unset: ['TaskTemplate', 'ProjectWorkItem'] });
   }
-  pipeline.push({ $sort: { createdAt: -1 } }, { $limit: 200 });
+  pipeline.push({ $sort: { createdAt: -1 } }, { $limit: 200 }, { $unset: 'Task' });
   const activity = await AuditLog.aggregate(pipeline);
   res.json(await AuditLog.populate(activity, [
     { path: 'actor', select: 'name role' }, { path: 'client', select: 'name' }, { path: 'project', select: 'name' },

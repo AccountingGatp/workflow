@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import app, { handleErrors } from '../src/app.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
-import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, ProjectWorkItem, Task, TaskTemplate } from '../src/models/index.js';
+import { User, Client, Team, TeamMembership, ClientAssignment, ClientPermission, ClientProject, ProjectWorkItem, Task, TaskTemplate, AuditLog } from '../src/models/index.js';
 import { dailyModels } from '../src/daily-work/models.js';
 import { setCurrentLeave } from '../src/daily-work/leave.js';
 import { clock, shiftDate } from '../src/daily-work/dates.js';
@@ -24,8 +24,8 @@ test('daily Slack text groups numbered tasks and matches the requested layout', 
     ':bar_chart: Summary: 1 project, 3.5 hours total',
     'Projects:',
     '1. lxp-enterprises-llc - 3.5 hours',
-    '   Task 1: FCB Deposits Creation (1h) - Priority: Medium - YTA',
-    '   Task 2: Other task (2.5h) - Priority: Medium - YTA',
+    '   Task 1: FCB Deposits Creation (1h) - Priority: Medium',
+    '   Task 2: Other task (2.5h) - Priority: Medium',
   ].join('\n'));
   const twoProjects = dailySubmissionText({ ...report, date: '2026-11-21', entries: [
     ...report.entries,
@@ -57,7 +57,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     server = app.listen(0);
     const base = `http://127.0.0.1:${server.address().port}/api/daily-work`;
     async function request(user, path, method = 'GET', body, status = 200) {
-      const response = await fetch((/^\/(tasks|clients|templates|users|settings\/mail|mail)(?:[/?]|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
+      const response = await fetch((/^\/(tasks|clients|templates|users|audit|settings\/mail|mail)(?:[/?]|$)/.test(path) ? base.replace(/\/daily-work$/, '') : base) + path, {
         method, headers: { 'content-type': 'application/json', authorization: 'Bearer ' + jwt.sign({ sub: String(user._id) }, JWT_SECRET) },
         body: body && JSON.stringify(body),
       });
@@ -368,7 +368,13 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const customTaskPath = `/tasks/${custom.entries[0].workflowTaskId}`;
     assert.deepEqual((await request(employee, customTaskPath)).activity, []);
     await request(owner, customTaskPath, 'PATCH', { priority: 'low' });
+    assert.equal(await AuditLog.countDocuments({ entityId: custom.entries[0].workflowTaskId }), 0);
+    await AuditLog.create({ actor: employee._id, entity: 'Task', action: 'task.create',
+      client: client._id, entityId: custom.entries[0].workflowTaskId, summary: 'Historical custom activity' });
     assert.deepEqual((await request(employee, customTaskPath)).activity, []);
+    const activity = await request(owner, '/audit');
+    assert.ok(activity.some((row) => row.entityId === linkedTask._id));
+    assert.ok(!activity.some((row) => row.entityId === custom.entries[0].workflowTaskId));
     const increased = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.5 }], 200, custom.version);
     assert.equal(increased.entries[0].hours, 1.5);
     await log(employee, emptyDate, [{ ...increased.entries[0], hours: 24.01 }], 400, increased.version);
