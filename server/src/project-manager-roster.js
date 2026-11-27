@@ -1,4 +1,4 @@
-import { ClientProject, User } from './models/index.js';
+import { ClientProject } from './models/index.js';
 
 const roster = [
   ["6aec5d52b35e33f721f6fd12","Palak"], // Bluntd
@@ -55,30 +55,16 @@ const roster = [
   ["6afff3f91cb96c52e8233c7a","Palak"],
 ];
 
-export async function projectManager(name, people) {
-  const label = name.trim();
-  if (!label) return null;
-  people ??= await User.find({ active: true, deletedAt: null }).select('name').lean();
-  const normalized = label.toLowerCase();
-  const exact = people.filter((person) => person.name.trim().toLowerCase() === normalized);
-  const matches = exact.length ? exact : people.filter((person) =>
-    person.name.trim().toLowerCase().split(/\s+/)[0] === normalized);
-  return { name: label, ...(matches.length === 1 && { user: matches[0]._id }) };
-}
-
 export async function importProjectManagerRoster() {
   const ids = roster.map(([project]) => project);
   const pending = new Set((await ClientProject.distinct('_id', {
     _id: { $in: ids }, deletedAt: null, projectManager: { $exists: false },
   })).map(String));
   if (!pending.size) return 0;
-  const people = await User.find({ active: true, deletedAt: null }).select('name').lean();
-  const managers = new Map(await Promise.all([...new Set(roster.map(([, name]) => name))]
-    .map(async (name) => [name, await projectManager(name, people)])));
   const result = await ClientProject.bulkWrite(roster.filter(([project]) => pending.has(project)).map(([project, name]) => ({
     updateOne: {
       filter: { _id: project, deletedAt: null, projectManager: { $exists: false } },
-      update: { $set: { projectManager: managers.get(name) } },
+      update: { $set: { projectManager: { name } } },
     },
   })));
   return result.modifiedCount;

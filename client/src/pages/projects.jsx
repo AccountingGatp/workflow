@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Building2, FolderKanban, Plus, Pencil, ExternalLink, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { api, useApi, usePaginatedTasks, useAuth, useToast } from '../lib.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import { ProjectManagerAssignment } from '../project-manager-assignment.jsx';
 import { ProjectAssignment } from '../project-assignment.jsx';
 import { ProjectInsights } from './daily-work.jsx';
 import ProjectWorkRegister from './project-work-register.jsx';
@@ -119,11 +120,10 @@ function BulletList({ values = [] }) {
 }
 const joinRows = (items = [], keys) => items.map(v => keys.map(k => v[k] || '').join(' | ')).join('\n');
 function ProjectEditor({ project, onClose, onSaved }) {
-  const { can } = useAuth();
   const toast = useToast();
   const [form, setForm] = useState({
     name: project.name || '', description: project.description || '', businessType: project.businessType || '',
-    website: project.website || '', notes: project.notes || '', managerName: project.projectManager?.name || '',
+    website: project.website || '', notes: project.notes || '',
     contacts: joinRows(project.contacts, ['name','role','email']),
     team: joinRows(project.team, ['name','role','profileUrl']),
     scope: (project.scope || []).join('\n'),
@@ -153,7 +153,6 @@ function ProjectEditor({ project, onClose, onSaved }) {
       const payload = {
         name: form.name, description: form.description, businessType: form.businessType,
         website: form.website, notes: form.notes,
-        ...(can.super && form.managerName !== (project.projectManager?.name || '') && { managerName: form.managerName }),
         contacts: rows(form.contacts).map(([name, role, email]) => ({ name, role, email })),
         team: rows(form.team).map(([name, role, profileUrl]) => ({ name, role, profileUrl })),
         scope: lines(form.scope), excluded: lines(form.excluded), links,
@@ -175,7 +174,6 @@ function ProjectEditor({ project, onClose, onSaved }) {
     <form id="project-editor" className="stack" style={{ gap: 16 }} onSubmit={submit}>
       <ErrorBox error={error}/>
       {field('name', 'Project name')}
-      {can.super && field('managerName', 'Project manager')}
       {field('description', 'Project summary', true)}
       {field('businessType', 'Business type')}
       {field('website', 'Website')}
@@ -234,6 +232,7 @@ export function ClientProjects() {
   const detail = useApi(projectId ? `/clients/${id}/projects/${projectId}` : null, [id, projectId]);
   const [adding, setAdding] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [assigningManager, setAssigningManager] = useState(false);
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [editingClient, setEditingClient] = useState(false);
@@ -252,7 +251,7 @@ export function ClientProjects() {
   const seeClient = !projectId || workspace?.canSeeClient;
   const canManage = !!workspace?.canManage;
   const canEditTasks = !!workspace?.canEditTasks;
-  const canViewInsights = can.hr || (canManage && (can.super || user.role === 'manager'));
+  const canViewInsights = can.hr || workspace?.isProjectManager || (canManage && (can.super || user.role === 'manager'));
   return <>
     <div className="row-wrap small" style={{ marginBottom: 12 }}>
       <Link to="/clients">Projects</Link><span className="muted">/</span>
@@ -267,6 +266,7 @@ export function ClientProjects() {
       {!projectId && !standalone && canManage && <button className="btn btn-primary" onClick={() => setAdding(true)}><Plus size={16}/>New project</button>}
       {projectId && canManage && p && <>
         {workspace.canManageClient && <button className="btn btn-outline" onClick={() => setAssigning(true)}><UserPlus size={16}/>Assign people</button>}
+        {can.super && <button type="button" className="btn btn-outline" onClick={() => setAssigningManager(true)}><UserPlus size={16}/>Assign manager</button>}
         <button className="btn btn-outline" onClick={() => setEditing(true)}><Pencil size={15}/>Edit project</button>
         {can.super && <button type="button" className="btn btn-danger" onClick={() => setDeleting(true)}>
           <Trash2 size={16} />Delete project
@@ -350,6 +350,8 @@ export function ClientProjects() {
     {creatingTask && p && <TaskForm key={projectId + creatingTask} presetClient={id} presetProject={projectId}
       presetClientName={parent} presetProjectName={p.name} recurring={creatingTask === 'recurring'}
       onClose={() => setCreatingTask(null)} onSaved={tasks.reload} />}
+    {assigningManager && p && <ProjectManagerAssignment project={p} onClose={() => setAssigningManager(false)}
+      onSaved={() => { detail.reload(); setAssigningManager(false); }} />}
     {assigning && p && <ProjectAssignment project={p} onClose={() => setAssigning(false)} />}
     {adding && <NewProjectForm clientId={id} onClose={() => setAdding(false)}
       onSaved={() => { setAdding(false); projects.reload(); }} />}

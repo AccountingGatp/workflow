@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import { HttpError, ah } from '../middleware/auth.js';
 import { ClientProject, Task, User } from '../models/index.js';
 import { applyTaskTransition } from '../services/task-review.js';
+import { isAssignedProjectManager } from '../services/project-managers.js';
 import { canManageProject, canMonitorAllWork, isSuper, superAdminIds } from '../services/access.js';
 import { dailyModels, sharedBudgetId } from './models.js';
 import { importDailyProjects } from './import-projects.js';
@@ -421,9 +422,10 @@ r.get('/reports', route(async (req, res, models, scope) => {
 
 r.get('/project-insights/:id', route(async (req, res, models) => {
   const id = idValue(req.params.id);
-  const project = await ClientProject.findOne({ _id: id, deletedAt: null }).select('client').lean();
+  const project = await ClientProject.findOne({ _id: id, deletedAt: null }).select('client projectManager').lean();
   if (!project) throw new HttpError(404, 'Project not found');
-  enforce(canMonitorAllWork(req.user) || req.user.role === 'manager' && await canManageProject(req.user, project));
+  enforce(canMonitorAllWork(req.user) || isAssignedProjectManager(req.user, project) ||
+    req.user.role === 'manager' && await canManageProject(req.user, project));
   const date = dateValue(req.query.date || clock().date);
   await syncClientProjects(models, [], [id]);
   const dailyProject = await models.Project.findOne({ workflowProjectId: id }).select('_id').lean();

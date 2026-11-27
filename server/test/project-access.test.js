@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import app, { handleErrors } from '../src/app.js';
 import { clock } from '../src/daily-work/dates.js';
+import { linkRosterManagers } from '../src/services/project-managers.js';
 import { JWT_SECRET } from '../src/middleware/auth.js';
 import {
   AuditLog, Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission,
@@ -155,6 +156,28 @@ test('project assignment enables Daily Work without opening the rest of the clie
 
     const statusPath = `${dayPath}/members/${employee._id}/entries/${saved.entries[0]._id}/status`;
     await request(employee, statusPath, 'PATCH', { version: saved.version, status: 'incomplete', reason: 'Waiting for the statement' });
+    const rosterLabel = 'Confirmed manager';
+    const managerProjectPath = '/projects/' + project._id + '/manager';
+    await ClientProject.updateOne({ _id: project._id }, { $set: { projectManager: { name: rosterLabel, user: lead._id } } });
+    assert.equal((await request(manager, '/projects')).some((row) => row.isProjectManager), false);
+    assert.equal(await linkRosterManagers({ [rosterLabel]: manager.email }), 1);
+    assert.equal(await linkRosterManagers({ [rosterLabel]: lead.email }), 0);
+    assert.deepEqual((await request(manager, '/projects')).filter((row) => row.isProjectManager).map((row) => row._id), [String(project._id)]);
+    await request(manager, managerProjectPath, 'PUT', { userId: String(lead._id) }, 403);
+    await request(admin, managerProjectPath, 'PUT', { userId: String(employee._id) }, 400);
+    const options = await request(admin, '/project-manager-accounts');
+    assert.ok(options.some((option) => option.email === manager.email));
+    assert.ok(!options.some((option) => option.email === employee.email));
+    await request(manager, '/project-manager-accounts', 'GET', undefined, 403);
+    await request(manager, clientPath, 'GET', undefined, 403);
+    await request(manager, siblingPath, 'GET', undefined, 403);
+    await request(manager, '/daily-work/project-insights/' + project._id);
+    await request(assignedLead, '/daily-work/project-insights/' + project._id, 'GET', undefined, 403);
+    await request(admin, managerProjectPath, 'PUT', { userId: String(assignedLead._id) });
+    await request(assignedLead, '/daily-work/project-insights/' + project._id);
+    assert.equal((await request(manager, '/projects')).some((row) => row.isProjectManager), false);
+    await request(admin, managerProjectPath, 'PUT', { userId: null });
+    await request(assignedLead, '/daily-work/project-insights/' + project._id, 'GET', undefined, 403);
     await request(admin, projectPath + '/people/' + manager._id, 'PUT');
     const report = (projectId, person = '') => `/daily-work/reports?from=${date}&to=${date}&projectId=${projectId}&memberId=${person}`;
     const assignedReport = await request(manager, report(dailyProject._id, employee._id));

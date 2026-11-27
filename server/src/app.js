@@ -20,6 +20,7 @@ import { detachBluntdRecurringLinks } from './detach-bluntd-recurring-links.js';
 import { assignLoanTasks } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
+import { linkRosterManagers } from './services/project-managers.js';
 import { importProjectManagerRoster } from './project-manager-roster.js';
 import { importWorkflowProjects } from './import-workflow-projects.js';
 import { importProjectAssignments } from './import-project-assignments.js';
@@ -47,6 +48,13 @@ async function connect() {
   await seedIfEmpty();
   const managersImported = await importProjectManagerRoster();
   if (managersImported) console.info('Project managers imported:', managersImported);
+  const linkedManagers = await linkRosterManagers({
+    Palak: 'palak@gatpsolutions.com',
+    Anjali: 'anjali@gatpsolutions.com',
+    Hitesh: 'hitesh.g@gatpsolutions.com',
+    Simran: 'simran.k@gatpsolutions.com',
+  });
+  if (linkedManagers) console.info('Project manager accounts linked:', linkedManagers);
   const loanImport = await seedLoanReminders();
   console.info('Bluntd loan reminder import:', loanImport);
   console.info('Bluntd loan assignments:', await assignLoanTasks());

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, Task, TaskTemplate, TeamMembership, User } from '../models/index.js';
 import { allProjectsEnabled, setAllProjectsEnabled } from '../services/project-access-settings.js';
-import { projectManager } from '../project-manager-roster.js';
+import { isAssignedProjectManager, managerAccountFilter, managerRecord } from '../services/project-managers.js';
 import { ah, HttpError, requireRole } from '../middleware/auth.js';
 import { canSeeClient, canSeeProject, canManageClient, canManageProject, taskPortfolio, taskScope, staffTaskFilter, superAdminIds, canGrantDirectly, clientAssignees, grantedProjectIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
 
@@ -130,10 +130,14 @@ export async function listProjects(user) {
     const tasks = byProject.get(String(project._id));
     const owner = clientInfo.get(String(project.client));
     const reference = owner?.standaloneProject ? clientInfo.get(String(referenceClient)) : owner;
+    const isProjectManager = isAssignedProjectManager(user, project);
+    const managesClient = managed === null || managed.includes(String(project.client));
     return {
       ...project,
+      isProjectManager,
       clientName: reference?.name,
-      canManage: user.role !== 'hr' && (managed === null || managed.includes(String(project.client)) ||
+      canManageClient: user.role !== 'hr' && managesClient,
+      canManage: user.role !== 'hr' && (managesClient || isProjectManager ||
         (user.role === 'manager' && portfolioIds.has(String(project._id)))),
       clientInfoId: reference?._id,
       openTasks: tasks?.open || 0,
@@ -143,6 +147,26 @@ export async function listProjects(user) {
 }
 
 r.get('/projects', ah(async (req, res) => res.json(await listProjects(req.user))));
+
+r.get('/project-manager-accounts', requireRole('super_admin'), ah(async (_req, res) => {
+  res.json(await User.find(managerAccountFilter).select('name email role').sort({ name: 1, email: 1 }).lean());
+}));
+
+r.put('/projects/:id/manager', requireRole('super_admin'), ah(async (req, res) => {
+  const { id } = req.params;
+  const { userId } = req.body || {};
+  if (!valid(id)) throw new HttpError(404, 'Project not found');
+  if (userId !== null && (typeof userId !== 'string' || !valid(userId))) throw new HttpError(400, 'Select a manager account');
+  const account = userId && await User.findOne({ ...managerAccountFilter, _id: userId }).select('name').lean();
+  if (userId && !account) throw new HttpError(400, 'Select an active manager account');
+  const projectManager = account ? managerRecord(account) : null;
+  const project = await ClientProject.findOneAndUpdate({ _id: id, deletedAt: null },
+    { $set: { projectManager } }, { returnDocument: 'after' });
+  if (!project) throw new HttpError(404, 'Project not found');
+  await audit(req.user, 'project.update', { entity: 'ClientProject', entityId: project._id, client: project.client,
+    summary: 'Updated manager for ' + project.name });
+  res.json({ projectManager });
+}));
 
 export async function createProject(user, body, clientId) {
   if (!['super_admin', 'manager', 'admin'].includes(user.role)) throw new HttpError(403, 'You cannot create projects');
@@ -196,7 +220,7 @@ r.get('/clients/:clientId/projects/:id', ah(async (req, res) => {
   ]);
   if (!client) throw new HttpError(404, 'Project not found');
   res.json({ ...safeProject(project, manager), clientReference, workspace: {
-    name: client.name, standaloneProject: !!client.standaloneProject, canManage: manager, canManageClient: clientManager, canEditTasks: manager || req.user.role === 'admin', canSeeClient: clientVisible,
+    name: client.name, isProjectManager: isAssignedProjectManager(req.user, project), standaloneProject: !!client.standaloneProject, canManage: manager, canManageClient: clientManager, canEditTasks: manager || req.user.role === 'admin', canSeeClient: clientVisible,
   } });
 }));
 r.post('/clients/:clientId/projects', ah(async (req, res) => res.status(201).json(await createProject(req.user, req.body, req.params.clientId))));
@@ -225,12 +249,6 @@ r.patch('/clients/:clientId/projects/:id', ah(async (req, res) => {
   if (!await canManageProject(req.user, existing)) throw new HttpError(403, 'Project management access denied');
   const keys = ['name', 'description', 'businessType', 'website', 'contacts', 'team', 'scope', 'excluded', 'links', 'tools', 'automations', 'quality', 'guarantees', 'notes'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => keys.includes(k)));
-  const managerName = req.body?.managerName;
-  if (managerName !== undefined) {
-    if (req.user.role !== 'super_admin') throw new HttpError(403, 'Only Super Admins can update the project manager');
-    if (typeof managerName !== 'string' || managerName.trim().length > 150) throw new HttpError(400, 'Use up to 150 characters for the manager name');
-    update.projectManager = await projectManager(managerName);
-  }
   if (update.name !== undefined && !String(update.name).trim()) throw new HttpError(400, 'Name required');
   for (const key of ['contacts','team','scope','excluded','links','tools','automations','quality','guarantees']) {
     if (key in update && !Array.isArray(update[key])) throw new HttpError(400, key + ' must be a list');

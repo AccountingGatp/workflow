@@ -76,7 +76,7 @@ const projectContactSchema = new Schema({
 export const ClientProject = model('ClientProject', new Schema({
   client: { ...ref('Client'), required: true },
   referenceClient: ref('Client'),
-  projectManager: new Schema({ name: String, user: ref('User') }, { _id: false }),
+  projectManager: new Schema({ name: String, user: ref('User'), accountVerified: Boolean }, { _id: false }),
   deletedAt: Date,
   name: { type: String, required: true, trim: true },
   description: String,
@@ -94,6 +94,7 @@ export const ClientProject = model('ClientProject', new Schema({
   notes: String,
 }, opts));
 ClientProject.schema.index({ client: 1, name: 1 }, { unique: true });
+ClientProject.schema.index({ 'projectManager.user': 1 });
 
 /**
  * Who manages a client: a team, and the admins (managers/TLs) accountable for it.

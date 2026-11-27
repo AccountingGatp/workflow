@@ -4,6 +4,7 @@ import { Building2, FolderKanban, Plus, Search, ArrowLeft, ShieldCheck, Trash2, 
 import { api, useApi, usePaginatedTasks, useAuth, useToast, fmtDate, toInputDate, ROLE_LABEL } from '../lib.jsx';
 import { Avatar, Avatars, Badge, Empty, ErrorBox, Field, Modal, PageHead, Skeleton, TeamTag } from '../ui.jsx';
 import { TaskDrawer, TaskForm, TaskListCard, TaskPagination, useTaskToggle } from '../tasks.jsx';
+import { ProjectManagerAssignment } from '../project-manager-assignment.jsx';
 import { ProjectAssignment } from '../project-assignment.jsx';
 import { NewProjectForm } from './projects.jsx';
 
@@ -20,6 +21,7 @@ export function Clients() {
   const [clientQuery, setClientQuery] = useState('');
   const [creating, setCreating] = useState(null);
   const [assigning, setAssigning] = useState(null);
+  const [assigningManager, setAssigningManager] = useState(null);
   const source = clientView ? clients : projects;
   const query = clientView ? clientQuery : projectQuery;
   const setQuery = clientView ? setClientQuery : setProjectQuery;
@@ -74,10 +76,13 @@ export function Clients() {
               </> : <>
                 <td className="small muted">{row.clientInfoId
                   ? <Link to={`/clients/${row.clientInfoId}`}>{row.clientName}</Link> : 'No client'}</td>
-                <td>{row.projectManager?.name || '—'}</td>
+                <td>{can.super ? <button type="button" className="btn btn-outline btn-sm"
+                  aria-label={`Assign manager for ${row.name}`} onClick={() => setAssigningManager(row)}>
+                  {row.projectManager?.name || 'Assign manager'}
+                </button> : row.projectManager?.name || '—'}</td>
                 <td><span className="row-wrap"><span className="mono">{row.openTasks}</span>
                   {row.overdueTasks > 0 && <Badge cls="b-danger">{row.overdueTasks} overdue</Badge>}</span></td>
-                {can.manage && <td>{row.canManage && <button type="button" className="btn btn-outline btn-sm"
+                {can.manage && <td>{row.canManageClient && <button type="button" className="btn btn-outline btn-sm"
                   aria-label={`Assign people to ${row.name}`} onClick={() => setAssigning(row)}>
                   <UserPlus size={15} />Assign people
                 </button>}</td>}
@@ -86,6 +91,8 @@ export function Clients() {
           })}</tbody>
         </table></div>}
     </div>
+    {assigningManager && <ProjectManagerAssignment project={assigningManager} onClose={() => setAssigningManager(null)}
+      onSaved={() => { projects.reload(); setAssigningManager(null); }} />}
     {assigning && <ProjectAssignment project={assigning} onClose={() => setAssigning(null)} />}
     {creating === 'project' && <NewProjectForm clients={manageableClients} onClose={() => setCreating(null)}
       onSaved={(project) => nav(`/clients/${project.client}/projects/${project._id}`)} />}
