@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { ArrowUpRight, FolderKanban, Plus, Search, Workflow, Zap } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, ArrowUpRight, FolderKanban, Pencil, Plus, Search, Workflow, Zap } from 'lucide-react';
 import { api, useApi, useToast } from '../lib.jsx';
 import { Empty, ErrorBox, Modal, PageHead, Skeleton } from '../ui.jsx';
 
-function AddAutomation({ project, available, onClose, onSaved }) {
+function AutomationForm({ project, link, available, onClose, onSaved }) {
   const addingProject = !project;
   const [projectId, setProjectId] = useState(available[0]?.id || '');
-  const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
+  const [name, setName] = useState(link?.name || '');
+  const [url, setUrl] = useState(link?.url || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const close = () => { if (!saving) onClose(); };
@@ -18,8 +19,9 @@ function AddAutomation({ project, available, onClose, onSaved }) {
     setSaving(true);
     try {
       if (addingProject) await api(`/automations/${projectId}`, { method: 'PUT' });
-      else await api(`/automations/${project.id}/links`, { method: 'POST', body: { name, url } });
-      onSaved(addingProject ? projectId : null);
+      else await api(`/automations/${project.id}/links` + (link ? '/' + link._id : ''),
+        { method: link ? 'PATCH' : 'POST', body: { name, url } });
+      onSaved(addingProject ? projectId : null, !!link);
     } catch (err) {
       setError(err);
     } finally {
@@ -27,12 +29,12 @@ function AddAutomation({ project, available, onClose, onSaved }) {
     }
   }
 
-  return <Modal title={addingProject ? 'Add project' : `Add automation · ${project.name}`} onClose={close}
+  return <Modal title={addingProject ? 'Add project' : link ? 'Edit automation' : `Add automation · ${project.name}`} onClose={close}
     footer={<>
       <button type="button" className="btn btn-ghost" disabled={saving} onClick={close}>Cancel</button>
       <button type="submit" form="automation-form" className="btn btn-primary"
         disabled={saving || (addingProject ? !projectId : !name.trim() || !url.trim())}>
-        {saving ? 'Saving…' : addingProject ? 'Add project' : 'Add automation'}
+        {saving ? 'Saving…' : addingProject ? 'Add project' : link ? 'Save changes' : 'Add automation'}
       </button>
     </>}>
     <form id="automation-form" className="stack" onSubmit={save}>
@@ -58,75 +60,79 @@ function AddAutomation({ project, available, onClose, onSaved }) {
 export default function Automations() {
   const catalog = useApi('/automations');
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
-  const [projectFilter, setProjectFilter] = useState('');
-  const [adding, setAdding] = useState(null);
+  const [form, setForm] = useState(null);
   const rows = catalog.data || [];
   const projects = rows.filter((project) => project.links !== null);
   const available = rows.filter((project) => project.canEdit && project.links === null);
+  const projectId = params.get('project');
+  const project = projects.find((item) => item.id === projectId);
   const query = search.trim().toLowerCase();
-  const visible = projects.flatMap((project) => {
-    if (projectFilter && project.id !== projectFilter) return [];
-    if (!query || project.name.toLowerCase().includes(query)) return [project];
-    const links = project.links.filter((link) => link.name.toLowerCase().includes(query));
-    return links.length ? [{ ...project, links }] : [];
-  });
+  const visible = projects.filter((item) => item.name.toLowerCase().includes(query));
 
-  function saved(projectId) {
+  function saved(addedProjectId, edited) {
     catalog.reload();
-    setAdding(null);
-    if (projectId) {
-      setProjectFilter(projectId);
-      setSearch('');
-    }
-    toast(projectId ? 'Project added to Automations' : 'Automation added');
+    setForm(null);
+    if (addedProjectId) setParams({ project: addedProjectId });
+    toast(addedProjectId ? 'Project added to Automations' : edited ? 'Automation updated' : 'Automation added');
   }
 
   return <>
-    <PageHead title="Automations" subtitle="Launch your project’s automation tools from one place.">
-      {!!available.length && <button type="button" className="btn btn-primary" onClick={() => setAdding({})}>
+    {projectId && <Link className="btn btn-ghost btn-sm automation-back" to="/automations">
+      <ArrowLeft size={16} />All automation projects
+    </Link>}
+    <PageHead title={project?.name || 'Automations'} subtitle={projectId ? undefined : 'Choose a project to open its automation tools.'}>
+      {!projectId && !!available.length && <button type="button" className="btn btn-primary" onClick={() => setForm({})}>
         <Plus size={18} />Add project
+      </button>}
+      {project?.canEdit && <button type="button" className="btn btn-primary" onClick={() => setForm({ project })}>
+        <Plus size={18} />Add automation
       </button>}
     </PageHead>
     <ErrorBox error={catalog.error} />
-    {catalog.loading ? <Skeleton rows={3} /> : !catalog.error && <>
-      {!!projects.length && <div className="automation-filters row-wrap">
-        <div className="search">
-          <Search size={17} aria-hidden="true" />
-          <input className="input" type="search" aria-label="Search automations" placeholder="Search projects and automations"
-            value={search} onChange={(event) => setSearch(event.target.value)} />
-        </div>
-        <select className="select" aria-label="Filter by project" value={projectFilter}
-          onChange={(event) => setProjectFilter(event.target.value)}>
-          <option value="">All projects</option>
-          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-        </select>
-      </div>}
-      {!visible.length && <div className="card"><Empty icon={Workflow}
-        title={projects.length ? 'No matching automations' : 'No automation projects yet'} /></div>}
-      <div className="automation-groups">
-        {visible.map((project) => <section className="automation-group" key={project.id} aria-labelledby={`automation-${project.id}`}>
-          <div className="row-wrap automation-group-head">
-            <span className="automation-project-icon"><FolderKanban size={21} aria-hidden="true" /></span>
-            <h2 id={`automation-${project.id}`}>{project.name}</h2>
-            {project.canEdit && <button type="button" className="btn btn-outline btn-sm" onClick={() => setAdding({ project })}>
-              <Plus size={16} />Add automation
-            </button>}
-          </div>
-          {project.links.length ? <div className="automation-grid">
-            {project.links.map((link) => <a className="card automation-card" key={link.url}
-              href={link.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${link.name} in a new tab`}>
+    {catalog.loading ? <Skeleton rows={3} /> : !catalog.error && (projectId ? (
+      !project ? <div className="card"><Empty icon={FolderKanban} title="Automation project unavailable" /></div> :
+        project.links.length ? <div className="automation-grid">
+          {project.links.map((link) => <div className="card automation-card-wrap" key={link._id}>
+            <a className="automation-card" href={link.url} target="_blank" rel="noopener noreferrer"
+              aria-label={`Open ${link.name} in a new tab`}>
               <span className="automation-tool-icon"><Zap size={19} aria-hidden="true" /></span>
               <span className="automation-card-label">
                 <strong>{link.name}</strong>
                 <span className="small muted">{new URL(link.url).hostname}</span>
               </span>
               <ArrowUpRight className="automation-arrow" size={18} aria-hidden="true" />
-            </a>)}
-          </div> : <div className="card"><Empty icon={Zap} title="No automation links yet" /></div>}
-        </section>)}
+            </a>
+            {project.canEdit && <button type="button" className="btn btn-ghost btn-sm automation-edit"
+              aria-label={`Edit ${link.name}`} onClick={() => setForm({ project, link })}>
+              <Pencil size={14} />Edit
+            </button>}
+          </div>)}
+        </div> : <div className="card"><Empty icon={Zap} title="No automation links yet" /></div>
+    ) : <>
+      {!!projects.length && <div className="automation-filters">
+        <div className="search">
+          <Search size={17} aria-hidden="true" />
+          <input className="input" type="search" aria-label="Search automation projects" placeholder="Search projects"
+            value={search} onChange={(event) => setSearch(event.target.value)} />
+        </div>
+      </div>}
+      {!visible.length && <div className="card"><Empty icon={Workflow}
+        title={projects.length ? 'No matching projects' : 'No automation projects yet'} /></div>}
+      <div className="automation-grid">
+        {visible.map((item) => <Link className="card automation-project-card" key={item.id}
+          to={`/automations?project=${item.id}`}>
+          <span className="automation-project-icon"><FolderKanban size={21} aria-hidden="true" /></span>
+          <span className="automation-card-label">
+            <strong>{item.name}</strong>
+            <span className="small muted">{item.links.length} {item.links.length === 1 ? 'automation' : 'automations'}</span>
+          </span>
+          <ArrowRight className="automation-arrow" size={19} aria-hidden="true" />
+        </Link>)}
       </div>
-    </>}
-    {adding && <AddAutomation project={adding.project} available={available} onClose={() => setAdding(null)} onSaved={saved} />}
+    </>)}
+    {form && <AutomationForm project={form.project} link={form.link} available={available}
+      onClose={() => setForm(null)} onSaved={saved} />}
   </>;
 }
