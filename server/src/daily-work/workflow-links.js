@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import { Client, ClientProject, ProjectWorkItem, Task, TaskTemplate, AuditLog } from '../models/index.js';
+import { Client, ClientProject, ProjectWorkItem, Task, TaskTemplate } from '../models/index.js';
 import { HttpError } from '../middleware/auth.js';
 import { matches, materializeOccurrence } from '../services/recurrence.js';
 import { clock, shiftDate } from './dates.js';
@@ -248,16 +248,17 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
   } else if (!selfSelected && master) {
     task = await findMasterOccurrence(master, filter, date, period, session, memberId);
   } else if (!selfSelected && !existing) {
-    const sameDay = { ...filter, project: projectId || null, title: row.title, dueDate: { $gte: dayStart, $lt: dayEnd } };
+    const sameDay = { ...filter, project: projectId || null, title: row.title,
+      dailyWorkCustom: { $ne: true }, dueDate: { $gte: dayStart, $lt: dayEnd } };
     task = await Task.findOne(sameDay).collation(catalogCollation).session(session);
   }
+  if (!task && !master && !row.catalogId) return;
   if (!task) {
     if (!selfSelected && master?.responsibleUser && String(master.responsibleUser) !== memberId) {
       throw new HttpError(403, 'This client task is assigned to another employee');
     }
     task = new Task({
       client: row.clientId, project: projectId, masterItem: master?._id,
-      dailyWorkCustom: !master && !row.catalogId,
       title: master?.title || row.title, dueDate: new Date(`${date}T12:00:00+05:30`),
       assignees: [user._id], owner: user._id, createdBy: user._id,
       priority: row.priority, sop: row.description || undefined, status: 'in_progress',
@@ -281,12 +282,7 @@ export async function saveWorkflowEntry({ user, models, project, row, existing, 
   if (row.status === 'complete' && task.status !== 'done') {
     applyTaskTransition(task, { status: 'done' }, { manager: managed, isAssignee: true, actorId: user._id });
   }
-  const created = task.isNew;
-  if (created || task.isModified()) await task.save({ session });
-  if (created && !task.dailyWorkCustom) await AuditLog.create([{
-    actor: user._id, action: 'task.create', entity: 'Task', entityId: task._id, client: task.client, project: task.project,
-    summary: `Created “${task.title}”`,
-  }], { session });
+  if (task.isNew || task.isModified()) await task.save({ session });
   row.title = task.title;
   row.workflowTaskId = String(task._id);
   row.workflowStatus = task.status;

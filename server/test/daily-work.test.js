@@ -320,7 +320,7 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const linkedTask = await request(employee, `/tasks/${linked.entries[0].workflowTaskId}`);
     assert.equal(linkedTask.masterItem._id, String(shared._id));
     assert.equal(linkedTask.status, 'done');
-    assert.deepEqual(linkedTask.activity.map((row) => row.action), ['task.create']);
+    assert.deepEqual(linkedTask.activity, []);
     await log(employee, '2026-10-09', linked.entries, 200, linked.version);
     assert.equal(await Task.countDocuments({ masterItem: shared._id }), 1);
 
@@ -364,17 +364,18 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const custom = await log(employee, emptyDate, [time('Prepare one-off report', 1, emptyProjectId)]);
     assert.equal(custom.entries[0].title, 'Prepare one-off report');
     assert.equal(custom.entries[0].hours, 1);
-    assert.ok(custom.entries[0].workflowTaskId);
-    const customTaskPath = `/tasks/${custom.entries[0].workflowTaskId}`;
-    assert.deepEqual((await request(employee, customTaskPath)).activity, []);
-    await request(owner, customTaskPath, 'PATCH', { priority: 'low' });
-    assert.equal(await AuditLog.countDocuments({ entityId: custom.entries[0].workflowTaskId }), 0);
+    assert.equal(custom.entries[0].workflowTaskId, undefined);
+    assert.equal(await Task.countDocuments({ project: emptyProject._id }), 0);
+    assert.equal(await ProjectWorkItem.countDocuments({ project: emptyProject._id }), 0);
+    const legacyTask = await Task.create({
+      title: 'Historical custom task', client: client._id, project: emptyProject._id,
+      dueDate: emptyDate, assignees: [employee._id], dailyWorkCustom: true,
+    });
     await AuditLog.create({ actor: employee._id, entity: 'Task', action: 'task.create',
-      client: client._id, entityId: custom.entries[0].workflowTaskId, summary: 'Historical custom activity' });
-    assert.deepEqual((await request(employee, customTaskPath)).activity, []);
-    const activity = await request(owner, '/audit');
-    assert.ok(activity.some((row) => row.entityId === linkedTask._id));
-    assert.ok(!activity.some((row) => row.entityId === custom.entries[0].workflowTaskId));
+      client: client._id, entityId: legacyTask._id, summary: 'Historical custom activity' });
+    assert.deepEqual((await request(employee, `/tasks/${legacyTask._id}`)).activity, []);
+    assert.ok(!(await request(owner, '/audit')).some((row) => row.entityId === String(legacyTask._id)));
+    assert.equal((await request(owner, `/tasks?scope=all&project=${emptyProject._id}`)).total, 0);
     const increased = await log(employee, emptyDate, [{ ...custom.entries[0], hours: 1.5 }], 200, custom.version);
     assert.equal(increased.entries[0].hours, 1.5);
     await log(employee, emptyDate, [{ ...increased.entries[0], hours: 24.01 }], 400, increased.version);
@@ -384,26 +385,21 @@ test('isolated daily work, scoped catalog and reports, Slack threads and schedul
     const corrected = await log(employee, emptyDate, [{ ...revised.entries[0], hours: 1.25 }], 200, revised.version);
     assert.equal(corrected.entries[0].hours, 1.25);
 
-    const archivedId = corrected.entries[0].workflowTaskId;
-    const archivedStatusPath = `/day/${emptyDate}/members/${employee._id}/entries/${corrected.entries[0]._id}/status`;
-    const markedIncomplete = await request(employee, archivedStatusPath, 'PATCH', {
+    const customStatusPath = `/day/${emptyDate}/members/${employee._id}/entries/${corrected.entries[0]._id}/status`;
+    const markedIncomplete = await request(employee, customStatusPath, 'PATCH', {
       status: 'incomplete', version: corrected.version, reason: 'Waiting for a statement',
     });
-    await request(owner, `/tasks/${archivedId}`, 'DELETE');
-    const archivedReport = await request(employee, `/reports?from=${emptyDate}&status=incomplete`);
-    assert.equal(archivedReport.submissions[0].entries[0].workflowStatus, 'unavailable');
-    assert.equal(archivedReport.submissions[0].entries[0].canUpdateStatus, true);
-    const finishArchived = { status: 'complete', version: markedIncomplete.version };
-    await request(other, archivedStatusPath, 'PATCH', finishArchived, 403);
-    const finished = await request(employee, archivedStatusPath, 'PATCH', finishArchived);
+    const customReport = await request(employee, `/reports?from=${emptyDate}&status=incomplete`);
+    assert.equal(customReport.submissions[0].entries[0].workflowStatus, undefined);
+    assert.equal(customReport.submissions[0].entries[0].canUpdateStatus, true);
+    const finishCustom = { status: 'complete', version: markedIncomplete.version };
+    await request(other, customStatusPath, 'PATCH', finishCustom, 403);
+    const finished = await request(employee, customStatusPath, 'PATCH', finishCustom);
     assert.equal(finished.entry.status, 'complete');
     assert.equal(finished.entry.incompleteReason, undefined);
     assert.equal(finished.entry.hours, 1.25);
-    assert.equal(finished.entry.workflowTaskId, archivedId);
-    const archived = await Task.findById(archivedId);
-    assert.equal(archived.status, 'cancelled');
-    assert.ok(archived.deletedAt);
-    assert.equal(await Task.countDocuments({ client: client._id, title: corrected.entries[0].title }), 1);
+    assert.equal(finished.entry.workflowTaskId, undefined);
+    assert.equal(await Task.countDocuments({ client: client._id, title: corrected.entries[0].title }), 0);
     assert.equal((await request(lead, `/reports?from=${emptyDate}&status=complete`)).submissions[0].entries[0].status, 'complete');
 
     const leadCatalog = (await getDay(lead, '2026-10-05')).catalog;

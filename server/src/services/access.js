@@ -17,6 +17,7 @@ import { HttpError } from '../middleware/auth.js';
 export const isSuper = (u) => u.role === 'super_admin';
 export const superAdminIds = () => User.distinct('_id', { role: 'super_admin' });
 export const staffTaskFilter = (adminIds) => ({
+  dailyWorkCustom: { $ne: true },
   $or: [
     { assignees: { $exists: false } },
     { assignees: { $size: 0 } },
