@@ -41,9 +41,8 @@ r.put('/automations/:projectId', ah(async (req, res) => {
   res.json({ ok: true });
 }));
 
-r.post('/automations/:projectId/links', ah(async (req, res) => {
-  const project = await manageableProject(req);
-  const { name, url } = req.body || {};
+function readCard(body) {
+  const { name, url } = body || {};
   if (typeof name !== 'string' || !name.trim() || name.trim().length > 120) throw new HttpError(400, 'Enter a tool name up to 120 characters');
   let link;
   try {
@@ -53,7 +52,12 @@ r.post('/automations/:projectId/links', ah(async (req, res) => {
   } catch {
     throw new HttpError(400, 'Enter a valid HTTPS link');
   }
-  const card = { name: name.trim(), url: link.href };
+  return { name: name.trim(), url: link.href };
+}
+
+r.post('/automations/:projectId/links', ah(async (req, res) => {
+  const project = await manageableProject(req);
+  const card = readCard(req.body);
   const result = await AutomationGroup.updateOne({ _id: project._id, 'links.url': { $ne: card.url } },
     { $push: { links: card } }, { runValidators: true });
   if (!result.modifiedCount) {
@@ -61,6 +65,24 @@ r.post('/automations/:projectId/links', ah(async (req, res) => {
     throw new HttpError(409, 'This link is already on the project dashboard');
   }
   res.status(201).json(card);
+}));
+
+r.patch('/automations/:projectId/links/:linkId', ah(async (req, res) => {
+  const project = await manageableProject(req);
+  const { linkId } = req.params;
+  if (!isObjectIdOrHexString(linkId)) throw new HttpError(404, 'Automation card not found');
+  const card = readCard(req.body);
+  const match = { _id: project._id, 'links._id': linkId };
+  const result = await AutomationGroup.updateOne({
+    ...match,
+    links: { $not: { $elemMatch: { _id: { $ne: linkId }, url: card.url } } },
+  }, { $set: { 'links.$[card].name': card.name, 'links.$[card].url': card.url } },
+  { arrayFilters: [{ 'card._id': linkId }], runValidators: true });
+  if (!result.matchedCount) {
+    if (!await AutomationGroup.exists(match)) throw new HttpError(404, 'Automation card not found');
+    throw new HttpError(409, 'This link is already on the project dashboard');
+  }
+  res.json({ _id: linkId, ...card });
 }));
 
 export default r;
