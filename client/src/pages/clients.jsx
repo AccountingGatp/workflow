@@ -58,7 +58,7 @@ export function Clients() {
           {!search && !clientView && can.manage ? 'Create a project to start organizing work.' : undefined}
         </Empty> : <div className="table-wrap"><table>
           <thead>{clientView ? <tr><th>Client</th><th>Managers</th><th>Status</th></tr>
-            : <tr><th>Project</th><th>Client</th><th>Open work</th>{can.manage && <th>Access</th>}</tr>}</thead>
+            : <tr><th>Project</th><th>Client</th><th>Manager</th><th>Open work</th>{can.manage && <th>Access</th>}</tr>}</thead>
           <tbody>{rows.map((row) => {
             const destination = clientView ? `/clients/${row._id}` : `/clients/${row.client}/projects/${row._id}`;
             const Icon = clientView ? Building2 : FolderKanban;
@@ -74,6 +74,7 @@ export function Clients() {
               </> : <>
                 <td className="small muted">{row.clientInfoId
                   ? <Link to={`/clients/${row.clientInfoId}`}>{row.clientName}</Link> : 'No client'}</td>
+                <td>{row.projectManager?.name || '—'}</td>
                 <td><span className="row-wrap"><span className="mono">{row.openTasks}</span>
                   {row.overdueTasks > 0 && <Badge cls="b-danger">{row.overdueTasks} overdue</Badge>}</span></td>
                 {can.manage && <td>{row.canManage && <button type="button" className="btn btn-outline btn-sm"

@@ -20,6 +20,7 @@ import { detachBluntdRecurringLinks } from './detach-bluntd-recurring-links.js';
 import { assignLoanTasks } from './assign-loan-reviewers.js';
 import { seedLoanReminders } from './seed-loan-reminders.js';
 import { seedIfEmpty } from './seed.js';
+import { importProjectManagerRoster } from './project-manager-roster.js';
 import { importWorkflowProjects } from './import-workflow-projects.js';
 import { importProjectAssignments } from './import-project-assignments.js';
 import { importTaskAutomation } from './import-task-automation.js';
@@ -44,6 +45,8 @@ async function connect() {
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
+  const managersImported = await importProjectManagerRoster();
+  if (managersImported) console.info('Project managers imported:', managersImported);
   const loanImport = await seedLoanReminders();
   console.info('Bluntd loan reminder import:', loanImport);
   console.info('Bluntd loan assignments:', await assignLoanTasks());
