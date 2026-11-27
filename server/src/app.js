@@ -10,6 +10,8 @@ import clientRoutes from './routes/clients.js';
 import dailyWorkRoutes from './daily-work/routes.js';
 import { runDailyWorkJobs } from './daily-work/jobs.js';
 import workRoutes from './routes/work.js';
+import automationRoutes from './routes/automations.js';
+import { seedAutomationCatalog } from './seed-automation-catalog.js';
 import projectRoutes from './routes/projects.js';
 import projectWorkRoutes from './routes/project-work.js';
 import mailRoutes, { mailPublic } from './routes/mail.js';
@@ -46,6 +48,7 @@ async function connect() {
   await ensureActivityRetention();
   console.log('✓ MongoDB connected; Activity Log retention: 7 days');
   await seedIfEmpty();
+  await seedAutomationCatalog();
   const managersImported = await importProjectManagerRoster();
   if (managersImported) console.info('Project managers imported:', managersImported);
   const linkedManagers = await linkRosterManagers({
@@ -137,7 +140,7 @@ app.put('/api/settings/mail', requireAuth, requireRole('super_admin'), ah(async 
 app.use('/api/mail', requireMailEnabled);
 app.use('/api', mailPublic);
 app.put('/api/users/:id/leave', requireAuth, requireRole('super_admin', 'hr'), updatePersonLeave);
-app.use('/api', requireAuth, enforceWorkReadOnly, peopleRoutes, clientRoutes, projectRoutes, projectWorkRoutes, workRoutes, mailRoutes);
+app.use('/api', requireAuth, enforceWorkReadOnly, peopleRoutes, clientRoutes, projectRoutes, projectWorkRoutes, workRoutes, mailRoutes, automationRoutes);
 
 export function handleErrors(app) {
   app.use((err, _req, res, _next) => {

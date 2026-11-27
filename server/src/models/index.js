@@ -96,6 +96,15 @@ export const ClientProject = model('ClientProject', new Schema({
 ClientProject.schema.index({ client: 1, name: 1 }, { unique: true });
 ClientProject.schema.index({ 'projectManager.user': 1 });
 
+const automationLinkSchema = new Schema({
+  name: { type: String, required: true, trim: true, maxlength: 120 },
+  url: { type: String, required: true, maxlength: 2048 },
+});
+export const AutomationGroup = model('AutomationGroup', new Schema({
+  _id: ref('ClientProject'),
+  links: [automationLinkSchema],
+}, opts), 'automation_groups');
+
 /**
  * Who manages a client: a team, and the admins (managers/TLs) accountable for it.
  * Several admins can manage one client. Reassignment ends a row (`endedAt`) instead of
