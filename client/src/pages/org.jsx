@@ -118,8 +118,11 @@ export function People() {
   const { data, error, loading, reload } = useApi('/users?dailyReport=1');
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const [availability, setAvailability] = useState('all');
   const query = search.trim().toLowerCase();
-  const filtered = (data || []).filter(({ name, email }) => `${name} ${email}`.toLowerCase().includes(query));
+  const onLeaveOnly = availability === 'on-leave';
+  const filtered = (data || []).filter(({ name, email, active, onLeave }) =>
+    (!onLeaveOnly || (active && onLeave)) && `${name} ${email}`.toLowerCase().includes(query));
   const [creating, setCreating] = useState(false);
   const [assigningPerson, setAssigningPerson] = useState(null);
   const [editingPerson, setEditingPerson] = useState(null);
@@ -153,12 +156,17 @@ export function People() {
           <input className="input" type="search" aria-label="Search people" placeholder="Search people by name or email"
             value={search} onChange={(event) => setSearch(event.target.value)} />
         </div>
-        {data && query && <span className="small muted" role="status">{filtered.length} of {data.length} people</span>}
+        <select className="select people-availability-filter" aria-label="Filter by availability" value={availability}
+          onChange={(event) => setAvailability(event.target.value)}>
+          <option value="all">All people</option>
+          <option value="on-leave">On leave</option>
+        </select>
+        {data && (query || onLeaveOnly) && <span className="small muted" role="status">{filtered.length} of {data.length} people</span>}
       </div>
       <div className="card" style={{ overflow: 'hidden' }}>
         <ErrorBox error={error} />
         {loading && !data ? <Skeleton /> : data && (!filtered.length
-          ? <Empty icon={Users} title={query ? 'No people match your search' : 'No people yet'} /> : (
+          ? <Empty icon={Users} title={query ? 'No people match your search' : onLeaveOnly ? 'No one is on leave today' : 'No people yet'} /> : (
           <div className="table-wrap"><table>
             <thead><tr><th>Name</th><th>Role</th><th>Teams</th>{can.super && <th>Projects</th>}<th>Availability</th><th>Account</th>{can.super && <th />}</tr></thead>
             <tbody>{filtered.map((u) => (
