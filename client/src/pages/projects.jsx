@@ -119,10 +119,11 @@ function BulletList({ values = [] }) {
 }
 const joinRows = (items = [], keys) => items.map(v => keys.map(k => v[k] || '').join(' | ')).join('\n');
 function ProjectEditor({ project, onClose, onSaved }) {
+  const { can } = useAuth();
   const toast = useToast();
   const [form, setForm] = useState({
     name: project.name || '', description: project.description || '', businessType: project.businessType || '',
-    website: project.website || '', notes: project.notes || '',
+    website: project.website || '', notes: project.notes || '', managerName: project.projectManager?.name || '',
     contacts: joinRows(project.contacts, ['name','role','email']),
     team: joinRows(project.team, ['name','role','profileUrl']),
     scope: (project.scope || []).join('\n'),
@@ -152,6 +153,7 @@ function ProjectEditor({ project, onClose, onSaved }) {
       const payload = {
         name: form.name, description: form.description, businessType: form.businessType,
         website: form.website, notes: form.notes,
+        ...(can.super && form.managerName !== (project.projectManager?.name || '') && { managerName: form.managerName }),
         contacts: rows(form.contacts).map(([name, role, email]) => ({ name, role, email })),
         team: rows(form.team).map(([name, role, profileUrl]) => ({ name, role, profileUrl })),
         scope: lines(form.scope), excluded: lines(form.excluded), links,
@@ -173,6 +175,7 @@ function ProjectEditor({ project, onClose, onSaved }) {
     <form id="project-editor" className="stack" style={{ gap: 16 }} onSubmit={submit}>
       <ErrorBox error={error}/>
       {field('name', 'Project name')}
+      {can.super && field('managerName', 'Project manager')}
       {field('description', 'Project summary', true)}
       {field('businessType', 'Business type')}
       {field('website', 'Website')}
@@ -298,6 +301,7 @@ export function ClientProjects() {
         </div>
         <p style={{ marginTop: 8 }}>{p.description || 'No project summary entered yet.'}</p>
         <div className="row-wrap small muted" style={{ marginTop: 10 }}>
+          {p.projectManager?.name && <span>Manager {p.projectManager.name}</span>}
           {p.businessType && <span>Business: {p.businessType}</span>}
           {safeUrl(p.website) && <a href={p.website} target="_blank" rel="noopener noreferrer">Website <ExternalLink size={12} style={{ display: 'inline' }}/></a>}
         </div>

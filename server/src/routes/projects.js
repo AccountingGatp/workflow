@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, Task, TaskTemplate, TeamMembership, User } from '../models/index.js';
 import { allProjectsEnabled, setAllProjectsEnabled } from '../services/project-access-settings.js';
+import { projectManager } from '../project-manager-roster.js';
 import { ah, HttpError, requireRole } from '../middleware/auth.js';
 import { canSeeClient, canSeeProject, canManageClient, canManageProject, taskPortfolio, taskScope, staffTaskFilter, superAdminIds, canGrantDirectly, clientAssignees, grantedProjectIds, visibleClientIds, activePermissionFilter, audit } from '../services/access.js';
 
@@ -109,7 +110,7 @@ export async function visibleProjectDirectory(user) {
   const clientIds = clients.map(({ _id }) => _id);
   const projects = await ClientProject.find(ids === null ? { deletedAt: null } : {
     deletedAt: null, $or: [{ client: { $in: clientIds } }, { _id: { $in: [...granted, ...portfolio] } }],
-  }).select('name client referenceClient').sort({ name: 1, _id: 1 }).lean();
+  }).select('name client referenceClient projectManager').sort({ name: 1, _id: 1 }).lean();
   return { projects, clientInfo, managed, portfolioIds };
 }
 
@@ -224,6 +225,12 @@ r.patch('/clients/:clientId/projects/:id', ah(async (req, res) => {
   if (!await canManageProject(req.user, existing)) throw new HttpError(403, 'Project management access denied');
   const keys = ['name', 'description', 'businessType', 'website', 'contacts', 'team', 'scope', 'excluded', 'links', 'tools', 'automations', 'quality', 'guarantees', 'notes'];
   const update = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => keys.includes(k)));
+  const managerName = req.body?.managerName;
+  if (managerName !== undefined) {
+    if (req.user.role !== 'super_admin') throw new HttpError(403, 'Only Super Admins can update the project manager');
+    if (typeof managerName !== 'string' || managerName.trim().length > 150) throw new HttpError(400, 'Use up to 150 characters for the manager name');
+    update.projectManager = await projectManager(managerName);
+  }
   if (update.name !== undefined && !String(update.name).trim()) throw new HttpError(400, 'Name required');
   for (const key of ['contacts','team','scope','excluded','links','tools','automations','quality','guarantees']) {
     if (key in update && !Array.isArray(update[key])) throw new HttpError(400, key + ' must be a list');
