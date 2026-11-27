@@ -2,35 +2,32 @@ import { Router } from 'express';
 import { isObjectIdOrHexString } from 'mongoose';
 import { AutomationGroup, ClientProject } from '../models/index.js';
 import { ah, HttpError } from '../middleware/auth.js';
-import { canManageProject } from '../services/access.js';
-import { isAssignedProjectManager } from '../services/project-managers.js';
-import { visibleProjectDirectory } from './projects.js';
 
 const r = Router();
 const editors = ['super_admin', 'manager', 'admin'];
 
 r.get('/automations', ah(async (req, res) => {
-  const { projects, managed, portfolioIds } = await visibleProjectDirectory(req.user);
-  const groups = await AutomationGroup.find({ _id: { $in: projects.map((project) => project._id) } })
-    .select('links').lean();
+  const canEdit = editors.includes(req.user.role);
+  const groups = await AutomationGroup.find().select('links').lean();
   const byProject = new Map(groups.map((group) => [String(group._id), group.links]));
+  const projects = await ClientProject.find({
+    deletedAt: null,
+    ...(!canEdit && { _id: { $in: groups.map((group) => group._id) } }),
+  }).select('name').sort({ name: 1, _id: 1 }).lean();
   res.json(projects.map((project) => ({
     id: project._id,
     name: project.name,
     links: byProject.get(String(project._id)) ?? null,
-    canEdit: editors.includes(req.user.role) && (managed === null || managed.includes(String(project.client)) ||
-      isAssignedProjectManager(req.user, project) ||
-      (req.user.role === 'manager' && portfolioIds.has(String(project._id)))),
+    canEdit,
   })));
 }));
 
 async function manageableProject(req) {
-  if (!editors.includes(req.user.role)) throw new HttpError(403, 'Project management access is required');
+  if (!editors.includes(req.user.role)) throw new HttpError(403, 'Only Admin / TLs, Managers and Super Admins can manage Automations');
   const { projectId } = req.params;
   if (!isObjectIdOrHexString(projectId)) throw new HttpError(404, 'Project not found');
-  const project = await ClientProject.findOne({ _id: projectId, deletedAt: null }).select('client projectManager').lean();
+  const project = await ClientProject.findOne({ _id: projectId, deletedAt: null }).select('_id').lean();
   if (!project) throw new HttpError(404, 'Project not found');
-  if (!await canManageProject(req.user, project)) throw new HttpError(403, 'Project management access is required');
   return project;
 }
 
