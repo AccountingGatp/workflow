@@ -7,6 +7,7 @@ import './styles.css';
 import { AuthProvider, ToastProvider, api, useApi, useAuth } from './lib.jsx';
 import { createWorkflowStore } from './daily-work-data.js';
 import Layout from './Layout.jsx';
+import Automations from './pages/automations.jsx';
 import DailyWork from './pages/daily-work.jsx';
 import Settings from './pages/settings.jsx';
 import { McpConnections, McpConsent } from './pages/mcp-connections.jsx';
@@ -48,6 +49,7 @@ function WorkflowRoutes({ can }) {
         <Route element={<Layout mailEnabled={mailEnabled} />}>
           <Route index element={can.super || can.hr ? <Navigate to="/overview" replace /> : <MyWork />} />
           <Route path="daily-work" element={<DailyWork />} />
+          <Route path="automations" element={<Automations />} />
           <Route path="overview" element={guard(can.manage || can.hr, <Overview />)} />
           <Route path="clients" element={<Clients />} />
           <Route path="clients/:id" element={<ClientDetail />} />

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, CalendarCheck, CheckSquare, FolderKanban, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Settings, Mail as MailIcon,
+  LayoutDashboard, CalendarCheck, CheckSquare, FolderKanban, Users, Repeat, ShieldCheck, History, LogOut, Menu, Moon, Sun, Settings, Workflow, Mail as MailIcon,
 } from 'lucide-react';
 import { useAuth, useApi, useToast, ROLE_LABEL } from './lib.jsx';
 import { Avatar, BrandName } from './ui.jsx';
@@ -61,6 +61,7 @@ export default function Layout({ mailEnabled }) {
         {item('/clients', FolderKanban, 'Projects')}
         {(can.manage || can.hr) && item('/recurring', Repeat, 'Recurring work')}
         <div className="nav-label">Organisation</div>
+        {item('/automations', Workflow, 'Automations')}
         {(can.super || can.hr) && item('/people', Users, 'People')}
         {can.manage && item('/mcp-connections', ShieldCheck, 'MCP Connections')}
         {can.super && item('/settings', Settings, 'Settings')}

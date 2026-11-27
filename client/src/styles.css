@@ -527,3 +527,38 @@ tbody tr.clickable:hover td { background: var(--surface-2); }
   border-top-left-radius: 0;
   border-top-right-radius: 0;
 }
+
+/* Automations */
+.automation-filters { gap: 12px; margin-bottom: 24px; }
+.automation-filters .search { flex: 1 1 250px; max-width: 430px; }
+.automation-filters .select { width: auto; max-width: 100%; }
+.automation-groups { display: grid; gap: 28px; }
+.automation-group {
+  padding: clamp(14px, 2.4vw, 24px);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--primary-soft) 54%, var(--surface)), var(--surface) 56%);
+}
+.automation-group:nth-child(even) {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--info) 7%, var(--surface)), var(--surface) 56%);
+}
+.automation-group-head { gap: 12px; margin-bottom: 18px; }
+.automation-group-head h2 { flex: 1 1 180px; }
+.automation-project-icon, .automation-tool-icon {
+  display: grid; place-items: center; flex: none; border-radius: var(--r-md);
+  color: var(--primary); background: var(--primary-soft);
+}
+.automation-project-icon { width: 43px; height: 43px; }
+.automation-tool-icon { width: 39px; height: 39px; }
+.automation-group:nth-child(even) :is(.automation-project-icon, .automation-tool-icon) {
+  color: var(--info); background: color-mix(in srgb, var(--info) 13%, var(--surface));
+}
+.automation-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.automation-card {
+  display: flex; align-items: center; gap: 13px; min-height: 86px; padding: 14px;
+  color: var(--text); text-decoration: none; transition: border-color .16s, box-shadow .16s;
+}
+.automation-card:hover { border-color: var(--primary); box-shadow: var(--shadow-2); text-decoration: none; }
+.automation-card-label { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.automation-arrow { flex: none; margin-left: auto; color: var(--text-3); }
+.automation-card:hover .automation-arrow { color: var(--primary); }
