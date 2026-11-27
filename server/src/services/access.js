@@ -1,6 +1,7 @@
 import { Types } from 'mongoose';
 import { Client, ClientAssignment, ClientPermission, ClientProject, ProjectPermission, TeamMembership, User, AuditLog } from '../models/index.js';
 import { allProjectsEnabled } from './project-access-settings.js';
+import { assignedManagerProjectIds, isAssignedProjectManager } from './project-managers.js';
 import { HttpError } from '../middleware/auth.js';
 
 /**
@@ -63,7 +64,10 @@ export async function visibleClientIds(user) {
 /** Active grants that apply only to their own project. */
 export async function grantedProjectIds(user, { includeDefault = true } = {}) {
   if (canMonitorAllWork(user)) return [];
-  const ids = await ProjectPermission.distinct('project', { user: user._id });
+  const [directGrants, managedProjects] = await Promise.all([
+    ProjectPermission.distinct('project', { user: user._id }), assignedManagerProjectIds(user),
+  ]);
+  const ids = [...directGrants, ...managedProjects];
   if (includeDefault && await allProjectsEnabled(user)) {
     const active = await activeProjectIds();
     const direct = ids.length ? await ClientProject.distinct('_id', { _id: { $in: ids }, deletedAt: null }) : [];
@@ -78,7 +82,11 @@ async function activeProjectIds() {
 }
 
 export async function canSeeProject(user, project, { includeDefault = true } = {}) {
-  if (await canSeeClient(user, project.client) ||
+  if (isAssignedProjectManager(user, project) || (project.projectManager === undefined &&
+      ['manager', 'admin'].includes(user.role) && await ClientProject.exists({
+        _id: project._id, client: project.client, deletedAt: null,
+        'projectManager.user': user._id, 'projectManager.accountVerified': true,
+      })) || await canSeeClient(user, project.client) ||
       await ProjectPermission.exists({ project: project._id, user: user._id })) return true;
   return includeDefault && !project.deletedAt && await allProjectsEnabled(user) &&
     !!await Client.exists({ _id: project.client, status: { $ne: 'inactive' } });
@@ -102,7 +110,7 @@ export function portfolioFilter({ clients, projects }) {
 }
 
 export async function canManageProject(user, project) {
-  return await canManageClient(user, project.client) ||
+  return isAssignedProjectManager(user, project) || await canManageClient(user, project.client) ||
     (user.role === 'manager' && !project.deletedAt && await canSeeProject(user, project));
 }
 
@@ -113,7 +121,7 @@ export async function canEditProjectWork(user, project) {
 export async function canEditTaskInProject(user, clientId, projectId) {
   if (await canManageClient(user, clientId)) return true;
   if (!projectId || !['admin', 'manager'].includes(user.role)) return false;
-  const project = await ClientProject.findOne({ _id: projectId, client: clientId, deletedAt: null }).select('client').lean();
+  const project = await ClientProject.findOne({ _id: projectId, client: clientId, deletedAt: null }).select('client projectManager').lean();
   return !!project && await canEditProjectWork(user, project);
 }
 

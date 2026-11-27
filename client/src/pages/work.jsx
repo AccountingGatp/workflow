@@ -22,6 +22,25 @@ export function MyWork() {
 
 /* ---------- Client manager dashboard ---------- */
 
+function MyManagedProjects({ projects }) {
+  const assigned = (projects || []).filter((project) => project.isProjectManager);
+  if (!assigned.length) return null;
+  return <section className="card" style={{ marginBottom: 20 }}>
+    <div className="card-head"><h3>My managed projects</h3></div>
+    <div className="table-wrap"><table>
+      <thead><tr><th>Project</th><th>Open work</th><th>Overdue</th><th>Analytics</th></tr></thead>
+      <tbody>{assigned.map((project) => {
+        const path = `/clients/${project.client}/projects/${project._id}`;
+        return <tr key={project._id}>
+          <td><Link to={path}>{project.name}</Link></td>
+          <td>{project.openTasks}</td><td>{project.overdueTasks}</td>
+          <td><Link to={path + '?insights=1'} aria-label={`View analytics for ${project.name}`}>View analytics</Link></td>
+        </tr>;
+      })}</tbody>
+    </table></div>
+  </section>;
+}
+
 function ManagerOverview() {
   const clients = useApi('/clients');
   const projects = useApi('/projects');
@@ -46,6 +65,7 @@ function ManagerOverview() {
   const number = key => workload.data ? totals[key] || 0 : '—';
   return <>
     <PageHead title="Manager overview" subtitle="Deadlines, employee progress and workload for the projects you can manage." />
+    <MyManagedProjects projects={projects.data} />
     <div className="row-wrap" style={{ marginBottom: 18, gap: 12 }}>
       <select className="select" aria-label="Select client" style={{ maxWidth: 360 }} value={clientId} onChange={e => { setClientId(e.target.value); setProjectId(''); setPersonId(''); }}>
         <option value="">All clients</option>
@@ -56,7 +76,7 @@ function ManagerOverview() {
         {availableProjects.map(p => <option key={p._id} value={p._id}>{p.name}</option>)}
         {clientId && <option value="unassigned">Needs project assignment</option>}
       </select>
-      {user.role === 'manager' && selectedProject && <Link className="btn" to={`/clients/${selectedProject.client}/projects/${selectedProject._id}?insights=1`}>View project insights</Link>}
+      {selectedProject && (user.role === 'manager' || selectedProject.isProjectManager) && <Link className="btn" to={`/clients/${selectedProject.client}/projects/${selectedProject._id}?insights=1`}>View project insights</Link>}
     </div>
     <ErrorBox error={workload.error || projects.error} />
     <div className="grid grid-4" style={{ marginBottom: 12 }}>
@@ -125,6 +145,7 @@ function ManagerOverview() {
 function GlobalOverview() {
   const { can } = useAuth();
   const dash = useApi('/dashboard');
+  const projects = useApi(can.super ? '/projects' : null);
   const [openId, setOpenId] = useState(null);
   const [person, setPerson] = useState('');
   const all = usePaginatedTasks(`scope=all&view=${person ? 'due' : 'overdue'}&assignee=${person}`);
@@ -140,6 +161,7 @@ function GlobalOverview() {
           <Link className="btn btn-primary" to="/daily-work">Log my work</Link>
         </>}
       </PageHead>
+      <MyManagedProjects projects={projects.data} />
       {!d ? <div className="card"><Skeleton /></div> : (
         <div className="split">
           <div className="stack" style={{ gap: 16 }}>
